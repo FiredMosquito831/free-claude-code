@@ -308,7 +308,7 @@ async def test_rotating_provider_does_not_retry_after_output_started():
     chunks: list[str] = []
     with pytest.raises(_RetryableError):
         async for chunk in provider.stream_response(_request()):
-            chunks.append(chunk)
+            chunks.append(chunk)  # noqa: PERF401 - incremental capture must keep partial chunks
     assert chunks == ["partial"]
     assert second.calls == 0
 

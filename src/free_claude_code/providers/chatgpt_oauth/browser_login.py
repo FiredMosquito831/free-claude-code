@@ -106,7 +106,7 @@ def _callback_page(title: str, message: str, *, success: bool) -> bytes:
   </div>
   <script>setTimeout(function () {{ window.close(); }}, 3000);</script>
 </body>
-</html>""".encode("utf-8")
+</html>""".encode()
 
 
 def _exchange_code_for_tokens(
@@ -171,9 +171,9 @@ class _BrowserLoginFlow:
 class _CallbackHandler(BaseHTTPRequestHandler):
     """Handle the OAuth redirect from the user's browser."""
 
-    server: "_CallbackHTTPServer"
+    server: _CallbackHTTPServer
 
-    def log_message(self, format: str, *args: Any) -> None:  # noqa: A002
+    def log_message(self, format: str, *args: Any) -> None:
         return
 
     def _send_page(self, status: int, title: str, message: str, *, success: bool) -> None:
@@ -184,7 +184,7 @@ class _CallbackHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def do_GET(self) -> None:  # noqa: N802
+    def do_GET(self) -> None:
         parsed = urlparse(self.path)
         flow = self.server.active_flow
 

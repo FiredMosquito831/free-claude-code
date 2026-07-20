@@ -2,6 +2,7 @@
 
 from fastapi.responses import JSONResponse
 
+from free_claude_code.api.request_capture import RequestCapture, build_capture
 from free_claude_code.api.request_errors import (
     http_status_for_unexpected_api_exception,
     log_unexpected_api_exception,
@@ -62,20 +63,31 @@ class ResponsesHandler:
                 "FCC /v1/responses supports streaming only; omit stream or set stream=true."
             )
 
+        capture: RequestCapture | None = None
         try:
             anthropic_payload = self._responses_adapter.to_anthropic_payload(
                 request_data
             )
             response_request = MessagesRequest(**anthropic_payload)
+            capture = build_capture(
+                self._settings,
+                response_request,
+                request_id=request_id,
+                endpoint="/v1/responses",
+                protocol="openai_responses",
+            )
             require_non_empty_messages(response_request.messages)
             routed = self._model_router.resolve_messages_request(response_request)
+            capture.set_routing(routed)
 
-            streamed = self._provider_executor.stream(
-                routed,
-                wire_api="responses",
-                raw_log_label="FULL_RESPONSES_PAYLOAD",
-                raw_log_payload=request_payload,
-                request_id=request_id,
+            streamed = capture.wrap(
+                self._provider_executor.stream(
+                    routed,
+                    wire_api="responses",
+                    raw_log_label="FULL_RESPONSES_PAYLOAD",
+                    raw_log_payload=request_payload,
+                    request_id=request_id,
+                )
             )
             return await openai_responses_sse_streaming_response(
                 self._responses_adapter.iter_sse_from_anthropic(
@@ -95,12 +107,18 @@ class ResponsesHandler:
             )
         except OpenAIResponsesAdapter.ConversionError as exc:
             raise InvalidRequestError(str(exc)) from exc
-        except ApplicationError:
+        except ApplicationError as exc:
+            if capture is not None:
+                capture.finish_error(exc)
             raise
         except ExecutionFailure as exc:
+            if capture is not None:
+                capture.finish_error(exc)
             return self._execution_failure_response(exc, request_id=request_id)
         except Exception as exc:
             failure = find_execution_failure(exc)
+            if capture is not None:
+                capture.finish_error(failure if failure is not None else exc)
             if failure is not None:
                 return self._execution_failure_response(failure, request_id=request_id)
             log_unexpected_api_exception(

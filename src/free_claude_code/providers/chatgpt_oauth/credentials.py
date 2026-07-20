@@ -10,6 +10,7 @@ with a process-wide lock.
 from __future__ import annotations
 
 import base64
+import contextlib
 import dataclasses
 import json
 import os
@@ -248,11 +249,9 @@ def _persist_refreshed_tokens(
             os.replace(temp_path, source.path)
         finally:
             temp_path.unlink(missing_ok=True)
-        try:
+        with contextlib.suppress(OSError):
             os.chmod(source.path, 0o600)
-        except OSError:
-            pass
-    except Exception as exc:  # noqa: BLE001 - persistence must not break refresh
+    except Exception as exc:
         logger.warning(
             "ChatGPT OAuth: could not persist refreshed tokens to {}: {}",
             source.path,

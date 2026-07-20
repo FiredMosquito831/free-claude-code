@@ -277,6 +277,21 @@ class Settings(BaseSettings):
         default=False, validation_alias="DEBUG_SUBAGENT_STACK"
     )
 
+    # ==================== Request Analytics Log ====================
+    # Persistent per-request log (SQLite at ~/.fcc/logs/requests.db) feeding the
+    # admin Requests/Analytics tab. Writes are non-blocking (background writer).
+    request_log_enabled: bool = Field(
+        default=True, validation_alias="REQUEST_LOG_ENABLED"
+    )
+    # When false, store only body lengths + SHA-256 hashes instead of raw text.
+    request_log_capture_bodies: bool = Field(
+        default=True, validation_alias="REQUEST_LOG_CAPTURE_BODIES"
+    )
+    # Retention cap; oldest rows are pruned periodically past this many rows.
+    request_log_max_rows: int = Field(
+        default=50_000, validation_alias="REQUEST_LOG_MAX_ROWS"
+    )
+
     # ==================== NIM Settings ====================
     nim: NimSettings = Field(default_factory=NimSettings)
 

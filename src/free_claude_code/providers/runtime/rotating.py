@@ -54,7 +54,7 @@ class RotatingProvider(BaseProvider):
         for provider in self._providers:
             try:
                 await provider.cleanup()
-            except Exception as exc:  # noqa: BLE001 - aggregate cleanup failures
+            except Exception as exc:
                 errors.append(exc)
         if len(errors) == 1:
             raise errors[0]

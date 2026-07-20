@@ -30,6 +30,13 @@ const VIEW_GROUPS = [
     sections: ["messaging", "voice"],
     containerId: "messagingSections",
   },
+  {
+    id: "requests",
+    label: "Requests",
+    title: "Requests",
+    sections: [],
+    containerId: "requestsSections",
+  },
 ];
 
 const byId = (id) => document.getElementById(id);
@@ -149,6 +156,10 @@ function setActiveView(viewId, { scroll = false } = {}) {
 
   if (scroll) {
     window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  if (activeView.id === "requests") {
+    loadRequestsView().catch((error) => showMessage(error.message, "error"));
   }
 }
 
@@ -1140,4 +1151,225 @@ document.addEventListener("pointerdown", (event) => {
 
 load().catch((error) => {
   showMessage(error.message, "error");
+});
+
+
+/* --------------------------------------------------------------------- */
+/* Requests / analytics view                                             */
+/* --------------------------------------------------------------------- */
+
+const reqState = {
+  offset: 0,
+  limit: 25,
+  total: 0,
+};
+
+function reqFilters() {
+  const params = new URLSearchParams();
+  const provider = byId("reqFilterProvider").value.trim();
+  const model = byId("reqFilterModel").value.trim();
+  const status = byId("reqFilterStatus").value;
+  const windowSeconds = byId("reqFilterWindow").value;
+  if (provider) params.set("provider", provider);
+  if (model) params.set("model", model);
+  if (status) params.set("status", status);
+  if (windowSeconds) {
+    params.set("since", (Date.now() / 1000 - Number(windowSeconds)).toFixed(0));
+  }
+  return params;
+}
+
+async function loadRequestsView() {
+  const params = reqFilters();
+  const [stats, list] = await Promise.all([
+    api(`/admin/api/requests/stats?${params}`),
+    api(`/admin/api/requests?limit=${reqState.limit}&offset=${reqState.offset}&${params}`),
+  ]);
+  if (stats.enabled === false) {
+    byId("reqStatsCards").innerHTML = "";
+    byId("reqTableBody").innerHTML = "";
+    byId("reqBodiesIndicator").textContent = "Request log disabled (REQUEST_LOG_ENABLED=false)";
+    byId("reqPageInfo").textContent = "";
+    return;
+  }
+  byId("reqBodiesIndicator").textContent = stats.capture_bodies
+    ? "Bodies: captured"
+    : "Bodies: hashes only (REQUEST_LOG_CAPTURE_BODIES=false)";
+  renderRequestStatsCards(stats);
+  renderReqSeriesChart(stats.series || []);
+  renderReqModelChart(stats.by_model || []);
+  reqState.total = list.total || 0;
+  renderRequestsTable(list.rows || []);
+  renderReqPager();
+}
+
+function renderRequestStatsCards(stats) {
+  const cards = [
+    ["Total requests", stats.total],
+    ["Error rate", `${((stats.error_rate || 0) * 100).toFixed(1)}%`],
+    ["Cancelled", stats.cancelled],
+    ["Tokens in", stats.tokens_in],
+    ["Tokens out", stats.tokens_out],
+    ["Avg duration", stats.avg_duration_ms != null ? `${stats.avg_duration_ms} ms` : "—"],
+    ["p95 duration", stats.p95_duration_ms != null ? `${stats.p95_duration_ms} ms` : "—"],
+    ["Avg TTFT", stats.avg_ttft_ms != null ? `${stats.avg_ttft_ms} ms` : "—"],
+  ];
+  const container = byId("reqStatsCards");
+  container.innerHTML = "";
+  cards.forEach(([label, value]) => {
+    const card = document.createElement("div");
+    card.className = "requests-card";
+    const valueEl = document.createElement("strong");
+    valueEl.textContent = value;
+    const labelEl = document.createElement("span");
+    labelEl.textContent = label;
+    card.append(valueEl, labelEl);
+    container.appendChild(card);
+  });
+}
+
+function renderRequestsTable(rows) {
+  const body = byId("reqTableBody");
+  body.innerHTML = "";
+  rows.forEach((row) => {
+    const tr = document.createElement("tr");
+    tr.className = `req-row req-status-${row.status}`;
+    const cells = [
+      (row.ts_iso || "").replace("T", " ").slice(0, 19),
+      row.endpoint || "",
+      row.provider || "",
+      row.resolved_model || row.requested_model || "",
+      row.status,
+      `${row.tokens_in ?? "—"}/${row.tokens_out ?? "—"}`,
+      row.duration_ms != null ? `${Math.round(row.duration_ms)} ms` : "—",
+    ];
+    cells.forEach((text) => {
+      const td = document.createElement("td");
+      td.textContent = text;
+      tr.appendChild(td);
+    });
+    tr.addEventListener("click", () => openRequestDetail(row.id));
+    body.appendChild(tr);
+  });
+}
+
+function renderReqPager() {
+  const start = reqState.total === 0 ? 0 : reqState.offset + 1;
+  const end = Math.min(reqState.offset + reqState.limit, reqState.total);
+  byId("reqPageInfo").textContent = `${start}–${end} of ${reqState.total}`;
+  byId("reqPrevPage").disabled = reqState.offset === 0;
+  byId("reqNextPage").disabled = end >= reqState.total;
+}
+
+function drawBarChart(canvas, labels, series) {
+  const ctx = canvas.getContext("2d");
+  const { width, height } = canvas;
+  ctx.clearRect(0, 0, width, height);
+  const pad = 24;
+  const max = Math.max(1, ...series.flatMap((s) => s.values));
+  const groups = labels.length || 1;
+  const groupWidth = (width - pad * 2) / groups;
+  const colors = ["#4f8ef7", "#e05d5d"];
+  series.forEach((s, seriesIndex) => {
+    ctx.fillStyle = colors[seriesIndex % colors.length];
+    s.values.forEach((value, i) => {
+      const barWidth = groupWidth / (series.length + 1);
+      const x = pad + i * groupWidth + seriesIndex * barWidth;
+      const barHeight = ((height - pad * 2) * value) / max;
+      ctx.fillRect(x, height - pad - barHeight, barWidth * 0.8, barHeight);
+    });
+  });
+  ctx.fillStyle = "#888";
+  ctx.font = "10px sans-serif";
+  labels.forEach((label, i) => {
+    if (labels.length > 12 && i % Math.ceil(labels.length / 12) !== 0) return;
+    ctx.fillText(label, pad + i * groupWidth, height - 8);
+  });
+}
+
+function renderReqSeriesChart(series) {
+  const labels = series.map((point) => (point.bucket || "").slice(5));
+  drawBarChart(document.getElementById("reqSeriesChart"), labels, [
+    { values: series.map((point) => point.requests) },
+    { values: series.map((point) => point.errors) },
+  ]);
+}
+
+function renderReqModelChart(byModel) {
+  const top = byModel.slice(0, 10);
+  const canvas = document.getElementById("reqModelChart");
+  const ctx = canvas.getContext("2d");
+  const { width, height } = canvas;
+  ctx.clearRect(0, 0, width, height);
+  const max = Math.max(1, ...top.map((m) => m.tokens_in + m.tokens_out));
+  const rowHeight = Math.min(20, (height - 10) / Math.max(1, top.length));
+  top.forEach((model, i) => {
+    const tokens = model.tokens_in + model.tokens_out;
+    const barWidth = ((width - 180) * tokens) / max;
+    ctx.fillStyle = "#4f8ef7";
+    ctx.fillRect(160, 5 + i * rowHeight, barWidth, rowHeight - 4);
+    ctx.fillStyle = "#888";
+    ctx.font = "10px sans-serif";
+    ctx.fillText(model.key.slice(0, 24), 4, 14 + i * rowHeight);
+  });
+}
+
+async function openRequestDetail(requestId) {
+  const row = await api(`/admin/api/requests/${requestId}`);
+  byId("reqDetailTitle").textContent = `Request ${row.id}`;
+  const meta = byId("reqDetailMeta");
+  meta.innerHTML = "";
+  const fields = [
+    ["Time", row.ts_iso],
+    ["Endpoint", row.endpoint],
+    ["Protocol", row.protocol],
+    ["Requested model", row.requested_model],
+    ["Provider", row.provider],
+    ["Resolved model", row.resolved_model],
+    ["Status", row.status],
+    ["Error", row.error_kind ? `${row.error_kind}: ${row.error_message || ""}` : ""],
+    ["Tokens", `${row.tokens_in ?? "—"} in / ${row.tokens_out ?? "—"} out`],
+    ["TTFT", row.ttft_ms != null ? `${Math.round(row.ttft_ms)} ms` : "—"],
+    ["Duration", row.duration_ms != null ? `${Math.round(row.duration_ms)} ms` : "—"],
+    ["Reasoning", row.reasoning],
+    ["Params", row.params ? JSON.stringify(row.params) : ""],
+    ["Input SHA-256", row.input_sha256],
+    ["Output SHA-256", row.output_sha256],
+  ];
+  fields.forEach(([label, value]) => {
+    if (value == null || value === "") return;
+    const dt = document.createElement("dt");
+    dt.textContent = label;
+    const dd = document.createElement("dd");
+    dd.textContent = value;
+    meta.append(dt, dd);
+  });
+  byId("reqDetailInput").textContent = row.input_text || "(not captured)";
+  byId("reqDetailOutput").textContent = row.output_text || "(not captured)";
+  byId("reqDetailModal").hidden = false;
+}
+
+byId("reqDetailClose").addEventListener("click", () => {
+  byId("reqDetailModal").hidden = true;
+});
+byId("reqApplyFilters").addEventListener("click", () => {
+  reqState.offset = 0;
+  loadRequestsView().catch((error) => showMessage(error.message, "error"));
+});
+byId("reqPrevPage").addEventListener("click", () => {
+  reqState.offset = Math.max(0, reqState.offset - reqState.limit);
+  loadRequestsView().catch((error) => showMessage(error.message, "error"));
+});
+byId("reqNextPage").addEventListener("click", () => {
+  reqState.offset += reqState.limit;
+  loadRequestsView().catch((error) => showMessage(error.message, "error"));
+});
+byId("reqClearButton").addEventListener("click", () => {
+  if (!window.confirm("Delete the entire request log?")) return;
+  api("/admin/api/requests", { method: "DELETE" })
+    .then(() => {
+      reqState.offset = 0;
+      return loadRequestsView();
+    })
+    .catch((error) => showMessage(error.message, "error"));
 });

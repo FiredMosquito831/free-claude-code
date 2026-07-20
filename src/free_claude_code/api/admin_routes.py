@@ -18,17 +18,17 @@ from free_claude_code.config.admin.sources import is_locked_source
 from free_claude_code.config.admin.values import load_config_response, load_value_state
 from free_claude_code.config.model_refs import configured_chat_model_refs
 from free_claude_code.config.provider_catalog import PROVIDER_CATALOG
-from free_claude_code.providers.chatgpt_oauth.credentials import (
-    ChatGPTOAuthError,
-    import_codex_cli_tokens,
-)
+from free_claude_code.config.settings import Settings
+from free_claude_code.core.request_log import RequestLogStore, store_from_settings
 from free_claude_code.providers.chatgpt_oauth.browser_login import (
     ChatGPTOAuthBrowserUnavailableError,
     browser_login_status,
     start_browser_login,
 )
-from free_claude_code.providers.runtime.config import parse_credential_keys
-from free_claude_code.providers.runtime.rotating import RotatingProvider
+from free_claude_code.providers.chatgpt_oauth.credentials import (
+    ChatGPTOAuthError,
+    import_codex_cli_tokens,
+)
 from free_claude_code.providers.chatgpt_oauth.oauth_login import (
     CHATGPT_OAUTH_DEVICE_VERIFICATION_URL,
     _initiate_device_auth,
@@ -37,8 +37,10 @@ from free_claude_code.providers.chatgpt_oauth.oauth_login import (
 from free_claude_code.providers.chatgpt_oauth.oauth_login import (
     ChatGPTOAuthLoginError as ChatGPTOAuthLoginFlowError,
 )
+from free_claude_code.providers.runtime.config import parse_credential_keys
+from free_claude_code.providers.runtime.rotating import RotatingProvider
 
-from .dependencies import get_services
+from .dependencies import get_services, get_settings
 from .ports import ApiServices
 
 router = APIRouter()
@@ -518,3 +520,97 @@ async def chatgpt_oauth_import_codex(request: Request):
         account_id=credentials.account_id,
         message="Imported existing Codex CLI tokens.",
     )
+
+
+# --------------------------------------------------------------------- requests log
+
+
+def _request_log_store_or_none(
+    settings: Settings,
+) -> RequestLogStore | None:
+    return store_from_settings(settings)
+
+
+@router.get("/admin/api/requests")
+async def list_request_log(
+    request: Request,
+    limit: int = 50,
+    offset: int = 0,
+    provider: str | None = None,
+    model: str | None = None,
+    status: str | None = None,
+    endpoint: str | None = None,
+    since: float | None = None,
+    until: float | None = None,
+    settings: Settings = Depends(get_settings),
+):
+    """Page through the persisted request log (newest first)."""
+    require_loopback_admin(request)
+    store = _request_log_store_or_none(settings)
+    if store is None:
+        return {"enabled": False, "rows": [], "total": 0, "limit": limit, "offset": offset}
+    if status is not None and status not in {"success", "error", "cancelled"}:
+        raise HTTPException(status_code=422, detail="Invalid status filter")
+    rows, total = store.list_requests(
+        limit=limit,
+        offset=offset,
+        provider=provider,
+        model=model,
+        status=status,
+        endpoint=endpoint,
+        since=since,
+        until=until,
+    )
+    return {
+        "enabled": True,
+        "capture_bodies": bool(settings.request_log_capture_bodies),
+        "rows": rows,
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+    }
+
+
+@router.get("/admin/api/requests/stats")
+async def request_log_stats(
+    request: Request,
+    since: float | None = None,
+    until: float | None = None,
+    settings: Settings = Depends(get_settings),
+):
+    """Aggregate request analytics over an optional epoch-second window."""
+    require_loopback_admin(request)
+    store = _request_log_store_or_none(settings)
+    if store is None:
+        return {"enabled": False}
+    result = store.stats(since=since, until=until)
+    result["enabled"] = True
+    result["capture_bodies"] = bool(settings.request_log_capture_bodies)
+    return result
+
+
+@router.get("/admin/api/requests/{request_id}")
+async def get_request_log_entry(
+    request_id: str,
+    request: Request,
+    settings: Settings = Depends(get_settings),
+):
+    """Return one request log row with full (uncapped) bodies."""
+    require_loopback_admin(request)
+    store = _request_log_store_or_none(settings)
+    row = store.get_request(request_id) if store is not None else None
+    if row is None:
+        raise HTTPException(status_code=404, detail="Request log entry not found")
+    return row
+
+
+@router.delete("/admin/api/requests")
+async def clear_request_log(
+    request: Request,
+    settings: Settings = Depends(get_settings),
+):
+    """Delete every persisted request log row."""
+    require_loopback_admin(request)
+    store = _request_log_store_or_none(settings)
+    cleared = store.clear() if store is not None else 0
+    return {"cleared": cleared}

@@ -57,6 +57,84 @@
               aria-label="Messaging configuration"
             ></div>
           </section>
+
+          <section id="view-requests" class="admin-view" data-view="requests" hidden>
+            <div id="requestsSections" hidden></div>
+            <div class="requests-toolbar">
+              <label>
+                Provider
+                <input id="reqFilterProvider" type="text" placeholder="any" />
+              </label>
+              <label>
+                Model
+                <input id="reqFilterModel" type="text" placeholder="any" />
+              </label>
+              <label>
+                Status
+                <select id="reqFilterStatus">
+                  <option value="">any</option>
+                  <option value="success">success</option>
+                  <option value="error">error</option>
+                  <option value="cancelled">cancelled</option>
+                </select>
+              </label>
+              <label>
+                Window
+                <select id="reqFilterWindow">
+                  <option value="">all time</option>
+                  <option value="3600">last hour</option>
+                  <option value="86400">last 24h</option>
+                  <option value="604800">last 7d</option>
+                </select>
+              </label>
+              <button id="reqApplyFilters" class="secondary-button" type="button">Apply</button>
+              <span id="reqBodiesIndicator" class="requests-indicator"></span>
+              <button id="reqClearButton" class="secondary-button danger" type="button">Clear log</button>
+            </div>
+            <div id="reqStatsCards" class="requests-cards"></div>
+            <div class="requests-charts">
+              <div class="requests-chart">
+                <h4>Requests over time</h4>
+                <canvas id="reqSeriesChart" width="640" height="180"></canvas>
+              </div>
+              <div class="requests-chart">
+                <h4>Tokens by model</h4>
+                <canvas id="reqModelChart" width="640" height="180"></canvas>
+              </div>
+            </div>
+            <table class="requests-table" aria-label="Request log">
+              <thead>
+                <tr>
+                  <th>Time</th>
+                  <th>Endpoint</th>
+                  <th>Provider</th>
+                  <th>Model</th>
+                  <th>Status</th>
+                  <th>Tokens</th>
+                  <th>Duration</th>
+                </tr>
+              </thead>
+              <tbody id="reqTableBody"></tbody>
+            </table>
+            <div class="requests-pager">
+              <button id="reqPrevPage" class="secondary-button" type="button">Prev</button>
+              <span id="reqPageInfo"></span>
+              <button id="reqNextPage" class="secondary-button" type="button">Next</button>
+            </div>
+            <div id="reqDetailModal" class="requests-modal" hidden>
+              <div class="requests-modal-card">
+                <div class="requests-modal-header">
+                  <h3 id="reqDetailTitle">Request detail</h3>
+                  <button id="reqDetailClose" class="secondary-button" type="button">Close</button>
+                </div>
+                <dl id="reqDetailMeta" class="requests-detail-meta"></dl>
+                <h4>Input</h4>
+                <pre id="reqDetailInput" class="requests-detail-body"></pre>
+                <h4>Output</h4>
+                <pre id="reqDetailOutput" class="requests-detail-body"></pre>
+              </div>
+            </div>
+          </section>
         </div>
       </main>
 

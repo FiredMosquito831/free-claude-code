@@ -9,6 +9,10 @@ from loguru import logger
 
 from free_claude_code.api.detection import is_safety_classifier_request
 from free_claude_code.api.optimization_handlers import try_optimizations
+from free_claude_code.api.request_capture import (
+    build_capture,
+    extract_output_text_from_message,
+)
 from free_claude_code.api.request_errors import (
     http_status_for_unexpected_api_exception,
     log_unexpected_api_exception,
@@ -97,11 +101,19 @@ class MessagesHandler:
     ) -> object:
         """Create an Anthropic-compatible message response."""
         request_id = request_id or new_request_id()
+        capture = build_capture(
+            self._settings,
+            request_data,
+            request_id=request_id,
+            endpoint="/v1/messages",
+            protocol="anthropic",
+        )
         try:
             require_non_empty_messages(request_data.messages)
             routed = self._model_router.resolve_messages_request(request_data)
             routed = self._apply_message_routing_policies(routed)
             self._reject_unsupported_server_tools(routed)
+            capture.set_routing(routed)
 
             result = self._run_message_intercepts(routed)
             if result is None:
@@ -115,17 +127,26 @@ class MessagesHandler:
                         request_id=request_id,
                     )
                 )
+            if isinstance(result, _MessagesStreamResult):
+                result = _MessagesStreamResult(capture.wrap(result.body))
+            else:
+                capture.finish_success(
+                    extract_output_text_from_message(result.response)
+                )
             return await self._to_public_response(
                 result,
                 stream=request_data.stream,
                 request_id=request_id,
             )
-        except ApplicationError:
+        except ApplicationError as exc:
+            capture.finish_error(exc)
             raise
         except ExecutionFailure as exc:
+            capture.finish_error(exc)
             return self._execution_failure_response(exc, request_id=request_id)
         except Exception as exc:
             failure = find_execution_failure(exc)
+            capture.finish_error(failure if failure is not None else exc)
             if failure is not None:
                 return self._execution_failure_response(failure, request_id=request_id)
             raise unexpected_http_exception(

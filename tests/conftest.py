@@ -29,6 +29,20 @@ def _isolate_from_dotenv(monkeypatch):
     )
 
 
+@pytest.fixture(autouse=True)
+def _isolate_request_log(monkeypatch, tmp_path):
+    """Keep request-log writes out of the real ~/.fcc directory during tests."""
+    from free_claude_code.core import request_log
+
+    monkeypatch.setattr(
+        request_log,
+        "default_request_log_path",
+        lambda: tmp_path / "requests.db",
+    )
+    yield
+    request_log.reset_request_log_stores()
+
+
 @pytest.fixture
 def provider_config():
     from free_claude_code.providers.base import ProviderConfig

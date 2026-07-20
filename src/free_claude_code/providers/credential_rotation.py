@@ -53,9 +53,8 @@ def error_justifies_rotation(error: BaseException) -> bool:
     """
     if isinstance(error, openai.AuthenticationError):
         return True
-    if isinstance(error, httpx.HTTPStatusError):
-        if error.response.status_code in (401, 403):
-            return True
+    if isinstance(error, httpx.HTTPStatusError) and error.response.status_code in (401, 403):
+        return True
     if retryable_transient_status(error) is not None:
         return True
     return retryable_upstream_transport_error(error)
@@ -118,15 +117,21 @@ class CredentialRotationState:
 
     def _update_states(self, now: float) -> None:
         for health in self._health:
-            if health.state == STATE_LOCKED_OUT:
-                if health.lockout_until > 0 and now >= health.lockout_until:
-                    # After lockout, require a successful probe before full use.
-                    health.state = STATE_HALF_OPEN
-                    health.is_probing = False
-            elif health.state in (STATE_COOLDOWN, STATE_CIRCUIT_OPEN):
-                if health.cooldown_until > 0 and now >= health.cooldown_until:
-                    health.state = STATE_HALF_OPEN
-                    health.is_probing = False
+            if (
+                health.state == STATE_LOCKED_OUT
+                and health.lockout_until > 0
+                and now >= health.lockout_until
+            ):
+                # After lockout, require a successful probe before full use.
+                health.state = STATE_HALF_OPEN
+                health.is_probing = False
+            elif (
+                health.state in (STATE_COOLDOWN, STATE_CIRCUIT_OPEN)
+                and health.cooldown_until > 0
+                and now >= health.cooldown_until
+            ):
+                health.state = STATE_HALF_OPEN
+                health.is_probing = False
 
     @staticmethod
     def _selectable(health: KeyHealth) -> bool:

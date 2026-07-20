@@ -31,6 +31,7 @@ from free_claude_code.config.model_refs import parse_provider_type
 from free_claude_code.config.paths import messaging_state_dir_path
 from free_claude_code.config.server_urls import local_admin_url, local_proxy_root_url
 from free_claude_code.config.settings import Settings, get_settings
+from free_claude_code.core.request_log import reset_request_log_stores
 from free_claude_code.messaging.platforms import factory as messaging_platform_factory
 from free_claude_code.messaging.platforms.factory import MessagingPlatformOptions
 from free_claude_code.messaging.platforms.ports import (
@@ -394,6 +395,11 @@ class ApplicationRuntime:
         logger.info("{} platform started with messaging workflow", components.name)
 
     async def _close_owned_resources(self) -> bool:
+        await best_effort(
+            "request_log.flush",
+            asyncio.to_thread(reset_request_log_stores),
+            log_verbose_errors=self.settings.log_api_error_tracebacks,
+        )
         if not await self._cleanup_messaging():
             return False
         if not await self._cleanup_transcriber():

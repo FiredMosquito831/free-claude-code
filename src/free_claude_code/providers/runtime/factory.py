@@ -4,7 +4,10 @@ import dataclasses
 from collections.abc import Callable
 
 from free_claude_code.application.errors import UnknownProviderError
-from free_claude_code.config.provider_catalog import PROVIDER_CATALOG, ProviderDescriptor
+from free_claude_code.config.provider_catalog import (
+    PROVIDER_CATALOG,
+    ProviderDescriptor,
+)
 from free_claude_code.config.settings import Settings
 from free_claude_code.providers.base import BaseProvider, ProviderConfig
 from free_claude_code.providers.credential_rotation import CredentialRotationState
