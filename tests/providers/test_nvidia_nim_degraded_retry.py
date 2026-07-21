@@ -8,6 +8,10 @@ import pytest
 
 from free_claude_code.config.nim import NimSettings
 from free_claude_code.core.failures import ExecutionFailure, FailureKind
+from free_claude_code.providers.admission import (
+    UPSTREAM_TRANSIENT_TOTAL_ATTEMPTS,
+    ProviderAdmissionController,
+)
 from free_claude_code.providers.base import ProviderConfig
 from free_claude_code.providers.failure_policy import (
     overloaded_provider_failure,
@@ -15,11 +19,6 @@ from free_claude_code.providers.failure_policy import (
 )
 from free_claude_code.providers.nvidia_nim import NvidiaNimProvider
 from free_claude_code.providers.open_router import OpenRouterProvider
-from free_claude_code.providers.rate_limit import (
-    DEFAULT_UPSTREAM_MAX_RETRIES,
-    UPSTREAM_TRANSIENT_TOTAL_ATTEMPTS,
-    ProviderRateLimiter,
-)
 from tests.providers.request_factory import make_messages_request
 
 _FUNCTION_ID = "87ea0ddc-cff1-4bca-bf8b-3bd98a35ddd0"
@@ -39,11 +38,16 @@ def _config(base_url: str) -> ProviderConfig:
     )
 
 
-def _limiter() -> ProviderRateLimiter:
-    return ProviderRateLimiter(
+def _admission(*, max_attempts: int = UPSTREAM_TRANSIENT_TOTAL_ATTEMPTS):
+    return ProviderAdmissionController(
+        provider_name="nvidia_nim",
         rate_limit=1_000_000,
         rate_window=1.0,
         max_concurrency=1_000,
+        max_attempts=max_attempts,
+        base_delay=0.0,
+        max_delay=0.0,
+        jitter=0.0,
     )
 
 
@@ -66,6 +70,28 @@ def _bad_request(
     return openai.BadRequestError("Bad Request", response=response, body=body)
 
 
+def _context_window_error(
+    *,
+    message: str = (
+        "max_tokens must be at least 1, got -853. (parameter=max_tokens, value=-853)"
+    ),
+    param: str = "max_tokens",
+    nested: bool = False,
+) -> openai.BadRequestError:
+    request = httpx.Request(
+        "POST", "https://integrate.api.nvidia.com/v1/chat/completions"
+    )
+    response = httpx.Response(400, request=request)
+    error_body: dict[str, object] = {
+        "message": message,
+        "type": "BadRequestError",
+        "param": param,
+        "code": 400,
+    }
+    body = {"error": error_body} if nested else error_body
+    return openai.BadRequestError("Bad Request", response=response, body=body)
+
+
 def _successful_stream(text: str = "Recovered"):
     chunk = MagicMock()
     chunk.choices = [
@@ -82,18 +108,18 @@ def _successful_stream(text: str = "Recovered"):
     return stream()
 
 
-def _nim(limiter: ProviderRateLimiter) -> NvidiaNimProvider:
+def _nim(admission: ProviderAdmissionController) -> NvidiaNimProvider:
     return NvidiaNimProvider(
         _config("https://integrate.api.nvidia.com/v1"),
         nim_settings=NimSettings(),
-        rate_limiter=limiter,
+        admission=admission,
     )
 
 
 @pytest.mark.asyncio
 async def test_degraded_function_retries_unchanged_request_then_succeeds() -> None:
-    limiter = _limiter()
-    provider = _nim(limiter)
+    admission = _admission()
+    provider = _nim(admission)
 
     with (
         patch.object(
@@ -102,11 +128,6 @@ async def test_degraded_function_retries_unchanged_request_then_succeeds() -> No
             new_callable=AsyncMock,
             side_effect=[_bad_request(), _successful_stream()],
         ) as create,
-        patch.object(limiter, "extend_reactive_block") as extend_block,
-        patch(
-            "free_claude_code.providers.rate_limit.asyncio.sleep",
-            new_callable=AsyncMock,
-        ) as sleep,
     ):
         events = [
             event
@@ -117,8 +138,6 @@ async def test_degraded_function_retries_unchanged_request_then_succeeds() -> No
 
     assert create.await_count == 2
     assert create.call_args_list[0].kwargs == create.call_args_list[1].kwargs
-    extend_block.assert_called_once()
-    sleep.assert_awaited_once()
     event_text = "".join(events)
     assert "Recovered" in event_text
     assert "event: message_stop" in event_text
@@ -127,8 +146,8 @@ async def test_degraded_function_retries_unchanged_request_then_succeeds() -> No
 
 @pytest.mark.asyncio
 async def test_degraded_function_exhaustion_is_detailed_redacted_overload() -> None:
-    limiter = _limiter()
-    provider = _nim(limiter)
+    admission = _admission()
+    provider = _nim(admission)
     error = _bad_request(
         body_extra={
             "authorization": "Bearer NIM_AUTH_SECRET",
@@ -143,11 +162,6 @@ async def test_degraded_function_exhaustion_is_detailed_redacted_overload() -> N
             new_callable=AsyncMock,
             side_effect=error,
         ) as create,
-        patch.object(limiter, "extend_reactive_block") as extend_block,
-        patch(
-            "free_claude_code.providers.rate_limit.asyncio.sleep",
-            new_callable=AsyncMock,
-        ) as sleep,
         patch("free_claude_code.providers.openai_chat.provider.trace_event") as trace,
         pytest.raises(ExecutionFailure) as exc_info,
     ):
@@ -159,8 +173,6 @@ async def test_degraded_function_exhaustion_is_detailed_redacted_overload() -> N
         ]
 
     assert create.await_count == UPSTREAM_TRANSIENT_TOTAL_ATTEMPTS
-    assert extend_block.call_count == DEFAULT_UPSTREAM_MAX_RETRIES
-    assert sleep.await_count == DEFAULT_UPSTREAM_MAX_RETRIES
 
     failure = exc_info.value
     assert failure.kind is FailureKind.OVERLOADED
@@ -184,6 +196,74 @@ async def test_degraded_function_exhaustion_is_detailed_redacted_overload() -> N
     assert "error_message" not in error_traces[-1]
 
 
+@pytest.mark.parametrize("nested", [False, True])
+@pytest.mark.asyncio
+async def test_negative_derived_max_tokens_is_context_window_failure(
+    nested: bool,
+) -> None:
+    provider = _nim(_admission())
+
+    with (
+        patch.object(
+            provider._client.chat.completions,
+            "create",
+            new_callable=AsyncMock,
+            side_effect=_context_window_error(nested=nested),
+        ) as create,
+        pytest.raises(ExecutionFailure) as exc_info,
+    ):
+        [
+            event
+            async for event in provider.stream_response(
+                make_messages_request(), request_id="req_context"
+            )
+        ]
+
+    assert create.await_count == 1
+    failure = exc_info.value
+    assert failure.kind is FailureKind.CONTEXT_WINDOW_EXCEEDED
+    assert failure.status_code == 400
+    assert failure.retryable is False
+    assert "Mapped message: Provider input exceeds the model context window." in (
+        failure.message
+    )
+    assert "max_tokens must be at least 1, got -853" in failure.message
+    assert "Request ID: req_context" in failure.message
+    assert "prompt is too long" not in failure.message
+
+
+@pytest.mark.parametrize(
+    ("message", "param"),
+    [
+        ("max_tokens must be at least 1, got 0", "max_tokens"),
+        ("max_tokens must be at least 1, got -853", "temperature"),
+        ("max_tokens must be less than or equal to 8192", "max_tokens"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_other_nim_max_token_errors_remain_invalid_requests(
+    message: str,
+    param: str,
+) -> None:
+    provider = _nim(_admission())
+
+    with (
+        patch.object(
+            provider._client.chat.completions,
+            "create",
+            new_callable=AsyncMock,
+            side_effect=_context_window_error(message=message, param=param),
+        ) as create,
+        pytest.raises(ExecutionFailure) as exc_info,
+    ):
+        [event async for event in provider.stream_response(make_messages_request())]
+
+    assert create.await_count == 1
+    assert exc_info.value.kind is FailureKind.INVALID_REQUEST
+    assert exc_info.value.status_code == 400
+    assert exc_info.value.retryable is False
+
+
 @pytest.mark.parametrize(
     "detail",
     [
@@ -195,8 +275,8 @@ async def test_degraded_function_exhaustion_is_detailed_redacted_overload() -> N
 )
 @pytest.mark.asyncio
 async def test_unrelated_nim_bad_request_is_not_retried(detail: str) -> None:
-    limiter = _limiter()
-    provider = _nim(limiter)
+    admission = _admission()
+    provider = _nim(admission)
 
     with (
         patch.object(
@@ -205,18 +285,11 @@ async def test_unrelated_nim_bad_request_is_not_retried(detail: str) -> None:
             new_callable=AsyncMock,
             side_effect=_bad_request(detail),
         ) as create,
-        patch.object(limiter, "extend_reactive_block") as extend_block,
-        patch(
-            "free_claude_code.providers.rate_limit.asyncio.sleep",
-            new_callable=AsyncMock,
-        ) as sleep,
         pytest.raises(ExecutionFailure) as exc_info,
     ):
         [event async for event in provider.stream_response(make_messages_request())]
 
     assert create.await_count == 1
-    extend_block.assert_not_called()
-    sleep.assert_not_awaited()
     assert exc_info.value.kind is FailureKind.INVALID_REQUEST
     assert exc_info.value.status_code == 400
     assert exc_info.value.retryable is False
@@ -224,9 +297,9 @@ async def test_unrelated_nim_bad_request_is_not_retried(detail: str) -> None:
 
 @pytest.mark.asyncio
 async def test_degraded_wording_remains_non_retryable_for_other_providers() -> None:
-    limiter = _limiter()
+    admission = _admission()
     provider = OpenRouterProvider(
-        _config("https://openrouter.ai/api/v1"), rate_limiter=limiter
+        _config("https://openrouter.ai/api/v1"), admission=admission
     )
     error = _bad_request()
 
@@ -239,25 +312,18 @@ async def test_degraded_wording_remains_non_retryable_for_other_providers() -> N
             new_callable=AsyncMock,
             side_effect=error,
         ) as create,
-        patch.object(limiter, "extend_reactive_block") as extend_block,
-        patch(
-            "free_claude_code.providers.rate_limit.asyncio.sleep",
-            new_callable=AsyncMock,
-        ) as sleep,
         pytest.raises(ExecutionFailure) as exc_info,
     ):
         [event async for event in provider.stream_response(make_messages_request())]
 
     assert create.await_count == 1
-    extend_block.assert_not_called()
-    sleep.assert_not_awaited()
     assert exc_info.value.kind is FailureKind.INVALID_REQUEST
     assert exc_info.value.status_code == 400
 
 
 @pytest.mark.asyncio
-async def test_limiter_override_preserves_raw_exception_after_exhaustion() -> None:
-    limiter = _limiter()
+async def test_admission_override_preserves_raw_exception_after_exhaustion() -> None:
+    admission = _admission(max_attempts=2)
     errors = (_bad_request(), _bad_request())
     attempts = 0
 
@@ -269,17 +335,11 @@ async def test_limiter_override_preserves_raw_exception_after_exhaustion() -> No
 
     override = Mock(return_value=overloaded_provider_failure())
     with (
-        patch.object(limiter, "extend_reactive_block"),
-        patch(
-            "free_claude_code.providers.rate_limit.asyncio.sleep",
-            new_callable=AsyncMock,
-        ),
         pytest.raises(openai.BadRequestError) as exc_info,
     ):
-        await limiter.execute_with_retry(
+        await admission.run_with_retry(
             fail,
             provider_failure_override=override,
-            max_retries=1,
         )
 
     assert attempts == 2

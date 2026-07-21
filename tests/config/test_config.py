@@ -39,6 +39,7 @@ class TestSettings:
 
         monkeypatch.delenv("CLAUDE_WORKSPACE", raising=False)
         monkeypatch.delenv("MODEL", raising=False)
+        monkeypatch.delenv("VERTEX_LOCATION", raising=False)
         monkeypatch.delenv("HTTP_READ_TIMEOUT", raising=False)
         monkeypatch.delenv("HTTP_CONNECT_TIMEOUT", raising=False)
         monkeypatch.setitem(Settings.model_config, "env_file", ())
@@ -58,6 +59,7 @@ class TestSettings:
         assert settings.debug_subagent_stack is False
         assert settings.log_level == "INFO"
         assert settings.open_admin_browser is True
+        assert settings.vertex_location == "global"
 
     def test_open_admin_browser_loads_from_environment(self, monkeypatch):
         from free_claude_code.config.settings import Settings
@@ -337,6 +339,18 @@ class TestSettings:
         assert settings.cloudflare_account_id == "cf-account"
         assert settings.cloudflare_proxy == "http://proxy.test:8080"
 
+    def test_vertex_settings_from_env(self, monkeypatch):
+        """Vertex project, location, and proxy env vars load into settings."""
+        from free_claude_code.config.settings import Settings
+
+        monkeypatch.setenv("VERTEX_PROJECT_ID", "vertex-project")
+        monkeypatch.setenv("VERTEX_LOCATION", "us-central1")
+        monkeypatch.setenv("VERTEX_PROXY", "http://proxy.test:8080")
+        settings = Settings()
+        assert settings.vertex_project_id == "vertex-project"
+        assert settings.vertex_location == "us-central1"
+        assert settings.vertex_proxy == "http://proxy.test:8080"
+
     def test_vercel_settings_from_env(self, monkeypatch):
         """Vercel AI Gateway key and proxy env vars load into settings."""
         from free_claude_code.config.settings import Settings
@@ -346,6 +360,23 @@ class TestSettings:
         settings = Settings()
         assert settings.vercel_ai_gateway_api_key == "vercel-key"
         assert settings.vercel_ai_gateway_proxy == "http://proxy.test:8080"
+
+    def test_bedrock_settings_from_official_environment(self, monkeypatch):
+        """Bedrock key, regional base URL, and proxy load into settings."""
+        from free_claude_code.config.settings import Settings
+
+        monkeypatch.setenv("AWS_BEARER_TOKEN_BEDROCK", "bedrock-key")
+        monkeypatch.setenv(
+            "BEDROCK_BASE_URL", "https://bedrock-mantle.us-west-2.api.aws/v1"
+        )
+        monkeypatch.setenv("BEDROCK_PROXY", "http://proxy.test:8080")
+        settings = Settings()
+
+        assert settings.bedrock_api_key == "bedrock-key"
+        assert settings.bedrock_base_url == (
+            "https://bedrock-mantle.us-west-2.api.aws/v1"
+        )
+        assert settings.bedrock_proxy == "http://proxy.test:8080"
 
     def test_huggingface_settings_from_env(self, monkeypatch):
         """Hugging Face key and proxy env vars load into settings."""
@@ -1103,10 +1134,8 @@ class TestPerModelMapping:
         )
         assert parse_model_name("cerebras/llama3.1-8b") == "llama3.1-8b"
 
-    def test_configured_chat_model_refs_collects_unique_models_with_sources(
-        self, monkeypatch
-    ):
-        """Startup validation model collection is limited to configured chat refs."""
+    def test_configured_chat_model_refs_collects_unique_models(self, monkeypatch):
+        """Model discovery is limited to configured chat references."""
         from free_claude_code.config.settings import Settings
 
         monkeypatch.setenv("FCC_SMOKE_MODEL_NVIDIA_NIM", "nvidia_nim/smoke")
@@ -1127,10 +1156,7 @@ class TestPerModelMapping:
         ]
         assert refs[0].provider_id == "nvidia_nim"
         assert refs[0].model_id == "fallback"
-        assert refs[0].sources == ("MODEL", "MODEL_SONNET")
         assert refs[1].provider_id == "open_router"
         assert refs[1].model_id == "anthropic/claude-fable-5"
-        assert refs[1].sources == ("MODEL_FABLE",)
         assert refs[2].provider_id == "open_router"
         assert refs[2].model_id == "anthropic/claude-opus"
-        assert refs[2].sources == ("MODEL_OPUS",)

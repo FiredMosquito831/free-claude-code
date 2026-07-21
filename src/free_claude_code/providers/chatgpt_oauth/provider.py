@@ -1,7 +1,5 @@
 """Direct ChatGPT/Codex OAuth provider using the Responses API."""
 
-from __future__ import annotations
-
 import platform
 import re
 import uuid
@@ -24,10 +22,10 @@ from free_claude_code.core.failures import ExecutionFailure
 from free_claude_code.core.reasoning import DEFAULT_REASONING_POLICY, ReasoningPolicy
 from free_claude_code.core.trace import trace_event
 from free_claude_code.core.version import package_version
+from free_claude_code.providers.admission import ProviderAdmissionController
 from free_claude_code.providers.base import BaseProvider, ProviderConfig
 from free_claude_code.providers.failure_policy import classify_provider_failure
 from free_claude_code.providers.model_listing import model_infos_from_ids
-from free_claude_code.providers.rate_limit import ProviderRateLimiter
 
 from .conversion import build_chatgpt_oauth_request_body
 from .credentials import ChatGPTOAuthError, load_chatgpt_oauth_credentials
@@ -37,12 +35,14 @@ CHATGPT_OAUTH_DEFAULT_BASE = "https://chatgpt.com/backend-api"
 
 # Model allowlist aligned with OpenCode's ChatGPT/Codex OAuth filter.
 # https://github.com/anomalyco/opencode/blob/main/packages/opencode/src/plugin/openai/codex.ts
-_CHATGPT_OAUTH_ALLOWED_MODELS = frozenset({
-    "gpt-5.5",
-    "gpt-5.3-codex-spark",
-    "gpt-5.4",
-    "gpt-5.4-mini",
-})
+_CHATGPT_OAUTH_ALLOWED_MODELS = frozenset(
+    {
+        "gpt-5.5",
+        "gpt-5.3-codex-spark",
+        "gpt-5.4",
+        "gpt-5.4-mini",
+    }
+)
 _CHATGPT_OAUTH_DISALLOWED_MODELS = frozenset({"gpt-5.5-pro"})
 _CHATGPT_OAUTH_GPT_VERSION_RE = re.compile(r"^gpt-(\d+\.\d+)")
 
@@ -96,11 +96,11 @@ class ChatGPTOAuthProvider(BaseProvider):
         self,
         config: ProviderConfig,
         *,
-        rate_limiter: ProviderRateLimiter,
+        admission: ProviderAdmissionController,
         account_id: str = "",
     ):
         super().__init__(config)
-        self._rate_limiter = rate_limiter
+        self._admission = admission
         self._base_url = (config.base_url or CHATGPT_OAUTH_DEFAULT_BASE).rstrip("/")
         self._account_id = account_id
         self._api_key = config.api_key
@@ -238,56 +238,54 @@ class ChatGPTOAuthProvider(BaseProvider):
                 log_raw_events=self._config.log_raw_sse_events,
             )
 
-            async with self._rate_limiter.concurrency_slot():
+            try:
+                response = await self._admission.run_with_retry(
+                    lambda: self._send_stream_request(url, headers, body),
+                    provider_failure_override=self._provider_failure_override,
+                    request_id=request_id,
+                )
                 try:
-                    response = await self._rate_limiter.execute_with_retry(
-                        self._send_stream_request,
-                        provider_failure_override=self._provider_failure_override,
-                        url=url,
-                        headers=headers,
-                        body=body,
-                    )
-                    try:
-                        if response.status_code >= 400:
-                            self._log_error(tag, req_tag, None, request_id)
-                            raise ApplicationUnavailableError(
-                                f"ChatGPT OAuth API error {response.status_code}"
-                            )
+                    if response.status_code >= 400:
+                        self._log_error(tag, req_tag, None, request_id)
+                        raise ApplicationUnavailableError(
+                            f"ChatGPT OAuth API error {response.status_code}"
+                        )
 
-                        yield ledger.message_start()
-                        async for event in iter_chatgpt_oauth_sse_events(response.aiter_raw()):
-                            for sse_event in converter.feed(event):
-                                yield sse_event
-
-                        for sse_event in converter.finish():
+                    yield ledger.message_start()
+                    async for event in iter_chatgpt_oauth_sse_events(
+                        response.aiter_raw()
+                    ):
+                        for sse_event in converter.feed(event):
                             yield sse_event
-                    finally:
-                        await response.aclose()
 
-                except ApplicationUnavailableError:
-                    raise
-                except Exception as error:
-                    self._log_error(tag, req_tag, error, request_id)
-                    failure = classify_provider_failure(
-                        error,
-                        provider_name=tag,
-                        read_timeout_s=self._config.http_read_timeout,
-                        request_id=request_id,
-                        mark_rate_limited=self._rate_limiter.extend_reactive_block,
-                        provider_failure_override=self._provider_failure_override,
-                    )
-                    trace_event(
-                        stage="provider",
-                        event="provider.response.error",
-                        source="provider",
-                        provider=tag,
-                        request_id=request_id,
-                        exc_type=type(error).__name__,
-                        failure_kind=failure.kind.value,
-                        status_code=failure.status_code,
-                        provider_retryable=failure.retryable,
-                    )
-                    raise failure from error
+                    for sse_event in converter.finish():
+                        yield sse_event
+                finally:
+                    await response.aclose()
+
+            except ApplicationUnavailableError:
+                raise
+            except Exception as error:
+                self._log_error(tag, req_tag, error, request_id)
+                failure = classify_provider_failure(
+                    error,
+                    provider_name=tag,
+                    read_timeout_s=self._config.http_read_timeout,
+                    request_id=request_id,
+                    provider_failure_override=self._provider_failure_override,
+                )
+                trace_event(
+                    stage="provider",
+                    event="provider.response.error",
+                    source="provider",
+                    provider=tag,
+                    request_id=request_id,
+                    exc_type=type(error).__name__,
+                    failure_kind=failure.kind.value,
+                    status_code=failure.status_code,
+                    provider_retryable=failure.retryable,
+                )
+                raise failure from error
 
         return _stream()
 

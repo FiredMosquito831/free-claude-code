@@ -8,9 +8,11 @@ import pytest
 from free_claude_code.application.errors import UnknownProviderError
 from free_claude_code.config.nim import NimSettings
 from free_claude_code.config.provider_catalog import (
+    BEDROCK_DEFAULT_BASE,
     COHERE_DEFAULT_BASE,
     GITHUB_MODELS_DEFAULT_BASE,
     HUGGINGFACE_DEFAULT_BASE,
+    KIMI_CODE_DEFAULT_BASE,
     MINIMAX_DEFAULT_BASE,
     OLLAMA_CLOUD_DEFAULT_BASE,
     PROVIDER_CATALOG,
@@ -18,6 +20,7 @@ from free_claude_code.config.provider_catalog import (
     VERCEL_AI_GATEWAY_DEFAULT_BASE,
     ZAI_DEFAULT_BASE,
 )
+from free_claude_code.providers.admission import ProviderAdmissionController
 from free_claude_code.providers.chatgpt_oauth import ChatGPTOAuthProvider
 from free_claude_code.providers.cloudflare import CloudflareProvider
 from free_claude_code.providers.deepseek import DeepSeekProvider
@@ -31,12 +34,12 @@ from free_claude_code.providers.openai_chat import (
     OPENAI_CHAT_PROFILES,
     OpenAIChatProvider,
 )
-from free_claude_code.providers.rate_limit import ProviderRateLimiter
 from free_claude_code.providers.runtime import (
     ProviderRuntime,
     build_provider_config,
     create_provider,
 )
+from free_claude_code.providers.vertex import VertexProvider
 
 
 def _make_settings(**overrides):
@@ -55,6 +58,8 @@ def _make_settings(**overrides):
     mock.minimax_api_key = "test_minimax_key"
     mock.opencode_api_key = "test_opencode_key"
     mock.vercel_ai_gateway_api_key = "test_vercel_key"
+    mock.bedrock_api_key = "test_bedrock_key"
+    mock.bedrock_base_url = BEDROCK_DEFAULT_BASE
     mock.huggingface_api_key = "test_huggingface_key"
     mock.cohere_api_key = "test_cohere_key"
     mock.github_models_token = "test_github_models_token"
@@ -71,8 +76,8 @@ def _make_settings(**overrides):
     mock.codestral_proxy = ""
     mock.kimi_proxy = ""
     mock.kimi_api_key = "test_kimi_key"
-    mock.kimi_coding_proxy = ""
-    mock.kimi_coding_api_key = "test_kimi_coding_key"
+    mock.kimi_code_proxy = ""
+    mock.kimi_code_api_key = "test_kimi_code_key"
     mock.chatgpt_oauth_access_token = "test_chatgpt_oauth_token"
     mock.chatgpt_oauth_account_id = ""
     mock.chatgpt_oauth_base_url = "http://localhost:9999/v1"
@@ -82,6 +87,7 @@ def _make_settings(**overrides):
     mock.opencode_proxy = ""
     mock.opencode_go_proxy = ""
     mock.vercel_ai_gateway_proxy = ""
+    mock.bedrock_proxy = ""
     mock.huggingface_proxy = ""
     mock.cohere_proxy = ""
     mock.github_models_proxy = ""
@@ -93,6 +99,9 @@ def _make_settings(**overrides):
     mock.cloudflare_proxy = ""
     mock.gemini_api_key = ""
     mock.gemini_proxy = ""
+    mock.vertex_project_id = "test-vertex-project"
+    mock.vertex_location = "global"
+    mock.vertex_proxy = ""
     mock.groq_api_key = ""
     mock.groq_proxy = ""
     mock.cerebras_api_key = ""
@@ -166,6 +175,23 @@ def test_ollama_cloud_provider_config_uses_key_and_proxy():
     assert config.proxy == "http://proxy.test:8080"
 
 
+def test_bedrock_provider_config_uses_regional_base_key_and_proxy() -> None:
+    descriptor = PROVIDER_CATALOG["bedrock"]
+    settings = _make_settings(
+        bedrock_api_key="bedrock-token",
+        bedrock_base_url="https://bedrock-mantle.eu-west-1.api.aws/v1",
+        bedrock_proxy="http://proxy.test:8080",
+    )
+
+    config = build_provider_config(descriptor, settings)
+
+    assert descriptor.credential_env == "AWS_BEARER_TOKEN_BEDROCK"
+    assert descriptor.default_base_url == BEDROCK_DEFAULT_BASE
+    assert config.api_key == "bedrock-token"
+    assert config.base_url == "https://bedrock-mantle.eu-west-1.api.aws/v1"
+    assert config.proxy == "http://proxy.test:8080"
+
+
 @pytest.mark.parametrize(
     ("provider_id", "expected_api_key"),
     [
@@ -213,6 +239,21 @@ def test_minimax_descriptor_uses_expected_endpoint_and_credential():
 
     assert descriptor.default_base_url == MINIMAX_DEFAULT_BASE
     assert descriptor.credential_env == "MINIMAX_API_KEY"
+
+
+def test_kimi_code_provider_config_uses_subscription_key_and_proxy() -> None:
+    descriptor = PROVIDER_CATALOG["kimi_code"]
+    settings = _make_settings(
+        kimi_code_api_key="subscription-token",
+        kimi_code_proxy="http://proxy.test:8080",
+    )
+
+    config = build_provider_config(descriptor, settings)
+
+    assert descriptor.credential_env == "KIMI_CODE_API_KEY"
+    assert config.api_key == "subscription-token"
+    assert config.base_url == KIMI_CODE_DEFAULT_BASE
+    assert config.proxy == "http://proxy.test:8080"
 
 
 def test_cloudflare_descriptor_uses_api_root_not_account_url():
@@ -357,16 +398,19 @@ def test_create_provider_uses_openai_chat_openrouter_by_default():
 def test_create_provider_instantiates_each_builtin():
     settings = _make_settings(
         gemini_api_key="test_gemini_key",
+        vertex_project_id="test-vertex-project",
         groq_api_key="test_groq_key",
         cerebras_api_key="test_cerebras_key",
         fireworks_api_key="test_fireworks_key",
         cloudflare_api_token="test_cloudflare_token",
         cloudflare_account_id="test_cloudflare_account",
         vercel_ai_gateway_api_key="test_vercel_key",
+        bedrock_api_key="test_bedrock_key",
         huggingface_api_key="test_huggingface_key",
         cohere_api_key="test_cohere_key",
         github_models_token="test_github_models_token",
         kimi_api_key="test_kimi_key",
+        kimi_code_api_key="test_kimi_code_key",
         provider_rate_limit=7,
         provider_rate_window=11,
         provider_max_concurrency=3,
@@ -379,7 +423,7 @@ def test_create_provider_instantiates_each_builtin():
         "mistral_codestral": OpenAIChatProvider,
         "deepseek": DeepSeekProvider,
         "kimi": OpenAIChatProvider,
-        "kimi_coding": OpenAIChatProvider,
+        "kimi_code": OpenAIChatProvider,
         "chatgpt_oauth": ChatGPTOAuthProvider,
         "minimax": OpenAIChatProvider,
         "fireworks": OpenAIChatProvider,
@@ -392,36 +436,39 @@ def test_create_provider_instantiates_each_builtin():
         "opencode": OpenAIChatProvider,
         "opencode_go": OpenAIChatProvider,
         "vercel": OpenAIChatProvider,
+        "bedrock": OpenAIChatProvider,
         "huggingface": OpenAIChatProvider,
         "cohere": OpenAIChatProvider,
         "github_models": GitHubModelsProvider,
         "zai": OpenAIChatProvider,
         "gemini": GeminiProvider,
+        "vertex": VertexProvider,
         "groq": OpenAIChatProvider,
         "sambanova": OpenAIChatProvider,
         "cerebras": OpenAIChatProvider,
     }
-    sentinel_limiter = MagicMock(spec=ProviderRateLimiter)
+    sentinel_admission = MagicMock(spec=ProviderAdmissionController)
 
     with (
         patch("free_claude_code.providers.openai_chat.provider.AsyncOpenAI"),
         patch("httpx.AsyncClient"),
         patch(
-            "free_claude_code.providers.runtime.factory.ProviderRateLimiter",
-            return_value=sentinel_limiter,
-        ) as limiter_factory,
+            "free_claude_code.providers.runtime.factory.ProviderAdmissionController",
+            return_value=sentinel_admission,
+        ) as admission_factory,
     ):
         for provider_id, provider_cls in cases.items():
             provider = create_provider(provider_id, settings)
 
             assert isinstance(provider, provider_cls)
-            assert provider._rate_limiter is sentinel_limiter
-            limiter_factory.assert_called_once_with(
+            assert provider._admission is sentinel_admission
+            admission_factory.assert_called_once_with(
+                provider_name=provider_id,
                 rate_limit=7,
                 rate_window=11,
                 max_concurrency=3,
             )
-            limiter_factory.reset_mock()
+            admission_factory.reset_mock()
 
     assert set(cases) == set(PROVIDER_CATALOG)
 
@@ -436,7 +483,7 @@ def test_provider_runtime_caches_by_provider_id():
     assert first is second
 
 
-def test_provider_runtime_provider_owns_one_limiter() -> None:
+def test_provider_runtime_provider_owns_one_admission_controller() -> None:
     runtime = ProviderRuntime(_make_settings())
 
     with patch("free_claude_code.providers.openai_chat.provider.AsyncOpenAI"):
@@ -445,10 +492,10 @@ def test_provider_runtime_provider_owns_one_limiter() -> None:
 
     assert isinstance(first, NvidiaNimProvider)
     assert isinstance(second, NvidiaNimProvider)
-    assert first._rate_limiter is second._rate_limiter
+    assert first._admission is second._admission
 
 
-def test_separate_provider_runtimes_never_share_limiters() -> None:
+def test_separate_provider_runtimes_never_share_admission_controllers() -> None:
     first_runtime = ProviderRuntime(_make_settings())
     second_runtime = ProviderRuntime(_make_settings())
 
@@ -459,10 +506,10 @@ def test_separate_provider_runtimes_never_share_limiters() -> None:
     assert isinstance(first, NvidiaNimProvider)
     assert isinstance(second, NvidiaNimProvider)
     assert first is not second
-    assert first._rate_limiter is not second._rate_limiter
+    assert first._admission is not second._admission
 
 
-def test_different_providers_in_one_runtime_have_independent_limiters() -> None:
+def test_different_providers_have_independent_admission_controllers() -> None:
     runtime = ProviderRuntime(_make_settings())
 
     with patch("free_claude_code.providers.openai_chat.provider.AsyncOpenAI"):
@@ -471,7 +518,7 @@ def test_different_providers_in_one_runtime_have_independent_limiters() -> None:
 
     assert isinstance(nim, NvidiaNimProvider)
     assert isinstance(open_router, OpenRouterProvider)
-    assert nim._rate_limiter is not open_router._rate_limiter
+    assert nim._admission is not open_router._admission
 
 
 def test_unknown_provider_raises_unknown_provider_type_error():

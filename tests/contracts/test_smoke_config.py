@@ -34,16 +34,20 @@ def _settings(**overrides):
         "codestral_api_key": "",
         "deepseek_api_key": "",
         "kimi_api_key": "",
-        "kimi_coding_api_key": "",
+        "kimi_code_api_key": "",
         "wafer_api_key": "",
         "minimax_api_key": "",
         "opencode_api_key": "",
         "vercel_ai_gateway_api_key": "",
+        "bedrock_api_key": "",
+        "bedrock_base_url": "https://bedrock-mantle.us-east-1.api.aws/v1",
         "huggingface_api_key": "",
         "cohere_api_key": "",
         "github_models_token": "",
         "zai_api_key": "",
         "gemini_api_key": "",
+        "vertex_project_id": "",
+        "vertex_location": "global",
         "groq_api_key": "",
         "sambanova_api_key": "",
         "cerebras_api_key": "",
@@ -155,6 +159,40 @@ def test_openrouter_provider_smoke_uses_concrete_free_model(monkeypatch) -> None
     assert models[0].source == "provider_default"
 
 
+def test_bedrock_provider_configuration_uses_official_api_key(monkeypatch) -> None:
+    monkeypatch.delenv("FCC_SMOKE_MODEL_BEDROCK", raising=False)
+    config = _smoke_config(
+        settings=_settings(
+            model="ollama/llama3.1",
+            ollama_base_url="",
+            bedrock_api_key="bedrock-key",
+        )
+    )
+
+    assert config.has_provider_configuration("bedrock")
+    models = config.provider_smoke_models()
+    assert [model.provider for model in models] == ["bedrock"]
+    assert models[0].full_model == "bedrock/openai.gpt-oss-120b"
+    assert models[0].source == "provider_default"
+
+
+def test_vertex_provider_configuration_uses_project_id(monkeypatch) -> None:
+    monkeypatch.delenv("FCC_SMOKE_MODEL_VERTEX", raising=False)
+    config = _smoke_config(
+        settings=_settings(
+            model="ollama/llama3.1",
+            ollama_base_url="",
+            vertex_project_id="vertex-project",
+        )
+    )
+
+    assert config.has_provider_configuration("vertex")
+    models = config.provider_smoke_models()
+    assert [model.provider for model in models] == ["vertex"]
+    assert models[0].full_model == "vertex/google/gemini-3.5-flash"
+    assert models[0].source == "provider_default"
+
+
 def test_wafer_provider_configuration_uses_api_key(monkeypatch) -> None:
     monkeypatch.delenv("FCC_SMOKE_MODEL_WAFER", raising=False)
     config = _smoke_config(
@@ -169,6 +207,23 @@ def test_wafer_provider_configuration_uses_api_key(monkeypatch) -> None:
     models = config.provider_smoke_models()
     assert models[0].provider == "wafer"
     assert models[0].full_model == PROVIDER_SMOKE_DEFAULT_MODELS["wafer"]
+
+
+def test_kimi_code_provider_configuration_uses_subscription_key(monkeypatch) -> None:
+    monkeypatch.delenv("FCC_SMOKE_MODEL_KIMI_CODE", raising=False)
+    config = _smoke_config(
+        settings=_settings(
+            model="ollama/llama3.1",
+            ollama_base_url="",
+            kimi_code_api_key="subscription-key",
+        )
+    )
+
+    assert config.has_provider_configuration("kimi_code")
+    models = config.provider_smoke_models()
+    assert [model.provider for model in models] == ["kimi_code"]
+    assert models[0].full_model == "kimi_code/k3"
+    assert models[0].source == "provider_default"
 
 
 def test_minimax_provider_configuration_uses_api_key(monkeypatch) -> None:

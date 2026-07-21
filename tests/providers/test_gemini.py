@@ -4,14 +4,16 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from free_claude_code.application.errors import InvalidRequestError
 from free_claude_code.config.provider_catalog import GEMINI_DEFAULT_BASE
+from free_claude_code.core.reasoning import ReasoningEffort, ReasoningPolicy
 from free_claude_code.providers.base import ProviderConfig
 from free_claude_code.providers.gemini import GeminiProvider
-from free_claude_code.providers.gemini.quirks import (
-    GEMINI_SKIP_THOUGHT_SIGNATURE_VALIDATOR,
+from free_claude_code.providers.google_openai import (
+    GOOGLE_SKIP_THOUGHT_SIGNATURE_VALIDATOR,
 )
 from tests.providers.request_factory import make_messages_request
-from tests.providers.support import passthrough_rate_limiter, reasoning_for
+from tests.providers.support import immediate_admission, reasoning_for
 
 
 def make_request(**overrides):
@@ -26,6 +28,17 @@ def _simulate_openai_sdk_wire_json(body: dict) -> dict:
     return wire
 
 
+def _google_thinking_config(wire: dict) -> dict | None:
+    literal_extra_body = wire.get("extra_body")
+    if not isinstance(literal_extra_body, dict):
+        return None
+    google = literal_extra_body.get("google")
+    if not isinstance(google, dict):
+        return None
+    thinking_config = google.get("thinking_config")
+    return thinking_config if isinstance(thinking_config, dict) else None
+
+
 @pytest.fixture
 def gemini_config():
     return ProviderConfig(
@@ -38,7 +51,7 @@ def gemini_config():
 
 @pytest.fixture
 def gemini_provider(gemini_config):
-    return GeminiProvider(gemini_config, rate_limiter=passthrough_rate_limiter())
+    return GeminiProvider(gemini_config, admission=immediate_admission())
 
 
 def test_init(gemini_config):
@@ -46,9 +59,7 @@ def test_init(gemini_config):
     with patch(
         "free_claude_code.providers.openai_chat.provider.AsyncOpenAI"
     ) as mock_openai:
-        provider = GeminiProvider(
-            gemini_config, rate_limiter=passthrough_rate_limiter()
-        )
+        provider = GeminiProvider(gemini_config, admission=immediate_admission())
         assert provider._api_key == "test_gemini_key"
         assert (
             provider._base_url
@@ -110,7 +121,7 @@ def test_build_request_body_reasoning_off_sets_reasoning_none():
             rate_limit=10,
             rate_window=60,
         ),
-        rate_limiter=passthrough_rate_limiter(),
+        admission=immediate_admission(),
     )
     req = make_request(thinking={"type": "disabled"})
     body = provider._build_request_body(req, reasoning=reasoning_for(req))
@@ -118,6 +129,70 @@ def test_build_request_body_reasoning_off_sets_reasoning_none():
     assert body["reasoning_effort"] == "none"
     roles = [m.get("role") for m in body.get("messages", [])]
     assert "assistant_reasoning_content" not in roles
+
+
+@pytest.mark.parametrize(
+    ("reasoning", "expected_effort", "expected_thinking_config"),
+    [
+        (ReasoningPolicy.provider_default(), None, None),
+        (ReasoningPolicy.off(), "none", None),
+        (ReasoningPolicy.on(), None, {"include_thoughts": True}),
+        (
+            ReasoningPolicy.on(effort=ReasoningEffort.HIGH),
+            "high",
+            None,
+        ),
+        (
+            ReasoningPolicy.on(budget_tokens=777),
+            None,
+            {"thinking_budget": 777, "include_thoughts": True},
+        ),
+        (
+            ReasoningPolicy.on(
+                effort=ReasoningEffort.HIGH,
+                budget_tokens=777,
+            ),
+            None,
+            {"thinking_budget": 777, "include_thoughts": True},
+        ),
+    ],
+)
+def test_gemini_reasoning_uses_exactly_one_wire_channel(
+    gemini_provider: GeminiProvider,
+    reasoning: ReasoningPolicy,
+    expected_effort: str | None,
+    expected_thinking_config: dict | None,
+) -> None:
+    body = gemini_provider._build_request_body(
+        make_request(thinking=None),
+        reasoning=reasoning,
+    )
+    wire = _simulate_openai_sdk_wire_json(body)
+
+    assert wire.get("reasoning_effort") == expected_effort
+    assert _google_thinking_config(wire) == expected_thinking_config
+    assert not (
+        "reasoning_effort" in wire and _google_thinking_config(wire) is not None
+    )
+
+
+def test_gemini_adaptive_thinking_with_effort_does_not_emit_custom_config(
+    gemini_provider: GeminiProvider,
+) -> None:
+    request = make_messages_request(
+        "models/gemini-3.5-flash",
+        thinking={"type": "adaptive"},
+        output_config={"effort": "high"},
+    )
+
+    body = gemini_provider._build_request_body(
+        request,
+        reasoning=reasoning_for(request),
+    )
+    wire = _simulate_openai_sdk_wire_json(body)
+
+    assert wire["reasoning_effort"] == "high"
+    assert _google_thinking_config(wire) is None
 
 
 def test_build_request_body_preserves_caller_extra_body(gemini_provider):
@@ -137,15 +212,19 @@ def test_build_request_body_preserves_caller_extra_body(gemini_provider):
 
 def test_build_request_body_merges_caller_nested_google(gemini_provider):
     req = make_request(
+        thinking=None,
         extra_body={
             "metadata": {"user": "u1"},
             "extra_body": {
                 "google": {
-                    "thinking_config": {"budget_tokens": 128},
+                    "thinking_config": {
+                        "thinking_level": "low",
+                        "include_thoughts": False,
+                    },
                     "cached_content": "cachedContents/example",
                 }
             },
-        }
+        },
     )
 
     body = gemini_provider._build_request_body(req, reasoning=reasoning_for(req))
@@ -161,8 +240,42 @@ def test_build_request_body_merges_caller_nested_google(gemini_provider):
     assert google.get("cached_content") == "cachedContents/example"
     thinking_config = google.get("thinking_config")
     assert isinstance(thinking_config, dict)
-    assert thinking_config.get("budget_tokens") == 128
-    assert thinking_config.get("include_thoughts") is True
+    assert thinking_config == {
+        "thinking_level": "low",
+        "include_thoughts": False,
+    }
+
+
+def test_gemini_rejects_caller_thinking_config_with_fcc_reasoning_control(
+    gemini_provider: GeminiProvider,
+) -> None:
+    request = make_request(
+        thinking=None,
+        extra_body={
+            "extra_body": {"google": {"thinking_config": {"thinking_level": "low"}}}
+        },
+    )
+
+    with pytest.raises(InvalidRequestError, match="thinking_config"):
+        gemini_provider._build_request_body(
+            request,
+            reasoning=ReasoningPolicy.on(effort=ReasoningEffort.HIGH),
+        )
+
+
+def test_gemini_rejects_malformed_google_extension_container(
+    gemini_provider: GeminiProvider,
+) -> None:
+    request = make_request(
+        thinking=None,
+        extra_body={"extra_body": {"google": {"thinking_config": "low"}}},
+    )
+
+    with pytest.raises(InvalidRequestError, match="thinking_config must be an object"):
+        gemini_provider._build_request_body(
+            request,
+            reasoning=ReasoningPolicy.provider_default(),
+        )
 
 
 def test_build_request_body_preserves_tool_call_extra_content(gemini_provider):
@@ -291,7 +404,7 @@ def test_build_request_body_adds_current_turn_fallback_signature(
 
     tool_calls = body["messages"][1]["tool_calls"]
     assert tool_calls[0]["extra_content"] == {
-        "google": {"thought_signature": GEMINI_SKIP_THOUGHT_SIGNATURE_VALIDATOR}
+        "google": {"thought_signature": GOOGLE_SKIP_THOUGHT_SIGNATURE_VALIDATOR}
     }
     assert "extra_content" not in tool_calls[1]
 

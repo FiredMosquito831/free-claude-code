@@ -10,8 +10,8 @@ from dataclasses import dataclass
 NVIDIA_NIM_DEFAULT_BASE = "https://integrate.api.nvidia.com/v1"
 # Moonshot Kimi OpenAI-compatible Chat Completions API.
 KIMI_DEFAULT_BASE = "https://api.moonshot.ai/v1"
-# Kimi For Coding subscription API (OpenAI-compatible Chat Completions).
-KIMI_CODING_DEFAULT_BASE = "https://api.kimi.com/coding/v1"
+# Kimi Code subscription OpenAI-compatible Chat Completions API.
+KIMI_CODE_DEFAULT_BASE = "https://api.kimi.com/coding/v1"
 # ChatGPT OAuth (Codex) backend root. The provider posts to
 # /codex/responses using an OAuth access token.
 CHATGPT_OAUTH_DEFAULT_BASE = "https://chatgpt.com/backend-api"
@@ -33,6 +33,9 @@ OLLAMA_CLOUD_DEFAULT_BASE = "https://ollama.com/v1"
 OPENCODE_DEFAULT_BASE = "https://opencode.ai/zen/v1"
 OPENCODE_GO_DEFAULT_BASE = "https://opencode.ai/zen/go/v1"
 VERCEL_AI_GATEWAY_DEFAULT_BASE = "https://ai-gateway.vercel.sh/v1"
+# Amazon Bedrock Mantle OpenAI-compatible endpoint. The base URL remains
+# configurable because API keys and model availability are region-scoped.
+BEDROCK_DEFAULT_BASE = "https://bedrock-mantle.us-east-1.api.aws/v1"
 HUGGINGFACE_DEFAULT_BASE = "https://router.huggingface.co/v1"
 COHERE_DEFAULT_BASE = "https://api.cohere.ai/compatibility/v1"
 GITHUB_MODELS_DEFAULT_BASE = "https://models.github.ai/inference"
@@ -40,6 +43,8 @@ GITHUB_MODELS_DEFAULT_BASE = "https://models.github.ai/inference"
 ZAI_DEFAULT_BASE = "https://api.z.ai/api/coding/paas/v4"
 # Google AI Studio Gemini API OpenAI-compat layer (not Vertex AI).
 GEMINI_DEFAULT_BASE = "https://generativelanguage.googleapis.com/v1beta/openai/"
+# Vertex AI API root. The provider owns project/location endpoint composition.
+VERTEX_AI_API_ROOT = "https://aiplatform.googleapis.com"
 GROQ_DEFAULT_BASE = "https://api.groq.com/openai/v1"
 CEREBRAS_DEFAULT_BASE = "https://api.cerebras.ai/v1"
 SAMBANOVA_DEFAULT_BASE = "https://api.sambanova.ai/v1"
@@ -59,6 +64,17 @@ class ProviderDescriptor:
     default_base_url: str | None = None
     base_url_attr: str | None = None
     proxy_attr: str | None = None
+    required_settings_attrs: tuple[str, ...] = ()
+
+    def configuration_attrs(self) -> tuple[str, ...]:
+        """Return settings fields whose non-empty values configure this provider."""
+        if self.required_settings_attrs:
+            return self.required_settings_attrs
+        if self.credential_attr is not None:
+            return (self.credential_attr,)
+        if self.base_url_attr is not None:
+            return (self.base_url_attr,)
+        return ()
 
 
 PROVIDER_CATALOG: dict[str, ProviderDescriptor] = {
@@ -88,6 +104,17 @@ PROVIDER_CATALOG: dict[str, ProviderDescriptor] = {
         credential_attr="gemini_api_key",
         default_base_url=GEMINI_DEFAULT_BASE,
         proxy_attr="gemini_proxy",
+    ),
+    "vertex": ProviderDescriptor(
+        provider_id="vertex",
+        display_name="Google Vertex AI",
+        credential_url=(
+            "https://cloud.google.com/docs/authentication/"
+            "set-up-adc-local-dev-environment"
+        ),
+        default_base_url=VERTEX_AI_API_ROOT,
+        proxy_attr="vertex_proxy",
+        required_settings_attrs=("vertex_project_id",),
     ),
     "deepseek": ProviderDescriptor(
         provider_id="deepseek",
@@ -142,6 +169,16 @@ PROVIDER_CATALOG: dict[str, ProviderDescriptor] = {
         default_base_url=VERCEL_AI_GATEWAY_DEFAULT_BASE,
         proxy_attr="vercel_ai_gateway_proxy",
     ),
+    "bedrock": ProviderDescriptor(
+        provider_id="bedrock",
+        display_name="Amazon Bedrock",
+        credential_env="AWS_BEARER_TOKEN_BEDROCK",
+        credential_url="https://console.aws.amazon.com/bedrock/",
+        credential_attr="bedrock_api_key",
+        default_base_url=BEDROCK_DEFAULT_BASE,
+        base_url_attr="bedrock_base_url",
+        proxy_attr="bedrock_proxy",
+    ),
     "huggingface": ProviderDescriptor(
         provider_id="huggingface",
         display_name="Hugging Face",
@@ -187,14 +224,14 @@ PROVIDER_CATALOG: dict[str, ProviderDescriptor] = {
         default_base_url=KIMI_DEFAULT_BASE,
         proxy_attr="kimi_proxy",
     ),
-    "kimi_coding": ProviderDescriptor(
-        provider_id="kimi_coding",
-        display_name="Kimi Coding",
-        credential_env="KIMI_CODING_API_KEY",
-        credential_url="https://kimi.com/coding",
-        credential_attr="kimi_coding_api_key",
-        default_base_url=KIMI_CODING_DEFAULT_BASE,
-        proxy_attr="kimi_coding_proxy",
+    "kimi_code": ProviderDescriptor(
+        provider_id="kimi_code",
+        display_name="Kimi Code",
+        credential_env="KIMI_CODE_API_KEY",
+        credential_url="https://www.kimi.com/code/console",
+        credential_attr="kimi_code_api_key",
+        default_base_url=KIMI_CODE_DEFAULT_BASE,
+        proxy_attr="kimi_code_proxy",
     ),
     "chatgpt_oauth": ProviderDescriptor(
         provider_id="chatgpt_oauth",
@@ -258,6 +295,10 @@ PROVIDER_CATALOG: dict[str, ProviderDescriptor] = {
         credential_attr="cloudflare_api_token",
         default_base_url=CLOUDFLARE_AI_REST_ROOT,
         proxy_attr="cloudflare_proxy",
+        required_settings_attrs=(
+            "cloudflare_api_token",
+            "cloudflare_account_id",
+        ),
     ),
     "zai": ProviderDescriptor(
         provider_id="zai",

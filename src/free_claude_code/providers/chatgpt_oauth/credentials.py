@@ -7,8 +7,6 @@ persisting refreshed credentials), and concurrent refreshes are deduplicated
 with a process-wide lock.
 """
 
-from __future__ import annotations
-
 import base64
 import contextlib
 import dataclasses
@@ -94,7 +92,7 @@ def _load_codex_cli_source() -> _TokenSource:
 def _load_hermes_source() -> _TokenSource:
     path = _home() / ".hermes" / "auth.json"
     payload = _load_json(path)
-    provider = ((payload.get("providers") or {}).get("openai-codex") or {})
+    provider = (payload.get("providers") or {}).get("openai-codex") or {}
     tokens = provider.get("tokens") or {}
     return _TokenSource(
         name="hermes-openai-codex",
@@ -182,7 +180,9 @@ def _access_token_seconds_remaining(access_token: str) -> int | None:
     return int(exp - time.time())
 
 
-def _refresh_access_token(refresh_token: str) -> tuple[str, str | None, int | None]:
+def _refresh_access_token(
+    refresh_token: str,
+) -> tuple[str, str, int | None, str | None]:
     """Refresh an OAuth access token and return the new credential set."""
     response = httpx.post(
         CODEX_OAUTH_TOKEN_URL,
@@ -203,7 +203,9 @@ def _refresh_access_token(refresh_token: str) -> tuple[str, str | None, int | No
     new_refresh = payload.get("refresh_token") or refresh_token
     expires_in = payload.get("expires_in")
     if not isinstance(new_access, str) or not new_access:
-        raise ChatGPTOAuthError("OAuth refresh response did not contain an access token.")
+        raise ChatGPTOAuthError(
+            "OAuth refresh response did not contain an access token."
+        )
     expires_at = None
     if isinstance(expires_in, (int, float)):
         expires_at = int(time.time() + expires_in)
@@ -278,7 +280,7 @@ def _ensure_fresh_source(source: _TokenSource) -> _TokenSource:
     with _REFRESH_LOCK:
         # Another thread may have refreshed while we waited on the lock.
         current = _reload_source(source)
-        if current.has_access_token:
+        if current.has_access_token and current.access_token is not None:
             remaining = _access_token_seconds_remaining(current.access_token)
             if remaining is not None and remaining > 300:
                 return current
@@ -335,7 +337,9 @@ def load_chatgpt_oauth_credentials(
       2. Token files (~/.hermes/auth.json, ~/.codex/auth.json).
     """
     if access_token and access_token.strip():
-        resolved_account_id = (account_id or "").strip() or _extract_account_id(access_token)
+        resolved_account_id = (account_id or "").strip() or _extract_account_id(
+            access_token
+        )
         return ChatGPTOAuthCredentials(
             access_token=access_token.strip(),
             account_id=resolved_account_id,
@@ -376,3 +380,55 @@ def import_codex_cli_tokens() -> ChatGPTOAuthCredentials:
         refresh_token=source.refresh_token,
         source_name=source.name,
     )
+
+
+class ChatGPTOAuthLoginError(Exception):
+    """Raised when the ChatGPT OAuth login flow fails."""
+
+
+class ChatGPTOAuthLoginTimeoutError(ChatGPTOAuthLoginError):
+    """Raised when the user does not complete login before the deadline."""
+
+
+def _extract_expires_at(tokens: dict[str, Any]) -> int | None:
+    """Return a Unix timestamp for token expiry, if known."""
+    # Prefer the explicit expires_in from the token response.
+    expires_in = tokens.get("expires_in")
+    if isinstance(expires_in, (int, float)):
+        return int(time.time() + expires_in)
+    # Fall back to the exp claim in the access token.
+    access_token = tokens.get("access_token")
+    if isinstance(access_token, str):
+        claims = _decode_jwt_claims(access_token)
+        exp = claims.get("exp")
+        if isinstance(exp, (int, float)):
+            return int(exp)
+    return None
+
+
+def _write_codex_auth_file(
+    tokens: dict[str, Any],
+    *,
+    auth_path: Path | None = None,
+) -> Path:
+    """Persist tokens to the Codex CLI auth file used by the provider loader."""
+    path = auth_path or (_codex_home() / "auth.json")
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    access_token = tokens.get("access_token")
+    refresh_token = tokens.get("refresh_token")
+    id_token = tokens.get("id_token")
+    expires_at = _extract_expires_at(tokens)
+
+    payload_tokens: dict[str, Any] = {
+        "access_token": access_token,
+        "refresh_token": refresh_token,
+    }
+    if isinstance(id_token, str) and id_token:
+        payload_tokens["id_token"] = id_token
+    if expires_at is not None:
+        payload_tokens["expires_at"] = expires_at
+
+    payload = {"tokens": payload_tokens}
+    path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    return path

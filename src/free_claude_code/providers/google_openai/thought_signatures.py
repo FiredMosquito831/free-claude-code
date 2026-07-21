@@ -1,55 +1,23 @@
-"""Gemini request-body quirks for the shared OpenAI-chat provider."""
+"""Google thought-signature replay for OpenAI-compatible tool calls."""
 
 from copy import deepcopy
-from typing import Any, cast
+from typing import Any
 
-from free_claude_code.core.anthropic.models import MessagesRequest
-from free_claude_code.core.reasoning import ReasoningPolicy
-
-GEMINI_SKIP_THOUGHT_SIGNATURE_VALIDATOR = "skip_thought_signature_validator"
+GOOGLE_SKIP_THOUGHT_SIGNATURE_VALIDATOR = "skip_thought_signature_validator"
 
 
-def apply_gemini_request_quirks(
+def apply_google_thought_signatures(
     body: dict[str, Any],
-    request_data: MessagesRequest,
-    reasoning: ReasoningPolicy,
     *,
     tool_call_extra_content_by_id: dict[str, dict[str, Any]] | None = None,
 ) -> None:
-    """Apply Google-specific request extensions after common OpenAI conversion."""
-    extra_body: dict[str, Any] = {}
-    request_extra = request_data.extra_body
-    if isinstance(request_extra, dict):
-        extra_body.update(deepcopy(request_extra))
+    """Restore Google tool-call signatures required for conversation replay."""
 
-    if reasoning.requests_reasoning:
-        _apply_thinking_config(extra_body)
-
-    if extra_body:
-        body["extra_body"] = extra_body
-
-    _apply_gemini_tool_call_signatures(
-        body,
-        tool_call_extra_content_by_id=tool_call_extra_content_by_id,
-    )
-
-
-def _ensure_dict(container: dict[str, Any], key: str) -> dict[str, Any]:
-    value = container.get(key)
-    if isinstance(value, dict):
-        return cast(dict[str, Any], value)
-    nested: dict[str, Any] = {}
-    container[key] = nested
-    return nested
-
-
-def _apply_thinking_config(extra_body: dict[str, Any]) -> None:
-    # OpenAI's SDK merges its ``extra_body`` argument into the request JSON.
-    # Google expects its extension fields under a literal JSON ``extra_body`` key.
-    literal_extra_body = _ensure_dict(extra_body, "extra_body")
-    google_section = _ensure_dict(literal_extra_body, "google")
-    thinking_cfg = _ensure_dict(google_section, "thinking_config")
-    thinking_cfg.setdefault("include_thoughts", True)
+    messages = body.get("messages")
+    if not isinstance(messages, list):
+        return
+    _apply_cached_tool_call_signatures(messages, tool_call_extra_content_by_id or {})
+    _apply_missing_current_turn_signatures(messages)
 
 
 def _thought_signature_from_extra_content(extra_content: Any) -> str | None:
@@ -145,17 +113,5 @@ def _apply_missing_current_turn_signatures(messages: list[Any]) -> None:
         if _tool_call_thought_signature(first_tool_call):
             continue
         _set_tool_call_thought_signature(
-            first_tool_call, GEMINI_SKIP_THOUGHT_SIGNATURE_VALIDATOR
+            first_tool_call, GOOGLE_SKIP_THOUGHT_SIGNATURE_VALIDATOR
         )
-
-
-def _apply_gemini_tool_call_signatures(
-    body: dict[str, Any],
-    *,
-    tool_call_extra_content_by_id: dict[str, dict[str, Any]] | None,
-) -> None:
-    messages = body.get("messages")
-    if not isinstance(messages, list):
-        return
-    _apply_cached_tool_call_signatures(messages, tool_call_extra_content_by_id or {})
-    _apply_missing_current_turn_signatures(messages)

@@ -55,7 +55,7 @@ Default targets do not send real bot messages or load voice backends:
 | --- | --- | --- |
 | `api` | messages, count_tokens full payload, errors, `/stop`, optimizations | configured provider only for streaming messages |
 | `auth` | canonical bearer auth, conflicting legacy headers, invalid/missing auth | none; test sets an isolated token |
-| `cli` | `fcc-init`, server entrypoint, Claude CLI adaptive thinking, session cleanup | Claude CLI binary and provider only for real CLI |
+| `cli` | server entrypoint, Claude CLI adaptive thinking, session cleanup | Claude CLI binary and provider only for real CLI |
 | `clients` | VS Code and JetBrains protocol payloads | configured provider |
 | `config` | env precedence, removed-env migration, proxy/timeouts | none |
 | `extensibility` | provider runtime and platform factory construction | none |
@@ -130,8 +130,10 @@ uv run pytest smoke/product -n 0 -s --tb=short
   `FCC_SMOKE_MODEL_MISTRAL`, `FCC_SMOKE_MODEL_MISTRAL_REASONING`,
   `FCC_SMOKE_MODEL_MISTRAL_CODESTRAL`,
   `FCC_SMOKE_MODEL_DEEPSEEK`, `FCC_SMOKE_MODEL_KIMI`,
+  `FCC_SMOKE_MODEL_KIMI_CODE`,
   `FCC_SMOKE_MODEL_WAFER`, `FCC_SMOKE_MODEL_MINIMAX`,
   `FCC_SMOKE_MODEL_OPENCODE`, `FCC_SMOKE_MODEL_OPENCODE_GO`,
+  `FCC_SMOKE_MODEL_BEDROCK`,
   `FCC_SMOKE_MODEL_ZAI`, `FCC_SMOKE_MODEL_FIREWORKS`, `FCC_SMOKE_MODEL_CLOUDFLARE`,
   `FCC_SMOKE_MODEL_GEMINI`, `FCC_SMOKE_MODEL_GROQ`, `FCC_SMOKE_MODEL_CEREBRAS`,
   `FCC_SMOKE_MODEL_OLLAMA_CLOUD`, `FCC_SMOKE_MODEL_LMSTUDIO`,
@@ -159,7 +161,7 @@ uv run pytest smoke/product -n 0 -s --tb=short
 
 Run smoke the same way you run tests (`uv run pytest smoke` from the repo). Child
 processes use the **same Python interpreter** as the test runner, not nested
-`uv run`, so Windows does not try to replace `free-claude-code.exe` while it is
+`uv run`, so Windows does not try to replace `fcc-server.exe` while it is
 locked.
 
 ## Failure Classes

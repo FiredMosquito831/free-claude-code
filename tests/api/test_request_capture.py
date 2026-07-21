@@ -2,7 +2,8 @@
 
 import asyncio
 import json
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator, AsyncIterator
+from typing import Any
 
 import pytest
 
@@ -12,6 +13,7 @@ from free_claude_code.api.request_capture import (
     extract_input_text,
     extract_request_params,
 )
+from free_claude_code.api.response_streams import ManagedStreamingResponse
 from free_claude_code.config.settings import Settings
 from free_claude_code.core.anthropic.models import Message, MessagesRequest
 from free_claude_code.core.failures import ExecutionFailure, FailureKind
@@ -30,13 +32,11 @@ def store(tmp_path):
 
 
 def _events(*frames: tuple[str, dict]) -> list[str]:
-    return [
-        f"event: {event}\ndata: {json.dumps(data)}\n\n" for event, data in frames
-    ]
+    return [f"event: {event}\ndata: {json.dumps(data)}\n\n" for event, data in frames]
 
 
-def _make_capture(store: RequestLogStore, **overrides) -> RequestCapture:
-    defaults = {
+def _make_capture(store: RequestLogStore | None, **overrides) -> RequestCapture:
+    defaults: dict[str, Any] = {
         "store": store,
         "request_id": "req_test",
         "endpoint": "/v1/messages",
@@ -64,9 +64,24 @@ def _final_row(store: RequestLogStore) -> dict:
 async def test_streaming_success_records_usage_and_text(store: RequestLogStore) -> None:
     async def body() -> AsyncIterator[str]:
         for chunk in _events(
-            ("message_start", {"type": "message_start", "message": {"usage": {"input_tokens": 42}}}),
-            ("content_block_delta", {"type": "content_block_delta", "delta": {"type": "text_delta", "text": "Hello "}}),
-            ("content_block_delta", {"type": "content_block_delta", "delta": {"type": "text_delta", "text": "world"}}),
+            (
+                "message_start",
+                {"type": "message_start", "message": {"usage": {"input_tokens": 42}}},
+            ),
+            (
+                "content_block_delta",
+                {
+                    "type": "content_block_delta",
+                    "delta": {"type": "text_delta", "text": "Hello "},
+                },
+            ),
+            (
+                "content_block_delta",
+                {
+                    "type": "content_block_delta",
+                    "delta": {"type": "text_delta", "text": "world"},
+                },
+            ),
             ("message_delta", {"type": "message_delta", "usage": {"output_tokens": 7}}),
             ("message_stop", {"type": "message_stop"}),
         ):
@@ -91,7 +106,12 @@ async def test_streaming_success_records_usage_and_text(store: RequestLogStore) 
 @pytest.mark.asyncio
 async def test_mid_stream_failure_records_error(store: RequestLogStore) -> None:
     async def body() -> AsyncIterator[str]:
-        yield _events(("message_start", {"type": "message_start", "message": {"usage": {"input_tokens": 3}}}))[0]
+        yield _events(
+            (
+                "message_start",
+                {"type": "message_start", "message": {"usage": {"input_tokens": 3}}},
+            )
+        )[0]
         raise ExecutionFailure(
             kind=FailureKind.RATE_LIMIT,
             status_code=429,
@@ -115,7 +135,13 @@ async def test_mid_stream_failure_records_error(store: RequestLogStore) -> None:
 async def test_sse_error_event_records_error(store: RequestLogStore) -> None:
     async def body() -> AsyncIterator[str]:
         yield _events(
-            ("error", {"type": "error", "error": {"type": "overloaded_error", "message": "busy"}})
+            (
+                "error",
+                {
+                    "type": "error",
+                    "error": {"type": "overloaded_error", "message": "busy"},
+                },
+            )
         )[0]
 
     capture = _make_capture(store)
@@ -133,7 +159,9 @@ async def test_client_disconnect_records_cancelled(store: RequestLogStore) -> No
 
     async def body() -> AsyncIterator[str]:
         try:
-            yield _events(("message_start", {"type": "message_start", "message": {}}))[0]
+            yield _events(("message_start", {"type": "message_start", "message": {}}))[
+                0
+            ]
             await asyncio.sleep(60)
             yield "never"
         finally:
@@ -142,6 +170,7 @@ async def test_client_disconnect_records_cancelled(store: RequestLogStore) -> No
     capture = _make_capture(store)
     stream = capture.wrap(body())
     await anext(stream)
+    assert isinstance(stream, AsyncGenerator)
     await stream.aclose()
     store.close()
 
@@ -212,7 +241,13 @@ async def test_finish_is_single_shot(store: RequestLogStore) -> None:
 async def test_privacy_mode_stores_hashes_not_bodies(store: RequestLogStore) -> None:
     async def body() -> AsyncIterator[str]:
         yield _events(
-            ("content_block_delta", {"type": "content_block_delta", "delta": {"type": "text_delta", "text": "secret out"}})
+            (
+                "content_block_delta",
+                {
+                    "type": "content_block_delta",
+                    "delta": {"type": "text_delta", "text": "secret out"},
+                },
+            )
         )[0]
 
     capture = _make_capture(store, input_text="secret in", capture_bodies=False)
@@ -342,8 +377,17 @@ async def test_messages_handler_end_to_end_capture() -> None:
     from free_claude_code.api.handlers import MessagesHandler
 
     events = _events(
-        ("message_start", {"type": "message_start", "message": {"usage": {"input_tokens": 11}}}),
-        ("content_block_delta", {"type": "content_block_delta", "delta": {"type": "text_delta", "text": "hi"}}),
+        (
+            "message_start",
+            {"type": "message_start", "message": {"usage": {"input_tokens": 11}}},
+        ),
+        (
+            "content_block_delta",
+            {
+                "type": "content_block_delta",
+                "delta": {"type": "text_delta", "text": "hi"},
+            },
+        ),
         ("message_delta", {"type": "message_delta", "usage": {"output_tokens": 2}}),
         ("message_stop", {"type": "message_stop"}),
     )
@@ -358,6 +402,7 @@ async def test_messages_handler_end_to_end_capture() -> None:
         messages=[Message(role="user", content="hello")],
     )
     response = await handler.create(request, request_id="req_e2e")
+    assert isinstance(response, ManagedStreamingResponse)
     async for _ in response.body_iterator:
         pass
     await response.aclose()

@@ -16,8 +16,6 @@ Policies:
     fails, then move to the next.
 """
 
-from __future__ import annotations
-
 import asyncio
 import time
 from dataclasses import dataclass
@@ -27,11 +25,13 @@ import httpx
 import openai
 
 from free_claude_code.providers.failure_policy import (
+    is_retryable_provider_error,
     retryable_transient_status,
-    retryable_upstream_transport_error,
 )
 
-ROTATION_POLICIES = frozenset({"single", "round_robin", "least_used", "failover", "on_error"})
+ROTATION_POLICIES = frozenset(
+    {"single", "round_robin", "least_used", "failover", "on_error"}
+)
 
 COOLDOWN_TIERS_SECONDS = (10.0, 30.0, 60.0, 120.0)
 AUTH_LOCKOUT_TIERS_SECONDS = (300.0, 3600.0, 86400.0)
@@ -53,11 +53,14 @@ def error_justifies_rotation(error: BaseException) -> bool:
     """
     if isinstance(error, openai.AuthenticationError):
         return True
-    if isinstance(error, httpx.HTTPStatusError) and error.response.status_code in (401, 403):
+    if isinstance(error, httpx.HTTPStatusError) and error.response.status_code in (
+        401,
+        403,
+    ):
         return True
     if retryable_transient_status(error) is not None:
         return True
-    return retryable_upstream_transport_error(error)
+    return is_retryable_provider_error(error)
 
 
 def _status_from_error(error: BaseException) -> int | None:
@@ -212,7 +215,10 @@ class CredentialRotationState:
 
             if status in (401, 403):
                 health.consecutive_failures += 1
-                tier_index = min(health.consecutive_failures, len(AUTH_LOCKOUT_TIERS_SECONDS)) - 1
+                tier_index = (
+                    min(health.consecutive_failures, len(AUTH_LOCKOUT_TIERS_SECONDS))
+                    - 1
+                )
                 health.state = STATE_LOCKED_OUT
                 health.lockout_until = now + AUTH_LOCKOUT_TIERS_SECONDS[tier_index]
             elif status == 429:

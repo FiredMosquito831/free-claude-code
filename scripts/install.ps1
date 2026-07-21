@@ -15,11 +15,21 @@ $ProgressPreference = "SilentlyContinue"
 
 $RepoArchiveUrl = "https://github.com/Alishahryar1/free-claude-code/archive/refs/heads/main.zip"
 $PythonVersion = "3.14.0"
-$MinUvVersion = "0.11.0"
+$MinUvVersion = "0.11.16"
 $ClaudeInstallUrl = "https://claude.ai/install.ps1"
 $CodexInstallUrl = "https://chatgpt.com/codex/install.ps1"
 $PiInstallUrl = "https://pi.dev/install.ps1"
 $UvInstallUrl = "https://astral.sh/uv/install.ps1"
+$FccCommands = @(
+    # Include retired entry points so updates reject older FCC processes before replacement.
+    "fcc-desktop",
+    "fcc-server",
+    "fcc-claude",
+    "fcc-codex",
+    "fcc-pi",
+    "fcc-init",
+    "free-claude-code"
+)
 
 function Show-Usage {
     @"
@@ -183,6 +193,20 @@ function Add-PiBinDirectories {
     }
     if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($prefix)) {
         Add-PathEntry $prefix
+    }
+}
+
+function Assert-NoFccProcessesRunning {
+    $running = @()
+    foreach ($commandName in $FccCommands) {
+        $processes = @(Get-Process -Name $commandName -ErrorAction SilentlyContinue)
+        foreach ($process in $processes) {
+            $running += "$commandName (PID $($process.Id))"
+        }
+    }
+
+    if ($running.Count -gt 0) {
+        throw "Free Claude Code is still running ($($running -join ', ')). Stop those processes, then rerun the installer."
     }
 }
 
@@ -355,17 +379,23 @@ function Get-UvVersion {
     return $version
 }
 
-function Test-UvVersionAtLeast {
+function Test-SupportedUvVersion {
     param(
         [string] $Version,
         [string] $Minimum
     )
 
-    $normalizedVersion = (Convert-UvVersionOutput $Version) -replace '[-+].*$', ''
-    $normalizedMinimum = (Convert-UvVersionOutput $Minimum) -replace '[-+].*$', ''
-    if ([string]::IsNullOrWhiteSpace($normalizedVersion) -or [string]::IsNullOrWhiteSpace($normalizedMinimum)) {
+    $parsedVersion = Convert-UvVersionOutput $Version
+    $parsedMinimum = Convert-UvVersionOutput $Minimum
+    if ([string]::IsNullOrWhiteSpace($parsedVersion) -or [string]::IsNullOrWhiteSpace($parsedMinimum)) {
         throw "Unable to compare uv versions."
     }
+    if ($parsedVersion.Contains("-")) {
+        return $false
+    }
+
+    $normalizedVersion = $parsedVersion -replace '\+.*$', ''
+    $normalizedMinimum = $parsedMinimum -replace '\+.*$', ''
 
     return ([version] $normalizedVersion) -ge ([version] $normalizedMinimum)
 }
@@ -382,8 +412,8 @@ function Confirm-Uv {
     }
 
     $version = Get-UvVersion $uvCommand.Source
-    if (-not (Test-UvVersionAtLeast -Version $version -Minimum $MinUvVersion)) {
-        throw "uv $MinUvVersion or newer is required; found uv $version after installation."
+    if (-not (Test-SupportedUvVersion -Version $version -Minimum $MinUvVersion)) {
+        throw "Stable uv $MinUvVersion or newer is required; found uv $version after installation."
     }
     Write-Host "Verified uv $version."
 }
@@ -405,11 +435,11 @@ function Ensure-Uv {
     $uvCommand = Get-ApplicationCommand "uv"
     if ($uvCommand) {
         $version = Get-UvVersion $uvCommand.Source
-        if (Test-UvVersionAtLeast -Version $version -Minimum $MinUvVersion) {
+        if (Test-SupportedUvVersion -Version $version -Minimum $MinUvVersion) {
             Write-Host "uv $version already satisfies >=$MinUvVersion; leaving it unchanged."
             return
         }
-        Write-Host "uv $version is below $MinUvVersion; installing the current standalone uv."
+        Write-Host "uv $version does not satisfy stable >=$MinUvVersion; installing the current standalone uv."
     }
     else {
         Write-Host "uv is not installed; installing the current standalone uv."
@@ -442,6 +472,7 @@ function Get-PackageSpec {
 }
 
 function Install-FreeClaudeCode {
+    Assert-NoFccProcessesRunning
     $packageSpec = Get-PackageSpec
     $arguments = @(
         "tool",
@@ -472,8 +503,9 @@ function Configure-AndConfirmFreeClaudeCode {
     if ($DryRun) {
         Write-Host "+ uv tool update-shell"
         Write-Host "+ uv tool dir --bin"
-        Write-Host "+ verify fcc-server, fcc-claude, fcc-codex, and fcc-pi in the uv tool bin directory"
+        Write-Host "+ verify fcc-desktop, fcc-server, fcc-claude, fcc-codex, and fcc-pi in the uv tool bin directory"
         Write-Host "+ fcc-server --version"
+        Install-FccDesktopShortcuts -DesktopCommand "<uv-tool-bin>\fcc-desktop.exe"
         return
     }
 
@@ -493,7 +525,7 @@ function Configure-AndConfirmFreeClaudeCode {
         [IO.Path]::AltDirectorySeparatorChar
     )
     $installedCommands = @{}
-    foreach ($commandName in @("fcc-server", "fcc-claude", "fcc-codex", "fcc-pi")) {
+    foreach ($commandName in @("fcc-desktop", "fcc-server", "fcc-claude", "fcc-codex", "fcc-pi")) {
         $command = Get-ApplicationCommand $commandName
         if (-not $command) {
             throw "Free Claude Code installation did not create '$commandName'."
@@ -509,6 +541,68 @@ function Configure-AndConfirmFreeClaudeCode {
     }
 
     Invoke-NativeCommand -FilePath $installedCommands["fcc-server"] -Arguments @("--version")
+    Install-FccDesktopShortcuts -DesktopCommand $installedCommands["fcc-desktop"]
+}
+
+function Test-EquivalentPath {
+    param(
+        [string] $Left,
+        [string] $Right
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Left) -or [string]::IsNullOrWhiteSpace($Right)) {
+        return $false
+    }
+    try {
+        return [string]::Equals(
+            [IO.Path]::GetFullPath($Left),
+            [IO.Path]::GetFullPath($Right),
+            [StringComparison]::OrdinalIgnoreCase
+        )
+    }
+    catch {
+        return $false
+    }
+}
+
+function Install-FccDesktopShortcuts {
+    param([string] $DesktopCommand)
+
+    $shortcutPaths = @(
+        (Join-Path $env:USERPROFILE "Desktop\Free Claude Code.lnk"),
+        (Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs\Free Claude Code.lnk")
+    )
+    foreach ($shortcutPath in $shortcutPaths) {
+        Write-Host "+ create shortcut $(Format-Argument $shortcutPath) -> $(Format-Argument $DesktopCommand)"
+    }
+    if ($DryRun) {
+        return
+    }
+
+    $shell = New-Object -ComObject WScript.Shell
+    foreach ($shortcutPath in $shortcutPaths) {
+        if (Test-Path -LiteralPath $shortcutPath) {
+            try {
+                $existingShortcut = $shell.CreateShortcut($shortcutPath)
+                $isFccShortcut = Test-EquivalentPath -Left $existingShortcut.TargetPath -Right $DesktopCommand
+            }
+            catch {
+                $isFccShortcut = $false
+            }
+            if (-not $isFccShortcut) {
+                Write-Host "A shortcut not managed by Free Claude Code already exists at $shortcutPath; leaving it unchanged."
+                continue
+            }
+        }
+        $parent = Split-Path -Parent $shortcutPath
+        New-Item -ItemType Directory -Force -Path $parent | Out-Null
+        $shortcut = $shell.CreateShortcut($shortcutPath)
+        $shortcut.TargetPath = $DesktopCommand
+        $shortcut.WorkingDirectory = $env:USERPROFILE
+        $shortcut.IconLocation = "$DesktopCommand,0"
+        $shortcut.Description = "Run Free Claude Code in the background"
+        $shortcut.Save()
+    }
 }
 
 if ($Help) {
@@ -526,6 +620,9 @@ if ((-not [string]::IsNullOrWhiteSpace($TorchBackend)) -and (-not ($VoiceLocal -
 }
 
 Add-KnownBinDirectories
+
+Write-Step "Checking for running Free Claude Code processes"
+Assert-NoFccProcessesRunning
 
 Write-Step "Ensuring Claude Code is installed"
 Ensure-ClaudeCode
@@ -550,7 +647,8 @@ if ($DryRun) {
     Write-Host "Dry run complete. No changes were made."
 }
 else {
-    Write-Host "Free Claude Code is installed and verified. Start the proxy with: fcc-server"
+    Write-Host "Free Claude Code is installed and verified. Open the Free Claude Code desktop shortcut to run it in the background."
+    Write-Host "For terminal use, start the proxy with: fcc-server"
     Write-Host "Run Claude Code with: fcc-claude"
     Write-Host "Run Codex with: fcc-codex"
     Write-Host "Run Pi with: fcc-pi"

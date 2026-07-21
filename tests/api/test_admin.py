@@ -31,6 +31,9 @@ def _clear_process_config(monkeypatch) -> None:
         "NVIDIA_NIM_API_KEY",
         "HUGGINGFACE_API_KEY",
         "OPENROUTER_API_KEY",
+        "AWS_BEARER_TOKEN_BEDROCK",
+        "BEDROCK_BASE_URL",
+        "BEDROCK_PROXY",
         "OLLAMA_API_KEY",
         "ANTHROPIC_AUTH_TOKEN",
         "TELEGRAM_PROXY_URL",
@@ -149,6 +152,15 @@ def test_admin_api_fetches_bypass_browser_cache():
     assert 'cache: "no-store"' in script
 
 
+def test_admin_provider_cards_support_non_key_configuration():
+    script = Path("src/free_claude_code/api/admin_static/admin.js").read_text(
+        encoding="utf-8"
+    )
+
+    assert '"missing_config"' in script
+    assert ": provider.configuration;" in script
+
+
 def test_admin_page_no_longer_renders_generated_env_panel(monkeypatch, tmp_path):
     _set_home(monkeypatch, tmp_path)
     app = create_test_app()
@@ -259,6 +271,8 @@ def test_admin_config_masks_secrets_and_exposes_manifest(monkeypatch, tmp_path):
     assert "REASONING_FABLE" in keys
     assert "ANTHROPIC_AUTH_TOKEN" in keys
     assert "OPENROUTER_API_KEY" in keys
+    assert "AWS_BEARER_TOKEN_BEDROCK" in keys
+    assert "BEDROCK_BASE_URL" in keys
     assert "FIREWORKS_API_KEY" in keys
     assert "CLOUDFLARE_API_TOKEN" in keys
     assert "CLOUDFLARE_ACCOUNT_ID" in keys
@@ -742,6 +756,33 @@ def test_admin_apply_writes_cerebras_key_and_masks_preview(monkeypatch, tmp_path
     text = env_file.read_text(encoding="utf-8")
     assert "MODEL=cerebras/llama3.1-8b" in text
     assert "CEREBRAS_API_KEY=cb-secret" in text
+
+
+def test_admin_apply_writes_bedrock_region_config_and_masks_key(monkeypatch, tmp_path):
+    _set_home(monkeypatch, tmp_path)
+    _clear_process_config(monkeypatch)
+    app = create_test_app()
+
+    response = _local_client(app).post(
+        "/admin/api/config/apply",
+        json={
+            "values": {
+                "MODEL": "bedrock/openai.gpt-oss-120b",
+                "AWS_BEARER_TOKEN_BEDROCK": "bedrock-secret",
+                "BEDROCK_BASE_URL": ("https://bedrock-mantle.us-west-2.api.aws/v1"),
+            }
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["applied"] is True
+    assert "AWS_BEARER_TOKEN_BEDROCK=********" in body["env_preview"]
+    env_file = tmp_path / ".fcc" / ".env"
+    text = env_file.read_text(encoding="utf-8")
+    assert "MODEL=bedrock/openai.gpt-oss-120b" in text
+    assert "AWS_BEARER_TOKEN_BEDROCK=bedrock-secret" in text
+    assert "BEDROCK_BASE_URL=https://bedrock-mantle.us-west-2.api.aws/v1" in text
 
 
 def test_admin_apply_writes_cloudflare_fields_and_masks_preview(monkeypatch, tmp_path):
@@ -1290,9 +1331,7 @@ def test_admin_chatgpt_oauth_import_codex_returns_tokens(monkeypatch, tmp_path):
     assert data["account_id"] == "codex_acct"
 
 
-def test_admin_chatgpt_oauth_import_codex_reports_missing_tokens(
-    monkeypatch, tmp_path
-):
+def test_admin_chatgpt_oauth_import_codex_reports_missing_tokens(monkeypatch, tmp_path):
     _set_home(monkeypatch, tmp_path)
     _clear_process_config(monkeypatch)
     app = create_test_app()

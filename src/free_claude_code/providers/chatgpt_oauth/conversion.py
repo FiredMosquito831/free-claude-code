@@ -1,7 +1,5 @@
 """Convert Anthropic Messages API requests to ChatGPT Responses API format."""
 
-from __future__ import annotations
-
 import json
 from typing import Any
 
@@ -17,7 +15,9 @@ CHATGPT_DEFAULT_REASONING_EFFORT = "medium"
 CHATGPT_DEFAULT_REASONING_SUMMARY = "auto"
 
 
-def _strip_openai_system_message(messages: list[dict[str, Any]]) -> tuple[str | None, list[dict[str, Any]]]:
+def _strip_openai_system_message(
+    messages: list[dict[str, Any]],
+) -> tuple[str | None, list[dict[str, Any]]]:
     """Extract the leading system message as Responses API instructions."""
     if messages and messages[0].get("role") == "system":
         instructions = messages[0].get("content")
@@ -116,7 +116,9 @@ def _openai_message_to_chatgpt_items(message: dict[str, Any]) -> list[dict[str, 
     ]
 
 
-def _openai_messages_to_chatgpt_input(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _openai_messages_to_chatgpt_input(
+    messages: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
     """Convert OpenAI-chat message list to Responses API input list."""
     items: list[dict[str, Any]] = []
     for message in messages:
@@ -135,13 +137,18 @@ def _convert_tools(tools: list[Any] | None) -> list[dict[str, Any]] | None:
         return None
     result: list[dict[str, Any]] = []
     for tool in tools:
-        schema = getattr(tool, "input_schema", None) or {"type": "object", "properties": {}}
-        result.append({
-            "type": "function",
-            "name": getattr(tool, "name", "unknown"),
-            "description": getattr(tool, "description", None) or "",
-            "parameters": schema,
-        })
+        schema = getattr(tool, "input_schema", None) or {
+            "type": "object",
+            "properties": {},
+        }
+        result.append(
+            {
+                "type": "function",
+                "name": getattr(tool, "name", "unknown"),
+                "description": getattr(tool, "description", None) or "",
+                "parameters": schema,
+            }
+        )
     return result
 
 
@@ -164,11 +171,7 @@ def _convert_tool_choice(tool_choice: Any) -> Any:
 def _supports_reasoning(model: str) -> bool:
     """Return True for models known to expose reasoning through the backend."""
     name = model.lower()
-    return (
-        name.startswith("gpt-5")
-        or name.startswith("codex")
-        or name.startswith("o")
-    )
+    return name.startswith("gpt-5") or name.startswith("codex") or name.startswith("o")
 
 
 def _extract_system_instructions(request: MessagesRequest) -> str | None:

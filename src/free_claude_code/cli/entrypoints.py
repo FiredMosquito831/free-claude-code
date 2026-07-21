@@ -17,17 +17,6 @@ def serve(argv: Sequence[str] | None = None) -> None:
     run_server()
 
 
-def init(argv: Sequence[str] | None = None) -> None:
-    """Scaffold config at ~/.fcc/.env (registered as ``fcc-init``)."""
-    if _print_version_if_requested(argv):
-        return
-
-    # Config initialization shares command infrastructure with the server.
-    from free_claude_code.cli.commands import init as initialize_config
-
-    initialize_config()
-
-
 def chatgpt_oauth_login(argv: Sequence[str] | None = None) -> None:
     """Log in to ChatGPT/Codex via OAuth device flow (``fcc-chatgpt-oauth-login``)."""
     if _print_version_if_requested(argv):

@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, patch
 import httpx
 import pytest
 
+from free_claude_code.application.model_metadata import ProviderModelInfo
 from free_claude_code.config.provider_catalog import GITHUB_MODELS_DEFAULT_BASE
 from free_claude_code.core.anthropic.models import Message, MessagesRequest
 from free_claude_code.core.anthropic.stream_contracts import parse_sse_text
@@ -15,7 +16,7 @@ from free_claude_code.providers.base import ProviderConfig
 from free_claude_code.providers.github_models import GitHubModelsProvider
 from free_claude_code.providers.github_models.client import GITHUB_MODELS_CATALOG_URL
 from free_claude_code.providers.model_listing import ModelListResponseError
-from tests.providers.support import REASONING_ON, passthrough_rate_limiter
+from tests.providers.support import REASONING_ON, immediate_admission
 
 
 @pytest.fixture
@@ -32,9 +33,7 @@ def github_models_config() -> ProviderConfig:
 def github_models_provider(
     github_models_config: ProviderConfig,
 ) -> GitHubModelsProvider:
-    return GitHubModelsProvider(
-        github_models_config, rate_limiter=passthrough_rate_limiter()
-    )
+    return GitHubModelsProvider(github_models_config, admission=immediate_admission())
 
 
 def _request(model: str = "openai/gpt-4.1") -> MessagesRequest:
@@ -76,7 +75,7 @@ def test_init_uses_default_base_url_api_key_and_github_headers(
         "free_claude_code.providers.openai_chat.provider.AsyncOpenAI"
     ) as mock_openai:
         provider = GitHubModelsProvider(
-            github_models_config, rate_limiter=passthrough_rate_limiter()
+            github_models_config, admission=immediate_admission()
         )
 
     assert provider._api_key == "test-github-models-token"
@@ -97,7 +96,7 @@ def test_init_strips_trailing_slash(github_models_config: ProviderConfig) -> Non
     )
 
     with patch("free_claude_code.providers.openai_chat.provider.AsyncOpenAI"):
-        provider = GitHubModelsProvider(config, rate_limiter=passthrough_rate_limiter())
+        provider = GitHubModelsProvider(config, admission=immediate_admission())
 
     assert provider._base_url == GITHUB_MODELS_DEFAULT_BASE
 
@@ -149,8 +148,8 @@ async def test_lists_stream_tool_capable_models_only(
             ]
         ),
     ) as mock_get:
-        assert await github_models_provider.list_model_ids() == frozenset(
-            {"openai/gpt-4.1"}
+        assert await github_models_provider.list_model_infos() == frozenset(
+            {ProviderModelInfo("openai/gpt-4.1")}
         )
 
     mock_get.assert_awaited_once_with(
@@ -176,7 +175,7 @@ async def test_model_list_rejects_malformed_payload(
         ),
         pytest.raises(ModelListResponseError, match="top-level array"),
     ):
-        await github_models_provider.list_model_ids()
+        await github_models_provider.list_model_infos()
 
 
 @pytest.mark.asyncio
@@ -194,7 +193,7 @@ async def test_model_list_returns_empty_set_when_no_models_support_streaming_too
             ]
         ),
     ):
-        assert await github_models_provider.list_model_ids() == frozenset()
+        assert await github_models_provider.list_model_infos() == frozenset()
 
 
 @pytest.mark.asyncio

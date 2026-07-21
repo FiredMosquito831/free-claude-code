@@ -1,11 +1,10 @@
 """Tests for multi-credential parsing, rotation state, and the rotating wrapper."""
 
-from __future__ import annotations
-
 from collections.abc import AsyncIterator
 
 import pytest
 
+from free_claude_code.application.model_metadata import ProviderModelInfo
 from free_claude_code.config.admin.manifest import FIELD_BY_KEY
 from free_claude_code.config.provider_catalog import PROVIDER_CATALOG
 from free_claude_code.config.settings import Settings
@@ -33,7 +32,7 @@ class _InvalidRequestError(Exception):
 
 
 def _settings(**overrides) -> Settings:
-    return Settings(_env_file=None, **overrides)
+    return Settings(**overrides)
 
 
 def _request() -> MessagesRequest:
@@ -225,8 +224,8 @@ class _FakeProvider(BaseProvider):
     async def cleanup(self) -> None:
         return None
 
-    async def list_model_ids(self) -> frozenset[str]:
-        return frozenset({"test-model"})
+    async def list_model_infos(self) -> frozenset[ProviderModelInfo]:
+        return frozenset({ProviderModelInfo("test-model")})
 
     def stream_response(
         self,

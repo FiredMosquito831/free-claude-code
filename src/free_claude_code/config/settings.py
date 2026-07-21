@@ -15,7 +15,7 @@ from .env_files import (
     settings_env_files,
 )
 from .nim import NimSettings
-from .provider_catalog import SUPPORTED_PROVIDER_IDS
+from .provider_catalog import BEDROCK_DEFAULT_BASE, SUPPORTED_PROVIDER_IDS
 from .reasoning import ReasoningPreference
 
 
@@ -37,8 +37,8 @@ class Settings(BaseSettings):
     # ==================== Kimi Config ====================
     kimi_api_key: str = Field(default="", validation_alias="KIMI_API_KEY")
 
-    # ==================== Kimi For Coding Config ====================
-    kimi_coding_api_key: str = Field(default="", validation_alias="KIMI_CODING_API_KEY")
+    # ==================== Kimi Code Subscription ====================
+    kimi_code_api_key: str = Field(default="", validation_alias="KIMI_CODE_API_KEY")
 
     # ==================== ChatGPT OAuth (experimental) Config ====================
     chatgpt_oauth_access_token: str = Field(
@@ -64,6 +64,15 @@ class Settings(BaseSettings):
     # ==================== Vercel AI Gateway ====================
     vercel_ai_gateway_api_key: str = Field(
         default="", validation_alias="AI_GATEWAY_API_KEY"
+    )
+
+    # ==================== Amazon Bedrock Mantle ====================
+    bedrock_api_key: str = Field(
+        default="", validation_alias="AWS_BEARER_TOKEN_BEDROCK"
+    )
+    bedrock_base_url: str = Field(
+        default=BEDROCK_DEFAULT_BASE,
+        validation_alias="BEDROCK_BASE_URL",
     )
 
     # ==================== Hugging Face Inference Providers ====================
@@ -94,6 +103,10 @@ class Settings(BaseSettings):
 
     # ==================== Google Gemini (Google AI Studio) ====================
     gemini_api_key: str = Field(default="", validation_alias="GEMINI_API_KEY")
+
+    # ==================== Google Vertex AI ====================
+    vertex_project_id: str = Field(default="", validation_alias="VERTEX_PROJECT_ID")
+    vertex_location: str = Field(default="global", validation_alias="VERTEX_LOCATION")
 
     # ==================== Groq (OpenAI-compatible) ====================
     groq_api_key: str = Field(default="", validation_alias="GROQ_API_KEY")
@@ -157,10 +170,8 @@ class Settings(BaseSettings):
     lmstudio_proxy: str = Field(default="", validation_alias="LMSTUDIO_PROXY")
     llamacpp_proxy: str = Field(default="", validation_alias="LLAMACPP_PROXY")
     kimi_proxy: str = Field(default="", validation_alias="KIMI_PROXY")
-    kimi_coding_proxy: str = Field(default="", validation_alias="KIMI_CODING_PROXY")
-    chatgpt_oauth_proxy: str = Field(
-        default="", validation_alias="CHATGPT_OAUTH_PROXY"
-    )
+    kimi_code_proxy: str = Field(default="", validation_alias="KIMI_CODE_PROXY")
+    chatgpt_oauth_proxy: str = Field(default="", validation_alias="CHATGPT_OAUTH_PROXY")
     wafer_proxy: str = Field(default="", validation_alias="WAFER_PROXY")
     minimax_proxy: str = Field(default="", validation_alias="MINIMAX_PROXY")
     opencode_proxy: str = Field(default="", validation_alias="OPENCODE_PROXY")
@@ -168,6 +179,7 @@ class Settings(BaseSettings):
     vercel_ai_gateway_proxy: str = Field(
         default="", validation_alias="VERCEL_AI_GATEWAY_PROXY"
     )
+    bedrock_proxy: str = Field(default="", validation_alias="BEDROCK_PROXY")
     huggingface_proxy: str = Field(default="", validation_alias="HUGGINGFACE_PROXY")
     cohere_proxy: str = Field(default="", validation_alias="COHERE_PROXY")
     github_models_proxy: str = Field(default="", validation_alias="GITHUB_MODELS_PROXY")
@@ -176,6 +188,7 @@ class Settings(BaseSettings):
     fireworks_proxy: str = Field(default="", validation_alias="FIREWORKS_PROXY")
     cloudflare_proxy: str = Field(default="", validation_alias="CLOUDFLARE_PROXY")
     gemini_proxy: str = Field(default="", validation_alias="GEMINI_PROXY")
+    vertex_proxy: str = Field(default="", validation_alias="VERTEX_PROXY")
     groq_proxy: str = Field(default="", validation_alias="GROQ_PROXY")
     cerebras_proxy: str = Field(default="", validation_alias="CEREBRAS_PROXY")
     ollama_cloud_proxy: str = Field(default="", validation_alias="OLLAMA_CLOUD_PROXY")
@@ -456,7 +469,7 @@ class Settings(BaseSettings):
             access_token = tokens.get("access_token")
             if isinstance(access_token, str) and access_token.strip():
                 self.chatgpt_oauth_access_token = access_token
-        except (FileNotFoundError, json.JSONDecodeError, OSError):
+        except FileNotFoundError, json.JSONDecodeError, OSError:
             pass
         return self
 

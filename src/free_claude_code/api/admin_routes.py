@@ -1,6 +1,7 @@
 """Local admin UI routes and APIs."""
 
 import asyncio
+import contextlib
 import ipaddress
 from pathlib import Path
 from typing import Any
@@ -229,16 +230,21 @@ async def list_credential_keys(
         None,
     )
     if provider_id is not None:
+        lease = None
         try:
-            async with services.requests.acquire() as lease:
-                if lease.is_provider_cached(provider_id):
-                    provider = lease.resolve_provider(provider_id)
-                    if isinstance(provider, RotatingProvider):
-                        snapshots = provider.key_health()
-                        for i in range(min(len(keys), len(snapshots))):
-                            health[i] = snapshots[i]
+            lease = await services.requests.acquire()
+            if lease.is_provider_cached(provider_id):
+                provider = lease.resolve_provider(provider_id)
+                if isinstance(provider, RotatingProvider):
+                    snapshots = provider.key_health()
+                    for i in range(min(len(keys), len(snapshots))):
+                        health[i] = snapshots[i]
         except Exception:
             pass  # Health is informational only; never fail the listing.
+        finally:
+            if lease is not None:
+                with contextlib.suppress(Exception):
+                    await lease.release()
 
     return {
         "env_key": env_key,
@@ -266,9 +272,7 @@ async def add_credential_key(
     if not new_key:
         raise HTTPException(status_code=400, detail="Key is empty")
     if "," in new_key:
-        raise HTTPException(
-            status_code=400, detail="Paste a single key without commas"
-        )
+        raise HTTPException(status_code=400, detail="Paste a single key without commas")
 
     keys = list(parse_credential_keys(str(entry["value"])))
     if new_key in keys:
@@ -549,7 +553,13 @@ async def list_request_log(
     require_loopback_admin(request)
     store = _request_log_store_or_none(settings)
     if store is None:
-        return {"enabled": False, "rows": [], "total": 0, "limit": limit, "offset": offset}
+        return {
+            "enabled": False,
+            "rows": [],
+            "total": 0,
+            "limit": limit,
+            "offset": offset,
+        }
     if status is not None and status not in {"success", "error", "cancelled"}:
         raise HTTPException(status_code=422, detail="Invalid status filter")
     rows, total = store.list_requests(

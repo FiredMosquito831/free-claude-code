@@ -43,6 +43,7 @@ Run your coding agents with free, paid, or local models. Choose and validate pro
 ## What You Get
 
 - Launch Claude Code with `fcc-claude`, Codex with `fcc-codex`, or Pi with `fcc-pi`.
+- Run FCC in the background from a desktop launcher on Windows or macOS.
 - Switch among 25 cloud and local providers from the Admin UI.
 - Use each coding agent's native model picker.
 - Route Fable, Opus, Sonnet, Haiku, and fallback traffic to different models.
@@ -73,6 +74,14 @@ Re-run the same command whenever you want to update. You can review the installe
 
 ### 2. Start The Server
 
+On Windows, open **Free Claude Code** from the desktop or Start menu. On
+macOS, open **Free Claude Code** from the desktop or your Applications folder.
+FCC runs in the system tray or menu bar without a terminal window. Use its menu
+to open Admin, check server status, restart, or quit; on Windows, left-clicking
+the tray icon opens Admin directly.
+
+For Linux or terminal use, run:
+
 ```bash
 fcc-server
 ```
@@ -80,8 +89,8 @@ fcc-server
 To print the installed Free Claude Code version without starting the server,
 run `fcc-server --version`.
 
-Keep this process running. By default, the Admin UI opens in your browser once
-the server is healthy. Its address is always shown in the startup log:
+Keep this process running. In terminal mode, the Admin UI opens in your browser
+once the server is healthy by default. Its address is shown in the startup log:
 
 ```text
 INFO:     Admin UI: http://127.0.0.1:8082/admin (local-only)
@@ -140,19 +149,22 @@ Enter the listed setting in the Admin UI, open **Model Config**, then search the
 | [NVIDIA NIM](https://build.nvidia.com/settings/api-keys) | `NVIDIA_NIM_API_KEY` | `nvidia_nim/nvidia/nemotron-3-super-120b-a12b` |
 | [OpenRouter](https://openrouter.ai/keys) | `OPENROUTER_API_KEY` | `open_router/openrouter/free` |
 | [Google AI Studio (Gemini)](https://aistudio.google.com/apikey) | `GEMINI_API_KEY` | `gemini/models/gemini-3.1-flash-lite` |
+| [Google Vertex AI](https://cloud.google.com/vertex-ai/generative-ai/docs/start/openai) | `VERTEX_PROJECT_ID` + ADC | `vertex/google/gemini-3.5-flash` |
 | [DeepSeek](https://platform.deepseek.com/api_keys) | `DEEPSEEK_API_KEY` | `deepseek/deepseek-chat` |
 | [Mistral La Plateforme](https://console.mistral.ai/) | `MISTRAL_API_KEY` | `mistral/devstral-small-latest` |
 | [Mistral Codestral](https://console.mistral.ai/) | `CODESTRAL_API_KEY` | `mistral_codestral/codestral-latest` |
 | [OpenCode Zen](https://opencode.ai/auth) | `OPENCODE_API_KEY` | `opencode/gpt-5.3-codex` |
 | [OpenCode Go](https://opencode.ai/auth) | `OPENCODE_API_KEY` | `opencode_go/minimax-m2.7` |
 | [Vercel AI Gateway](https://vercel.com/docs/ai-gateway/models-and-providers) | `AI_GATEWAY_API_KEY` | `vercel/openai/gpt-5.5` |
+| [Amazon Bedrock](https://console.aws.amazon.com/bedrock/) | `AWS_BEARER_TOKEN_BEDROCK` | `bedrock/openai.gpt-oss-120b` |
 | [Hugging Face Inference Providers](https://huggingface.co/settings/tokens) | `HUGGINGFACE_API_KEY` | `huggingface/Qwen/Qwen3-Coder-480B-A35B-Instruct:fastest` |
 | [Cohere](https://dashboard.cohere.com/api-keys) | `COHERE_API_KEY` | `cohere/command-a-plus-05-2026` |
 | [GitHub Models](https://github.com/marketplace?type=models) | `GITHUB_MODELS_TOKEN` | `github_models/openai/gpt-4.1` |
 | [Wafer](https://wafer.ai/) | `WAFER_API_KEY` | `wafer/DeepSeek-V4-Pro` |
-| [Kimi](https://platform.moonshot.ai/console/api-keys) | `KIMI_API_KEY` | `kimi/kimi-k2.5` |
-| [Kimi Coding](https://kimi.com/coding) | `KIMI_CODING_API_KEY` | `kimi_coding/kimi-k2.5` |
+| [Kimi API](https://platform.moonshot.ai/console/api-keys) | `KIMI_API_KEY` | `kimi/kimi-k2.5` |
+| [Kimi Code](https://www.kimi.com/code/console) | `KIMI_CODE_API_KEY` | `kimi_code/k3` |
 | [ChatGPT OAuth](https://github.com/openai/codex) (experimental) | `CHATGPT_OAUTH_ACCESS_TOKEN` + `CHATGPT_OAUTH_BASE_URL` | `chatgpt_oauth/gpt-5` |
+
 | [MiniMax](https://platform.minimax.io/user-center/basic-information/interface-key) | `MINIMAX_API_KEY` | `minimax/MiniMax-M3` |
 | [Cerebras Inference](https://cloud.cerebras.ai/) | `CEREBRAS_API_KEY` | `cerebras/gpt-oss-120b` |
 | [Groq](https://console.groq.com/keys) | `GROQ_API_KEY` | `groq/llama-3.3-70b-versatile` |
@@ -168,7 +180,18 @@ Enter the listed setting in the Admin UI, open **Model Config**, then search the
 Important provider notes:
 
 - Mistral Codestral uses a separate key from Mistral La Plateforme.
+- Kimi Code subscription keys use `kimi_code/`; Kimi API credit keys use
+  `kimi/`. Kimi Code plans are for personal interactive coding-agent use under
+  [Kimi's community guidelines](https://www.kimi.com/code/docs/en/kimi-code/community-guidelines.html).
 - OpenCode Zen and OpenCode Go share `OPENCODE_API_KEY` but use different model prefixes.
+- Amazon Bedrock uses its Mantle OpenAI-compatible endpoint. Set
+  `BEDROCK_BASE_URL` to the endpoint for the same region as the API key and
+  select one of the models returned by FCC's model picker.
+- Vertex AI uses Google Application Default Credentials instead of an API key.
+  Locally, run `gcloud auth application-default login` once; service-account
+  files and attached service accounts also work. Set `VERTEX_PROJECT_ID`, and
+  optionally change `VERTEX_LOCATION` from its `global` default. FCC refreshes
+  expiring access tokens automatically.
 - Cloudflare requires both its API token and account ID.
 - **ChatGPT OAuth is experimental and unsanctioned.** It is not an official OpenAI API product. The provider posts directly to `chatgpt.com/backend-api/codex/responses` using an OAuth access token. You can log in from the admin dashboard (Providers → ChatGPT OAuth Login), run `fcc-chatgpt-oauth-login` (headless device flow), or run `codex login`; leave `CHATGPT_OAUTH_ACCESS_TOKEN` empty so FCC reads `~/.codex/auth.json`. Supported models include `chatgpt_oauth/gpt-5.5`, `chatgpt_oauth/gpt-5.4`, `chatgpt_oauth/gpt-5.4-mini`, and `chatgpt_oauth/gpt-5.3-codex-spark`. The ChatGPT/Codex backend only exposes a limited set of built-in tools, so custom FCC tools may be rejected; use it at your own risk.
 - Ollama Cloud connects directly to `ollama.com`; use the exact model IDs shown
@@ -406,7 +429,10 @@ Re-run the matching command from [Install Or Update](#install).
 
 ### Uninstall
 
-Stop every running FCC command first. The uninstaller removes the FCC uv tool, verifies every FCC command is gone, and then deletes `~/.fcc/`. It leaves uv, Python, Claude Code, Codex, Pi, and shared PATH entries intact.
+Stop every running FCC command first. The uninstaller removes the FCC desktop
+launcher and uv tool, verifies every FCC command is gone, and then deletes
+`~/.fcc/`. It leaves uv, Python, Claude Code, Codex, Pi, and shared PATH entries
+intact.
 
 macOS/Linux:
 

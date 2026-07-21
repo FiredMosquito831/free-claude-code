@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from free_claude_code.application.model_metadata import ProviderModelInfo
 from free_claude_code.config.constants import ANTHROPIC_DEFAULT_MAX_OUTPUT_TOKENS
 from free_claude_code.config.provider_catalog import MINIMAX_DEFAULT_BASE
 from free_claude_code.core.anthropic.models import Message, MessagesRequest, Tool
@@ -17,7 +18,7 @@ from free_claude_code.providers.base import ProviderConfig
 from free_claude_code.providers.openai_chat import OpenAIChatProvider
 from tests.providers.support import (
     REASONING_OFF,
-    passthrough_rate_limiter,
+    immediate_admission,
     profiled_provider,
     reasoning_for,
 )
@@ -49,7 +50,7 @@ def minimax_provider():
             rate_limit=10,
             rate_window=60,
         ),
-        rate_limiter=passthrough_rate_limiter(),
+        admission=immediate_admission(),
     )
 
 
@@ -131,8 +132,8 @@ async def test_lists_models_from_openai_models_endpoint(minimax_provider):
         )
     )
 
-    assert await minimax_provider.list_model_ids() == frozenset(
-        {"MiniMax-M3", "MiniMax-M2.7"}
+    assert await minimax_provider.list_model_infos() == frozenset(
+        {ProviderModelInfo("MiniMax-M3"), ProviderModelInfo("MiniMax-M2.7")}
     )
 
 

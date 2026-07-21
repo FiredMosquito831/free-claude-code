@@ -4,9 +4,6 @@ This mirrors the device-auth path used by OpenCode so Free Claude Code can
 obtain ChatGPT/Codex OAuth tokens without requiring the official ``codex`` CLI.
 """
 
-from __future__ import annotations
-
-import json
 import sys
 import time
 from pathlib import Path
@@ -17,16 +14,15 @@ import httpx
 from .credentials import (
     CODEX_OAUTH_CLIENT_ID,
     CODEX_OAUTH_TOKEN_URL,
-    _codex_home,
-    _decode_jwt_claims,
+    ChatGPTOAuthLoginError,
+    ChatGPTOAuthLoginTimeoutError,
+    _write_codex_auth_file,
     extract_account_id_from_tokens,
 )
 
 CHATGPT_OAUTH_ISSUER = "https://auth.openai.com"
 CHATGPT_OAUTH_DEVICE_URL = f"{CHATGPT_OAUTH_ISSUER}/api/accounts/deviceauth/usercode"
-CHATGPT_OAUTH_DEVICE_TOKEN_URL = (
-    f"{CHATGPT_OAUTH_ISSUER}/api/accounts/deviceauth/token"
-)
+CHATGPT_OAUTH_DEVICE_TOKEN_URL = f"{CHATGPT_OAUTH_ISSUER}/api/accounts/deviceauth/token"
 CHATGPT_OAUTH_DEVICE_VERIFICATION_URL = f"{CHATGPT_OAUTH_ISSUER}/codex/device"
 CHATGPT_OAUTH_DEVICE_CALLBACK = f"{CHATGPT_OAUTH_ISSUER}/deviceauth/callback"
 CHATGPT_OAUTH_POLL_SAFETY_MS = 3000
@@ -34,14 +30,6 @@ CHATGPT_OAUTH_POLL_SAFETY_MS = 3000
 
 class _PendingChatGPTOAuthLogin(Exception):
     """Internal signal that the user has not yet completed device authorization."""
-
-
-class ChatGPTOAuthLoginError(Exception):
-    """Raised when the ChatGPT OAuth login flow fails."""
-
-
-class ChatGPTOAuthLoginTimeoutError(ChatGPTOAuthLoginError):
-    """Raised when the user does not complete login before the deadline."""
 
 
 def _user_agent() -> str:
@@ -182,50 +170,6 @@ def _exchange_authorization_code(
     return data
 
 
-def _extract_expires_at(tokens: dict[str, Any]) -> int | None:
-    """Return a Unix timestamp for token expiry, if known."""
-    # Prefer the explicit expires_in from the token response.
-    expires_in = tokens.get("expires_in")
-    if isinstance(expires_in, (int, float)):
-        return int(time.time() + expires_in)
-    # Fall back to the exp claim in the access token.
-    access_token = tokens.get("access_token")
-    if isinstance(access_token, str):
-        claims = _decode_jwt_claims(access_token)
-        exp = claims.get("exp")
-        if isinstance(exp, (int, float)):
-            return int(exp)
-    return None
-
-
-def _write_codex_auth_file(
-    tokens: dict[str, Any],
-    *,
-    auth_path: Path | None = None,
-) -> Path:
-    """Persist tokens to the Codex CLI auth file used by the provider loader."""
-    path = auth_path or (_codex_home() / "auth.json")
-    path.parent.mkdir(parents=True, exist_ok=True)
-
-    access_token = tokens.get("access_token")
-    refresh_token = tokens.get("refresh_token")
-    id_token = tokens.get("id_token")
-    expires_at = _extract_expires_at(tokens)
-
-    payload_tokens: dict[str, Any] = {
-        "access_token": access_token,
-        "refresh_token": refresh_token,
-    }
-    if isinstance(id_token, str) and id_token:
-        payload_tokens["id_token"] = id_token
-    if expires_at is not None:
-        payload_tokens["expires_at"] = expires_at
-
-    payload = {"tokens": payload_tokens}
-    path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
-    return path
-
-
 def perform_chatgpt_oauth_login(
     *,
     timeout_seconds: float = 600.0,
@@ -265,9 +209,7 @@ def perform_chatgpt_oauth_login(
     authorization_code = device_data.get("authorization_code")
     code_verifier = device_data.get("code_verifier")
     if not isinstance(authorization_code, str) or not authorization_code:
-        raise ChatGPTOAuthLoginError(
-            "Device auth response missing authorization_code"
-        )
+        raise ChatGPTOAuthLoginError("Device auth response missing authorization_code")
     if not isinstance(code_verifier, str) or not code_verifier:
         raise ChatGPTOAuthLoginError("Device auth response missing code_verifier")
 
@@ -322,9 +264,7 @@ def exchange_device_auth_for_tokens(
     authorization_code = device_data.get("authorization_code")
     code_verifier = device_data.get("code_verifier")
     if not isinstance(authorization_code, str) or not authorization_code:
-        raise ChatGPTOAuthLoginError(
-            "Device auth response missing authorization_code"
-        )
+        raise ChatGPTOAuthLoginError("Device auth response missing authorization_code")
     if not isinstance(code_verifier, str) or not code_verifier:
         raise ChatGPTOAuthLoginError("Device auth response missing code_verifier")
 

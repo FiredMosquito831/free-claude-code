@@ -44,6 +44,14 @@ _LOW_TO_MAX = (
     (ReasoningEffort.XHIGH, "max"),
     (ReasoningEffort.MAX, "max"),
 )
+_KIMI_CODE_EFFORTS = (
+    (ReasoningEffort.MINIMAL, "low"),
+    (ReasoningEffort.LOW, "low"),
+    (ReasoningEffort.MEDIUM, "high"),
+    (ReasoningEffort.HIGH, "high"),
+    (ReasoningEffort.XHIGH, "max"),
+    (ReasoningEffort.MAX, "max"),
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -57,6 +65,7 @@ class OpenAIChatProfile:
     reasoning_delta_field: Literal["reasoning_content", "reasoning"] = (
         "reasoning_content"
     )
+    user_agent: str | None = None
 
     @property
     def provider_name(self) -> str:
@@ -149,6 +158,11 @@ OPENAI_CHAT_PROFILES: dict[str, OpenAIChatProfile] = {
         ),
         ReasoningObject(_ALL_EFFORTS),
     ),
+    "bedrock": OpenAIChatProfile(
+        _policy("BEDROCK", ReasoningReplayMode.THINK_TAGS),
+        NO_REASONING,
+        normalize_base_url=True,
+    ),
     "huggingface": OpenAIChatProfile(
         _policy(
             "HUGGINGFACE",
@@ -211,16 +225,22 @@ OPENAI_CHAT_PROFILES: dict[str, OpenAIChatProfile] = {
             disabled={"type": "disabled"},
         ),
     ),
-    "kimi_coding": OpenAIChatProfile(
+    "kimi_code": OpenAIChatProfile(
         _policy(
-            "KIMI_CODING",
+            "KIMI_CODE",
             ReasoningReplayMode.REASONING_CONTENT,
             reject_extra_body_message=(
-                "Kimi For Coding API does not support caller extra_body on requests."
+                "Kimi Code Chat Completions API does not support caller "
+                "extra_body on requests."
             ),
-            default_max_tokens=ANTHROPIC_DEFAULT_MAX_OUTPUT_TOKENS,
+            max_tokens_field="max_completion_tokens",
         ),
-        NO_REASONING,
+        NamedEffortReasoning(
+            _KIMI_CODE_EFFORTS,
+            disabled_value="none",
+            enabled_value="max",
+        ),
+        user_agent="free-claude-code",
     ),
     "minimax": OpenAIChatProfile(
         _policy(

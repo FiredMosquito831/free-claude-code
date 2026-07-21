@@ -1,7 +1,5 @@
 """Provider wrapper that rotates requests across multiple credentials."""
 
-from __future__ import annotations
-
 from collections.abc import AsyncIterator, Sequence
 from typing import Any
 
@@ -42,9 +40,6 @@ class RotatingProvider(BaseProvider):
     ) -> None:
         """Validate the request once; all sub-providers share the same policy."""
         self._providers[0].preflight_stream(request, reasoning=reasoning)
-
-    async def list_model_ids(self) -> frozenset[str]:
-        return await self._providers[0].list_model_ids()
 
     async def list_model_infos(self) -> frozenset[ProviderModelInfo]:
         return await self._providers[0].list_model_infos()

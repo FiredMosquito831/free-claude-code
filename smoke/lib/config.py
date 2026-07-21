@@ -11,6 +11,7 @@ from free_claude_code.config.provider_catalog import (
     SUPPORTED_PROVIDER_IDS,
 )
 from free_claude_code.config.settings import Settings, get_settings
+from free_claude_code.providers.runtime.config import has_provider_configuration
 
 DEFAULT_TARGETS = frozenset(
     {
@@ -53,16 +54,19 @@ PROVIDER_SMOKE_DEFAULT_MODELS: dict[str, str] = {
     "lmstudio": "lmstudio/local-model",
     "llamacpp": "llamacpp/local-model",
     "ollama": "ollama/llama3.1",
+    "kimi_code": "kimi_code/k3",
     "wafer": "wafer/DeepSeek-V4-Pro",
     "minimax": "minimax/MiniMax-M3",
     "opencode": "opencode/gpt-5.3-codex",
     "opencode_go": "opencode_go/minimax-m2.7",
     "vercel": "vercel/openai/gpt-5.5",
+    "bedrock": "bedrock/openai.gpt-oss-120b",
     "huggingface": "huggingface/openai/gpt-oss-120b:fastest",
     "cohere": "cohere/command-a-plus-05-2026",
     "github_models": "github_models/openai/gpt-4.1",
     "zai": "zai/glm-5.2",
     "gemini": "gemini/models/gemini-3.1-flash-lite",
+    "vertex": "vertex/google/gemini-3.5-flash",
     "groq": "groq/llama-3.3-70b-versatile",
     "sambanova": "sambanova/Meta-Llama-3.3-70B-Instruct",
     "cerebras": "cerebras/llama3.1-8b",
@@ -250,62 +254,10 @@ class SmokeConfig:
         return bool(os.getenv(f"FCC_SMOKE_MODEL_{provider.upper()}"))
 
     def has_provider_configuration(self, provider: str) -> bool:
-        if provider == "nvidia_nim":
-            return bool(self.settings.nvidia_nim_api_key.strip())
-        if provider == "open_router":
-            return bool(self.settings.open_router_api_key.strip())
-        if provider == "mistral":
-            return bool(self.settings.mistral_api_key.strip())
-        if provider == "mistral_codestral":
-            return bool(self.settings.codestral_api_key.strip())
-        if provider == "deepseek":
-            return bool(self.settings.deepseek_api_key.strip())
-        if provider == "ollama_cloud":
-            return bool(self.settings.ollama_api_key.strip())
-        if provider == "kimi":
-            return bool(self.settings.kimi_api_key.strip())
-        if provider == "kimi_coding":
-            return bool(self.settings.kimi_coding_api_key.strip())
-        if provider == "lmstudio":
-            return bool(self.settings.lm_studio_base_url.strip())
-        if provider == "llamacpp":
-            return bool(self.settings.llamacpp_base_url.strip())
-        if provider == "ollama":
-            return bool(self.settings.ollama_base_url.strip())
-        if provider == "wafer":
-            return bool(self.settings.wafer_api_key.strip())
-        if provider == "minimax":
-            return bool(self.settings.minimax_api_key.strip())
-        if provider == "fireworks":
-            return bool(self.settings.fireworks_api_key.strip())
-        if provider == "opencode":
-            return bool(self.settings.opencode_api_key.strip())
-        if provider == "opencode_go":
-            return bool(self.settings.opencode_api_key.strip())
-        if provider == "vercel":
-            return bool(self.settings.vercel_ai_gateway_api_key.strip())
-        if provider == "huggingface":
-            return bool(self.settings.huggingface_api_key.strip())
-        if provider == "cohere":
-            return bool(self.settings.cohere_api_key.strip())
-        if provider == "github_models":
-            return bool(self.settings.github_models_token.strip())
-        if provider == "zai":
-            return bool(self.settings.zai_api_key.strip())
-        if provider == "gemini":
-            return bool(self.settings.gemini_api_key.strip())
-        if provider == "groq":
-            return bool(self.settings.groq_api_key.strip())
-        if provider == "sambanova":
-            return bool(self.settings.sambanova_api_key.strip())
-        if provider == "cerebras":
-            return bool(self.settings.cerebras_api_key.strip())
-        if provider == "cloudflare":
-            return bool(
-                self.settings.cloudflare_api_token.strip()
-                and self.settings.cloudflare_account_id.strip()
-            )
-        return False
+        descriptor = PROVIDER_CATALOG.get(provider)
+        if descriptor is None:
+            return False
+        return has_provider_configuration(descriptor, self.settings)
 
 
 def _parse_csv(raw: str | None) -> frozenset[str]:

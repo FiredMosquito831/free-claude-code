@@ -1,6 +1,7 @@
 """NVIDIA NIM provider implementation."""
 
 import json
+import re
 from collections.abc import Mapping
 from typing import Any
 
@@ -11,8 +12,10 @@ from free_claude_code.config.nim import NimSettings
 from free_claude_code.core.anthropic.models import MessagesRequest
 from free_claude_code.core.failures import ExecutionFailure
 from free_claude_code.core.reasoning import DEFAULT_REASONING_POLICY, ReasoningPolicy
+from free_claude_code.providers.admission import ProviderAdmissionController
 from free_claude_code.providers.base import ProviderConfig
 from free_claude_code.providers.failure_policy import (
+    context_window_exceeded_provider_failure,
     overloaded_provider_failure,
 )
 from free_claude_code.providers.openai_chat import (
@@ -20,7 +23,6 @@ from free_claude_code.providers.openai_chat import (
     OpenAIChatProfile,
     OpenAIChatProvider,
 )
-from free_claude_code.providers.rate_limit import ProviderRateLimiter
 
 from .request_options import NIM_REQUEST_POLICY, build_nim_request_body
 from .retry import (
@@ -34,6 +36,10 @@ from .tool_schema import (
 )
 
 _DEGRADED_FUNCTION_STATE = "degraded function cannot be invoked"
+_NEGATIVE_MAX_TOKENS_PATTERN = re.compile(
+    r"\bmax_tokens must be at least 1,\s*got\s+-[1-9]\d*\b",
+    re.IGNORECASE,
+)
 _PROFILE = OpenAIChatProfile(
     NIM_REQUEST_POLICY,
     NO_REASONING,
@@ -48,12 +54,12 @@ class NvidiaNimProvider(OpenAIChatProvider):
         config: ProviderConfig,
         *,
         nim_settings: NimSettings,
-        rate_limiter: ProviderRateLimiter,
+        admission: ProviderAdmissionController,
     ):
         super().__init__(
             config,
             profile=_PROFILE,
-            rate_limiter=rate_limiter,
+            admission=admission,
         )
         self._nim_settings = nim_settings
 
@@ -124,27 +130,50 @@ class NvidiaNimProvider(OpenAIChatProvider):
         return None
 
     def _provider_failure_override(self, error: Exception) -> ExecutionFailure | None:
-        """Map NVIDIA Cloud Function deployment failure onto canonical overload."""
+        """Classify NVIDIA-specific 400 responses by their actual semantics."""
         if not isinstance(error, openai.BadRequestError):
             return None
         if getattr(error, "status_code", None) != 400:
             return None
-        body = getattr(error, "body", None)
-        if not isinstance(body, Mapping):
-            return None
-        detail = body.get("detail")
-        if not isinstance(detail, str):
-            return None
-        function_ref, separator, state = detail.lower().partition(": ")
-        function_id = function_ref.removeprefix("function id ").strip(" '\"")
-        if (
-            not separator
-            or not function_ref.startswith("function id ")
-            or not function_id
-            or state.strip() != _DEGRADED_FUNCTION_STATE
-        ):
-            return None
-        return overloaded_provider_failure()
+        bodies = _nim_error_bodies(error)
+        if any(_is_context_window_exhaustion(body) for body in bodies):
+            return context_window_exceeded_provider_failure()
+        if any(_is_degraded_function(body) for body in bodies):
+            return overloaded_provider_failure()
+        return None
+
+
+def _nim_error_bodies(error: Exception) -> tuple[Mapping[str, Any], ...]:
+    body = getattr(error, "body", None)
+    if not isinstance(body, Mapping):
+        return ()
+    nested = body.get("error")
+    if isinstance(nested, Mapping):
+        return body, nested
+    return (body,)
+
+
+def _is_context_window_exhaustion(body: Mapping[str, Any]) -> bool:
+    message = body.get("message")
+    return (
+        body.get("param") == "max_tokens"
+        and isinstance(message, str)
+        and _NEGATIVE_MAX_TOKENS_PATTERN.search(message) is not None
+    )
+
+
+def _is_degraded_function(body: Mapping[str, Any]) -> bool:
+    detail = body.get("detail")
+    if not isinstance(detail, str):
+        return False
+    function_ref, separator, state = detail.lower().partition(": ")
+    function_id = function_ref.removeprefix("function id ").strip(" '\"")
+    return bool(
+        separator
+        and function_ref.startswith("function id ")
+        and function_id
+        and state.strip() == _DEGRADED_FUNCTION_STATE
+    )
 
 
 def _is_reasoning_budget_rejection(error_text: str) -> bool:

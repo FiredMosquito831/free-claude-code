@@ -147,8 +147,9 @@ FCC optimizes for installed user workflows, not internal compatibility. The
 behavior that must be preserved is that these user-facing surfaces run correctly
 for real prompts against supported providers:
 
-- `fcc-server` and the local Admin UI for configuring supported providers,
-  model routing, auth, server tools, messaging, and diagnostics.
+- `fcc-server`, the Windows/macOS FCC Desktop shell, and the local Admin UI for
+  configuring supported providers, model routing, auth, server tools, messaging,
+  and diagnostics.
 - `fcc-claude`, Claude Code, and the Anthropic-compatible proxy behavior Claude
   Code relies on, including streaming text, native/interleaved thinking, tool
   use/results, model discovery, token counting, retries/recovery, and supported
@@ -164,7 +165,7 @@ for real prompts against supported providers:
   reply-based conversation branches, status updates, transcript rendering,
   managed Claude/Codex task execution where configured, task stop/clear flows,
   persistence, and optional voice-note transcription.
-- Installation, update, init, and uninstall scripts insofar as they make the
+- Installation, update, and uninstall scripts insofar as they make the
   above workflows available on a user's machine.
 
 Internal modules, class designs, helper APIs, route implementations, and tests
@@ -208,28 +209,42 @@ new places to add unrelated behavior:
 
 Console scripts are registered in [pyproject.toml](pyproject.toml):
 
-- `fcc-server` and `free-claude-code` call `free_claude_code.cli.entrypoints:serve`.
-- `fcc-init` calls `free_claude_code.cli.entrypoints:init`.
+- `fcc-server` calls `free_claude_code.cli.entrypoints:serve`.
+- `fcc-desktop` is a GUI script calling
+  `free_claude_code.cli.desktop_entrypoint:launch` on Windows and macOS.
 - `fcc-claude` calls `free_claude_code.cli.launchers.claude:launch`.
 - `fcc-codex` calls `free_claude_code.cli.launchers.codex:launch`.
 - `fcc-pi` calls `free_claude_code.cli.launchers.pi:launch`.
 
 [scripts/install.sh](scripts/install.sh) and [scripts/install.ps1](scripts/install.ps1)
-install or update the uv tool plus optional voice extras. [scripts/uninstall.sh](scripts/uninstall.sh)
-and [scripts/uninstall.ps1](scripts/uninstall.ps1) remove only the FCC uv tool and always
-delete the managed `~/.fcc/` tree from [config/paths.py](src/free_claude_code/config/paths.py); they do not remove
+install or update the uv tool plus optional voice extras. On Windows the
+installer owns the FCC desktop and Start-menu shortcuts; on macOS it owns the
+per-user application bundle and desktop link. [scripts/uninstall.sh](scripts/uninstall.sh)
+and [scripts/uninstall.ps1](scripts/uninstall.ps1) remove those exact desktop
+artifacts, the FCC uv tool, and the managed `~/.fcc/` tree from
+[config/paths.py](src/free_claude_code/config/paths.py); they do not remove
 uv, Claude Code, Codex, Pi, or uv-managed Python runtimes. [scripts/ci.sh](scripts/ci.sh) and
 [scripts/ci.ps1](scripts/ci.ps1) mirror [.github/workflows/tests.yml](.github/workflows/tests.yml)
 for local pre-push verification.
 
 [cli/entrypoints.py](src/free_claude_code/cli/entrypoints.py) starts the FastAPI server with Uvicorn.
-`serve()` migrates legacy env files when needed, loads cached settings, runs a
-supervised server instance, and can restart the server after admin config changes.
+The shared `ServerSupervisor` migrates legacy env files when needed, loads cached
+settings, runs one server instance, and can restart it after Admin config changes.
 An Admin restart constructs the next instance only when the prior
 `ApplicationRuntime` reports that its complete ownership graph closed. An
 incomplete ASGI shutdown therefore exits the supervisor instead of overlapping
 old and replacement graphs. On final shutdown it best-effort kills registered
 child processes.
+
+[cli/desktop.py](src/free_claude_code/cli/desktop.py) owns the platform-neutral
+desktop lifecycle. An operating-system file lock admits one desktop host, the
+tray remains on the process main thread for native event-loop compatibility, and
+one worker runs the same in-process `ServerSupervisor` with console output and
+automatic browser launch disabled. A second desktop launch waits for health,
+opens the existing Admin page, and exits. Tray restart delegates to the canonical
+supervisor; tray quit requests the same graceful ASGI and application-runtime
+shutdown as `fcc-server`. [cli/desktop_tray.py](src/free_claude_code/cli/desktop_tray.py)
+owns only native status-area presentation and callbacks.
 
 [runtime/bootstrap.py](src/free_claude_code/runtime/bootstrap.py) is the single production composition function. The CLI
 supervisor supplies one settings snapshot and its restart callback; bootstrap
@@ -327,7 +342,7 @@ parsing and configured `MODEL*` inventory. API routing and provider validation
 depend on those helpers instead of adding behavior methods to Settings.
 
 [config/admin/](src/free_claude_code/config/admin/) owns the Admin UI config manifest and
-managed env writes. Provider credential, local URL, proxy, and display-name
+managed env writes. Provider credential, configurable base URL, proxy, and display-name
 metadata is generated from [config/provider_catalog.py](src/free_claude_code/config/provider_catalog.py);
 admin-only help text stays beside the admin manifest. The package splits source
 loading, value presentation, validation, persistence, and provider status into
@@ -338,9 +353,11 @@ atomically commits the managed env, and publishes a new provider generation.
 Restart-required changes preserve the existing supervisor restart flow and do
 not publish an in-process generation first.
 
-[.env.example](.env.example) is the single install/init/admin template source.
-It is packaged as a [src/free_claude_code/config/](src/free_claude_code/config/) resource for `fcc-init` and Admin UI
-template defaults; runtime settings do not read it as a live config file.
+[.env.example](.env.example) is the single Admin UI template source. It is
+packaged as a [src/free_claude_code/config/](src/free_claude_code/config/) resource for Admin UI defaults;
+runtime settings do not read it as a live config file. The Admin UI creates and
+atomically replaces `~/.fcc/.env` when configuration is applied; server startup
+only migrates legacy env files when the managed file is absent.
 
 Admin routes call `require_loopback_admin()`, which rejects non-loopback clients
 and non-local origins.
@@ -490,6 +507,18 @@ request-scoped policy passed to execution.
 
 Provider model discovery and optional thinking metadata live in the
 application-level catalog owned by `ProviderRuntimeManager`.
+[providers/runtime/discovery.py](src/free_claude_code/providers/runtime/discovery.py)
+is the sole owner of provider model-list queries and cache population. Startup
+synchronously warms the providers referenced by model routing before clients can
+perform their one-time model fetch, then a background pass fills the remaining
+configured provider catalogs without querying successful warm-ups again.
+Discovery is an adapter operation, not an assumption that every upstream has an
+OpenAI `/models` route. For example, Vertex translates that operation to
+Google's paginated `publishers/google/models` API and converts publisher resource
+names into the exact model IDs accepted by its OpenAI-compatible endpoint.
+Catalog contents are discovery metadata, not execution validation; the provider
+request remains authoritative when an upstream accepts a model absent from its
+list or rejects a listed model.
 `ProviderModelInfo.supports_thinking` alone owns discovered per-model thinking
 support for model-list presentation; it does not select request behavior.
 Provider adapters must never branch on upstream model names or versions to
@@ -508,30 +537,48 @@ passes it as `model_catalog_json`. Codex users open the native picker with
 Provider metadata is neutral and centralized in
 [config/provider_catalog.py](src/free_claude_code/config/provider_catalog.py). Each
 `ProviderDescriptor` declares provider ID, display name, locality, credential env
-var, default base URL, settings attribute names, and proxy support. It does not
-select a concrete adapter.
+var, default base URL, settings attribute names, configuration readiness, and
+proxy support. Readiness may require multiple ordinary settings or a non-secret
+project ID; it is not inferred exclusively from API-key presence. The catalog
+does not select a concrete adapter.
 
 [providers/runtime/](src/free_claude_code/providers/runtime/) owns construction details for one
 closable provider generation: construction policy, resolved provider
-configuration, lazy provider instances, provider-owned rate limiters, and
+configuration, lazy provider instances, provider-owned admission controllers, and
 cleanup. [providers/runtime/factory.py](src/free_claude_code/providers/runtime/factory.py)
 constructs ordinary provider IDs from `OPENAI_CHAT_PROFILES` and keeps a sparse
 factory mapping only for adapters with real state or algorithms. The union of
 those two construction owners must exactly equal the neutral provider catalog.
-`ProviderRuntime` directly guarantees one provider and limiter per provider ID
-within a generation; there is no pass-through cache object, process singleton,
-or second limiter registry. Provider admission combines a strict proactive window with
-one reactive backoff deadline. Positive backoffs can only extend that deadline,
-and admission loops until proactive capacity and the final reactive check are
-simultaneously available. The proactive timestamp is recorded only when that
-check succeeds, so a concurrent 429/5xx cannot be missed, shortened, consume
-unused quota, or release queued requests as an expiry burst. Retired generations
-retain their own synchronization state until request leases drain, while new
-generations and separate server instances never reuse it. Hot replacement
-therefore begins with fresh quota state; an old and new generation enforce
-independent budgets while old request leases drain. Application-level generation
-publication, request leases, model metadata, discovery orchestration, and
-configured-model validation belong to `ProviderRuntimeManager` in the runtime
+`ProviderRuntime` directly guarantees one provider and admission controller per
+provider ID within a generation; there is no pass-through cache object, process
+singleton, or second admission registry.
+
+[providers/admission.py](src/free_claude_code/providers/admission.py) owns the
+complete shared upstream-admission lifecycle for that provider generation. A
+strict sliding window admits each real attempt before a concurrency bulkhead;
+the bulkhead is held only while an upstream operation or stream is active, never
+during retry backoff. The first retryable failure before upstream acceptance
+opens one recovery episode and elects that logical execution as leader. The
+leader alone waits and sends half-open probes. Concurrent failures coalesce into
+the same episode, later callers wait, and already active streams continue. A
+stale in-flight success or failure cannot close or extend the episode, while
+leader cancellation transfers ownership to a waiter.
+
+A successful probe closes the episode and releases waiters through ordinary
+rate and concurrency admission. A non-retryable probe response also closes it
+because the provider has responded; only that request receives the rejection.
+If the leader exhausts its attempt budget, that terminal outcome stays attached
+to every coalesced logical execution, even if a later recovery generation starts.
+New work fails fast during the provider-directed cooldown; once it expires,
+exactly one new caller becomes the next probe. There is no background retry
+worker, copied request queue, or second scheduling system.
+
+Retired generations retain their own synchronization state until request leases
+drain, while new generations and separate server instances never reuse it. Hot
+replacement therefore begins with fresh quota and recovery state; an old and new
+generation enforce independent budgets while old request leases drain.
+Application-level generation publication, request leases, model metadata,
+and discovery orchestration belong to `ProviderRuntimeManager` in the runtime
 package. This separates a single generation's resources from process-lifetime
 state.
 
@@ -551,10 +598,12 @@ compatibility layer.
 - `ProviderConfig`: shared provider settings such as API key, base URL, rate
   limits, timeouts, proxy, and logging flags. It is a frozen internal
   value whose base URL has already been resolved from the catalog.
-- `BaseProvider`: the abstract implementation base for cleanup, model listing,
-  explicit preflight, and `stream_response()`.
+- `BaseProvider`: the abstract implementation base for cleanup, explicit
+  preflight, `stream_response()`, and the sole provider catalog operation,
+  `list_model_infos()`. Providers return application-owned `ProviderModelInfo`
+  values directly; there is no parallel IDs-only catalog contract.
 
-There is one upstream provider family:
+There is one upstream transport family:
 [providers/openai_chat/](src/free_claude_code/providers/openai_chat/) implements the concrete
 `OpenAIChatProvider` used by every OpenAI-compatible `/chat/completions`
 upstream. `OpenAIChatProfile` contains immutable request policy, an explicit
@@ -566,11 +615,31 @@ owns the exactly typed private per-request runner, recovery operations, tool-cal
 assembly, and streamed usage handling. No obsolete generic transport namespace
 or untyped provider backchannel remains.
 
+[providers/google_openai/](src/free_claude_code/providers/google_openai/) owns the
+Google-specific protocol behavior shared by AI Studio and Vertex AI: literal
+Google `extra_body` construction, exclusive reasoning serialization, and
+thought-signature replay. Each concrete profile selects one Google reasoning
+encoder, and that encoder is the sole writer of `reasoning_effort` or
+`extra_body.google.thinking_config` for its request. Caller-provided Google
+thinking configuration is preserved only for provider-default reasoning;
+combining it with FCC reasoning controls fails during deterministic preflight.
+Thought-signature replay is a separate component and never mutates reasoning
+controls. Neither concrete provider imports from the other. AI Studio owns its
+API-key endpoint; [providers/vertex/](src/free_claude_code/providers/vertex/)
+owns project/location endpoint composition, renewable Application Default
+Credentials, and translation of Google's native publisher-model catalog. The
+OpenAI transport receives a callable credential source, so access-token refresh
+does not require rebuilding provider generations or persisting ephemeral tokens.
+
 `OpenAIChatProvider` explicitly implements preflight by constructing the same
 upstream request body it will later stream. `BaseProvider` makes that operation
 abstract, so a new provider cannot silently omit the commit-boundary validation.
 LM Studio composes the OpenAI-chat conversion first and its context-budget probe
 second; conversion failure therefore cannot open a stream or run the probe.
+Provider classifiers and preflights report context exhaustion as the neutral
+`CONTEXT_WINDOW_EXCEEDED` execution failure. The Anthropic serializer alone adds
+Claude's `prompt is too long` compaction trigger; providers never encode a
+client-specific recovery phrase.
 
 Providers call the OpenAI request policy for Anthropic-to-OpenAI conversion,
 reasoning replay selection, `extra_body`, and chat-completion field normalization.
@@ -593,9 +662,16 @@ account-scoped Workers AI OpenAI-compatible Chat Completions endpoint for
 `@cf/...` model IDs, while account ID composition, model search, and
 Cloudflare-specific reasoning deltas stay in the Cloudflare provider client.
 OpenRouter remains specialized for model filtering and reasoning-detail stream
-events. Wafer, Kimi, MiniMax, Fireworks, and Z.ai use ordinary declarative
-profiles for their thinking, token, and `extra_body` policy. Z.ai is treated as
-the GLM Coding Plan provider and uses Z.ai's Coding Plan OpenAI base.
+events. Amazon Bedrock Mantle uses an ordinary profile with a region-specific,
+configurable OpenAI base URL and bearer API key; AWS SigV4 and native
+Converse/Invoke transports are outside that provider contract. Wafer, Kimi API,
+Kimi Code, MiniMax, Fireworks, and Z.ai use ordinary
+declarative profiles for their thinking, token, and `extra_body` policy. Kimi
+Code remains distinct from Kimi API because its subscription key and base URL
+are a separate customer contract; its profile maps provider-neutral reasoning
+to Kimi's named efforts and identifies FCC through the upstream user agent.
+Z.ai is treated as the GLM Coding Plan provider and uses Z.ai's Coding Plan
+OpenAI base.
 Mistral La Plateforme keeps its native `reasoning_effort` and thinking-chunk
 request/stream mapping inside
 [providers/mistral/reasoning.py](src/free_claude_code/providers/mistral/reasoning.py), including its
@@ -632,7 +708,7 @@ profile explicitly chooses native `reasoning_content`, native `reasoning`,
 for the next generation does not silently erase prior assistant state required
 for a valid continuation.
 
-The boundary has four hard rules:
+The boundary has five hard rules:
 
 1. Never inspect an upstream model name or version to select reasoning behavior.
 2. Prefer a provider's named effort vocabulary; use FCC's documented numeric
@@ -643,6 +719,9 @@ The boundary has four hard rules:
 4. Provider-default intent emits no compute-control field. Explicit off requests
    an upstream disable where supported and always suppresses reasoning output at
    the FCC protocol boundary.
+5. Each provider profile has exactly one reasoning encoder. That encoder alone
+   writes the provider's computation and reasoning-output request fields;
+   unrelated request postprocessors never add, repair, or remove those fields.
 
 Shared provider responsibilities include upstream rate limiting, model listing,
 SDK/HTTP failure classification, safe diagnostic construction, HTTP resource
@@ -671,7 +750,7 @@ usage quirks such as DeepSeek prompt-cache counters.
 1. Add provider metadata to [config/provider_catalog.py](src/free_claude_code/config/provider_catalog.py).
 2. Add credentials and related settings to [config/settings.py](src/free_claude_code/config/settings.py)
    and [.env.example](.env.example) when user configurable.
-3. Let Admin UI provider credential, local URL, and proxy fields come from the
+3. Let Admin UI provider credential, configurable base URL, and proxy fields come from the
    catalog. Add admin-only help text or provider-specific fields under
    [config/admin/](src/free_claude_code/config/admin/) only when the generated manifest is
    insufficient.
@@ -744,19 +823,34 @@ construction for those failures.
 Concrete adapters may supply one narrow semantic override for an upstream quirk
 that the shared SDK cannot express correctly. The concrete adapter owns the
 exact upstream marker, while the shared failure policy owns its canonical
-meaning and wording. The limiter uses that meaning for retry qualification and
-its existing provider-wide reactive backoff while retaining the raw exception,
-so exhausted retries still receive the original HTTP status/body through the
-shared redaction and diagnostic path. For NVCF's function-scoped failure this
-deliberately keeps the simple one-limiter-per-provider policy; a degraded NIM
-function can therefore briefly delay other NIM models during backoff. No
-provider-specific marker enters `core/`, another provider, or an API adapter.
+meaning and wording. Admission uses that meaning for retry qualification while
+retaining the raw exception, so exhausted retries still receive the original
+HTTP status/body through the shared redaction and diagnostic path. For NVCF's
+function-scoped failure this deliberately keeps the simple
+one-controller-per-provider policy; a degraded NIM function can therefore
+briefly pause other NIM models during shared recovery. No provider-specific
+marker enters `core/`, another provider, or an API adapter.
+
 [providers/stream_recovery.py](src/free_claude_code/providers/stream_recovery.py)
-owns the 0.75-second/65,536-byte holdback, four transparent early retries after
-the first attempt, and five midstream recovery attempts. Provider opening keeps
-its existing five-attempt exponential-backoff budget. `ExecutionFailure.retryable`
-records provider-policy eligibility; it never tells the client to retry after FCC
-has finalized the failure.
+owns only the 0.75-second/65,536-byte commit holdback and the choice between
+transparent replay, request-local continuation/tool salvage, and final failure.
+`ProviderRetrySession` owns one five-attempt budget for the whole logical
+execution: initial opening, deterministic request-shape corrections, early
+replay, continuation, and tool repair all consume that same budget. There are no
+nested retry counters. Deterministic corrections retry immediately; transient
+failures use exponential backoff with jitter and honor `Retry-After` as a
+minimum. When partial output exists, the last available attempt is reserved for
+continuation or repair instead of replaying the full request again. Completed
+tool calls can be salvaged without an upstream attempt.
+
+For streams, upstream acceptance is the first received chunk. Retryable failure
+before that point participates in provider-wide coordinated recovery. Failure
+after that point remains request-local so one interrupted connection does not
+freeze healthy parallel streams, but any continuation still consumes the same
+execution budget. The OpenAI SDK's internal retries remain disabled so FCC is
+the only retry owner. `ExecutionFailure.retryable` records provider-policy
+eligibility; it never tells the client to retry after FCC has finalized the
+failure.
 
 The OpenAI-chat provider remains an upstream adapter: it converts OpenAI chat
 chunks into ledger operations. After retry, continuation, and tool salvage are
@@ -805,6 +899,11 @@ Post-start Responses failures are assembler-owned: the active
 `ResponsesStreamAssembler` emits `response.failed` so the terminal event keeps
 the same `response.id`, output ledger, and usage state as the earlier
 `response.created`.
+Provider completion reasons remain canonical until that same assembler chooses
+the Responses terminal event. Anthropic `max_tokens` becomes
+`response.incomplete` with `incomplete_details.reason=max_output_tokens` while
+preserving partial output and usage; normal terminal reasons remain
+`response.completed`.
 
 Responses custom tools are also boundary-owned. The adapter accepts native
 Responses `custom` tool declarations, represents them internally as Anthropic
@@ -869,6 +968,14 @@ providers because that conversion would be lossy. Forced `web_search` or
 otherwise the Messages handler rejects them before provider execution.
 
 ## CLI Launchers And Managed Claude
+
+[cli/local_http.py](src/free_claude_code/cli/local_http.py) owns the direct
+agent-to-FCC connection boundary. Launcher health checks and local model-catalog
+requests never inherit environment or operating-system forward proxies. Every
+spawned agent environment preserves the user's outbound proxy configuration but
+adds the configured FCC host and standard loopback names to both `NO_PROXY` and
+`no_proxy`. Provider-specific upstream proxies remain provider-owned and do not
+participate in this local boundary.
 
 [cli/proxy_auth.py](src/free_claude_code/cli/proxy_auth.py) owns the neutral
 proxy-auth token policy shared by client launchers. A blank configured token
@@ -1323,7 +1430,7 @@ when maintainers want branch-level assurance.
 1. Add or expose the setting in [config/settings.py](src/free_claude_code/config/settings.py).
 2. Add the template key to [.env.example](.env.example) if users configure it.
 3. Add a `ConfigFieldSpec` under [config/admin/](src/free_claude_code/config/admin/), or add
-   provider catalog metadata when the setting is provider credential, local URL,
+   provider catalog metadata when the setting is provider credential, configurable base URL,
    proxy, or display-name metadata.
 4. Mark `restart_required` or `session_sensitive` when runtime state cannot be
    updated in place.

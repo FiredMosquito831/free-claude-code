@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from free_claude_code.application.model_metadata import ProviderModelInfo
 from free_claude_code.config.constants import ANTHROPIC_DEFAULT_MAX_OUTPUT_TOKENS
 from free_claude_code.config.provider_catalog import WAFER_DEFAULT_BASE
 from free_claude_code.core.anthropic.models import Message, MessagesRequest, Tool
@@ -13,7 +14,7 @@ from free_claude_code.providers.openai_chat import (
 )
 from tests.providers.support import (
     REASONING_OFF,
-    passthrough_rate_limiter,
+    immediate_admission,
     profiled_provider,
     reasoning_for,
 )
@@ -34,7 +35,7 @@ def wafer_provider(wafer_config):
     return profiled_provider(
         "wafer",
         wafer_config,
-        rate_limiter=passthrough_rate_limiter(),
+        admission=immediate_admission(),
     )
 
 
@@ -124,8 +125,8 @@ async def test_lists_models_from_openai_models_endpoint(wafer_provider):
         )
     )
 
-    assert await wafer_provider.list_model_ids() == frozenset(
-        {"DeepSeek-V4-Pro", "MiniMax-M2.7"}
+    assert await wafer_provider.list_model_infos() == frozenset(
+        {ProviderModelInfo("DeepSeek-V4-Pro"), ProviderModelInfo("MiniMax-M2.7")}
     )
 
     wafer_provider._client.models.list.assert_awaited_once_with()

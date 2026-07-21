@@ -53,6 +53,27 @@ IMPORT_EXCEPTIONS: dict[tuple[str, str], str] = {
     ),
     (
         "free_claude_code.api.admin_routes",
+        "free_claude_code.providers.chatgpt_oauth.browser_login",
+    ): (
+        "Owner: admin dashboard ChatGPT OAuth browser login API. "
+        "Reason: admin routes expose browser-based OAuth login endpoints backed by the provider utility."
+    ),
+    (
+        "free_claude_code.api.admin_routes",
+        "free_claude_code.providers.runtime.config",
+    ): (
+        "Owner: admin dashboard provider key rotation API. "
+        "Reason: admin routes parse comma-separated credentials to report rotation state."
+    ),
+    (
+        "free_claude_code.api.admin_routes",
+        "free_claude_code.providers.runtime.rotating",
+    ): (
+        "Owner: admin dashboard provider key rotation API. "
+        "Reason: admin routes inspect RotatingProvider instances to report key health."
+    ),
+    (
+        "free_claude_code.api.admin_routes",
         "free_claude_code.providers.chatgpt_oauth.credentials",
     ): (
         "Owner: admin dashboard ChatGPT OAuth import API. "
@@ -216,6 +237,60 @@ def test_openai_chat_collaborators_have_explicit_ownership_boundaries() -> None:
     provider_root = _PACKAGE_ROOT / "providers" / "openai_chat"
 
     assert _provider_backchannel_offenders(provider_root) == []
+
+
+def test_google_reasoning_wire_fields_have_one_owner() -> None:
+    owner = _PACKAGE_ROOT / "providers" / "google_openai" / "reasoning.py"
+    roots = [
+        _PACKAGE_ROOT / "providers" / "gemini",
+        _PACKAGE_ROOT / "providers" / "google_openai",
+        _PACKAGE_ROOT / "providers" / "vertex",
+    ]
+    owned_fields = {
+        "include_thoughts",
+        "reasoning_effort",
+        "thinking_budget",
+        "thinking_config",
+    }
+    offenders: list[str] = []
+
+    for root in roots:
+        for path in root.rglob("*.py"):
+            if path == owner:
+                continue
+            tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+            offenders.extend(
+                f"{path.relative_to(_REPO_ROOT).as_posix()}:{node.lineno}: {node.value}"
+                for node in ast.walk(tree)
+                if isinstance(node, ast.Constant) and node.value in owned_fields
+            )
+
+    assert sorted(offenders) == []
+
+
+def test_cli_local_http_transport_has_one_owner() -> None:
+    cli_root = _PACKAGE_ROOT / "cli"
+    owner = cli_root / "local_http.py"
+    owned_urllib_names = {"ProxyHandler", "build_opener", "urlopen"}
+    owned_environment_keys = {"NO_PROXY", "no_proxy"}
+    offenders: list[str] = []
+
+    for path in cli_root.rglob("*.py"):
+        if path == owner:
+            continue
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        relative_path = path.relative_to(_REPO_ROOT).as_posix()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom) and node.module == "urllib.request":
+                offenders.extend(
+                    f"{relative_path}:{node.lineno}: urllib.request.{alias.name}"
+                    for alias in node.names
+                    if alias.name in owned_urllib_names
+                )
+            if isinstance(node, ast.Constant) and node.value in owned_environment_keys:
+                offenders.append(f"{relative_path}:{node.lineno}: {node.value}")
+
+    assert sorted(offenders) == []
 
 
 def test_provider_backchannel_detector_reports_untyped_private_access(
