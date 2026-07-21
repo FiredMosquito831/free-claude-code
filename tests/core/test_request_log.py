@@ -94,6 +94,22 @@ def test_list_filters(store: RequestLogStore) -> None:
     assert total == 1
 
 
+def test_list_text_search(store: RequestLogStore) -> None:
+    store.enqueue(_record("a", input_text="deploy the kubernetes cluster", output_text="done"))
+    store.enqueue(_record("b", input_text="hello", output_text="kubernetes is complex"))
+    store.enqueue(_record("c", input_text="hello", output_text="world"))
+    store.close()
+    rows, total = store.list_requests(q="kubernetes")
+    assert total == 2
+    assert {row["id"] for row in rows} == {"a", "b"}
+    _, total = store.list_requests(q="KUBERNETES")
+    assert total == 2  # SQLite LIKE is case-insensitive for ASCII
+    _, total = store.list_requests(q="missing-text")
+    assert total == 0
+    _, total = store.list_requests(q="hello", provider="nvidia_nim")
+    assert total == 2  # matches b and c, combined with the provider filter
+
+
 def test_list_truncates_bodies_but_get_returns_full(store: RequestLogStore) -> None:
     long_text = "x" * (LIST_BODY_PREVIEW_CHARS + 100)
     store.enqueue(_record("r1", input_text=long_text, output_text=long_text))

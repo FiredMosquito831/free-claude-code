@@ -542,6 +542,7 @@ async def list_request_log(
     endpoint: str | None = None,
     since: float | None = None,
     until: float | None = None,
+    q: str | None = None,
     settings: Settings = Depends(get_settings),
 ):
     """Page through the persisted request log (newest first)."""
@@ -560,6 +561,7 @@ async def list_request_log(
         endpoint=endpoint,
         since=since,
         until=until,
+        q=q,
     )
     return {
         "enabled": True,

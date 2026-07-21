@@ -1169,10 +1169,12 @@ function reqFilters() {
   const provider = byId("reqFilterProvider").value.trim();
   const model = byId("reqFilterModel").value.trim();
   const status = byId("reqFilterStatus").value;
+  const search = byId("reqFilterSearch").value.trim();
   const windowSeconds = byId("reqFilterWindow").value;
   if (provider) params.set("provider", provider);
   if (model) params.set("model", model);
   if (status) params.set("status", status);
+  if (search) params.set("q", search);
   if (windowSeconds) {
     params.set("since", (Date.now() / 1000 - Number(windowSeconds)).toFixed(0));
   }
@@ -1353,6 +1355,11 @@ byId("reqDetailClose").addEventListener("click", () => {
   byId("reqDetailModal").hidden = true;
 });
 byId("reqApplyFilters").addEventListener("click", () => {
+  reqState.offset = 0;
+  loadRequestsView().catch((error) => showMessage(error.message, "error"));
+});
+byId("reqFilterSearch").addEventListener("keydown", (event) => {
+  if (event.key !== "Enter") return;
   reqState.offset = 0;
   loadRequestsView().catch((error) => showMessage(error.message, "error"));
 });

@@ -1077,6 +1077,10 @@ textarea:focus-visible,
   z-index: 100;
 }
 
+.requests-modal[hidden] {
+  display: none;
+}
+
 .requests-modal-card {
   width: min(760px, 92vw);
   max-height: 86vh;

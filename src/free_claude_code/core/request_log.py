@@ -265,6 +265,7 @@ class RequestLogStore:
         endpoint: str | None = None,
         since: float | None = None,
         until: float | None = None,
+        q: str | None = None,
     ) -> tuple[str, list[Any]]:
         clauses: list[str] = []
         args: list[Any] = []
@@ -286,6 +287,10 @@ class RequestLogStore:
         if until is not None:
             clauses.append("ts_epoch <= ?")
             args.append(until)
+        if q:
+            clauses.append("(input_text LIKE ? OR output_text LIKE ?)")
+            pattern = f"%{q}%"
+            args.extend([pattern, pattern])
         where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
         return where, args
 
@@ -300,6 +305,7 @@ class RequestLogStore:
         endpoint: str | None = None,
         since: float | None = None,
         until: float | None = None,
+        q: str | None = None,
         body_preview_chars: int | None = LIST_BODY_PREVIEW_CHARS,
     ) -> tuple[list[dict[str, Any]], int]:
         """Return (rows, total) newest-first, with bodies truncated for list views."""
@@ -310,6 +316,7 @@ class RequestLogStore:
             endpoint=endpoint,
             since=since,
             until=until,
+            q=q,
         )
         limit = max(1, min(limit, 500))
         offset = max(0, offset)
