@@ -1,7 +1,5 @@
 """Tests for multi-credential parsing, rotation state, and the rotating wrapper."""
 
-from __future__ import annotations
-
 from collections.abc import AsyncIterator
 
 import pytest

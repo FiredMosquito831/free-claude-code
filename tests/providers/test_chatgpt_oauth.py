@@ -3,6 +3,7 @@
 import json
 from unittest.mock import AsyncMock
 
+import httpx
 import pytest
 
 from free_claude_code.application.errors import (
@@ -558,33 +559,14 @@ def test_perform_chatgpt_oauth_login_writes_auth_file(tmp_path, monkeypatch):
         },
     }
 
-    class FakeResponse:
-        def __init__(self, payload):
-            self._payload = payload
-            self.status_code = 200
+    def _handler(request: httpx.Request) -> httpx.Response:
+        payload = responses[("POST", str(request.url))]
+        return httpx.Response(200, json=payload["json"])
 
-        def json(self):
-            return self._payload["json"]
-
-    class FakeClient:
-        def __init__(self):
-            self.calls: list[tuple[str, str]] = []
-            self._poll_count = 0
-
-        def post(self, url, **kwargs):
-            key = ("POST", url)
-            self.calls.append(key)
-            if url == oauth_login.CHATGPT_OAUTH_DEVICE_TOKEN_URL:
-                self._poll_count += 1
-            return FakeResponse(responses[key])
-
-        def close(self):
-            pass
-
-    fake_client = FakeClient()
+    fake_client = httpx.Client(transport=httpx.MockTransport(_handler))
     tokens = oauth_login.perform_chatgpt_oauth_login(
         timeout_seconds=2,
-        http_client=fake_client,  # type: ignore
+        http_client=fake_client,
     )
 
     assert tokens["access_token"] == access_token

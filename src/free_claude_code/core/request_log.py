@@ -1,7 +1,5 @@
 """SQLite-backed request log with a non-blocking background writer."""
 
-from __future__ import annotations
-
 import contextlib
 import json
 import queue

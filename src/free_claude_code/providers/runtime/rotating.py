@@ -1,7 +1,5 @@
 """Provider wrapper that rotates requests across multiple credentials."""
 
-from __future__ import annotations
-
 from collections.abc import AsyncIterator, Sequence
 from typing import Any
 

@@ -7,8 +7,6 @@ user never copies a URL or code — the browser opens automatically and the
 callback completes the flow.
 """
 
-from __future__ import annotations
-
 import base64
 import hashlib
 import secrets

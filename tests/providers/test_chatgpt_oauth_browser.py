@@ -1,7 +1,5 @@
 """Tests for the browser-based ChatGPT OAuth login (PKCE + local callback)."""
 
-from __future__ import annotations
-
 import json
 import threading
 import urllib.parse

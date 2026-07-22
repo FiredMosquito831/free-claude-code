@@ -7,8 +7,6 @@ persisting refreshed credentials), and concurrent refreshes are deduplicated
 with a process-wide lock.
 """
 
-from __future__ import annotations
-
 import base64
 import contextlib
 import dataclasses

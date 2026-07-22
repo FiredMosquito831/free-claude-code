@@ -4,8 +4,6 @@ This mirrors the device-auth path used by OpenCode so Free Claude Code can
 obtain ChatGPT/Codex OAuth tokens without requiring the official ``codex`` CLI.
 """
 
-from __future__ import annotations
-
 import json
 import sys
 import time

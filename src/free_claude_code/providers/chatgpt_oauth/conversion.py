@@ -1,7 +1,5 @@
 """Convert Anthropic Messages API requests to ChatGPT Responses API format."""
 
-from __future__ import annotations
-
 import json
 from typing import Any
 

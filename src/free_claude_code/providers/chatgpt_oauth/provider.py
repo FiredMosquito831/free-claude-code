@@ -1,7 +1,5 @@
 """Direct ChatGPT/Codex OAuth provider using the Responses API."""
 
-from __future__ import annotations
-
 import platform
 import re
 import uuid
