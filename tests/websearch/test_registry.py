@@ -1,0 +1,218 @@
+"""Registry build/resolve tests and the analytics recorder seam."""
+
+import pytest
+
+from free_claude_code.config.settings import Settings
+from free_claude_code.websearch import registry
+from free_claude_code.websearch.errors import (
+    WebSearchConfigError,
+    WebSearchUpstreamError,
+)
+from free_claude_code.websearch.registry import (
+    SearchOutcome,
+    active_provider,
+    build_provider,
+    build_providers,
+    resolve_provider_id,
+    search,
+    search_with_logging,
+)
+from tests.websearch.support import StubWebSearchProvider, build_config
+
+
+def _settings(monkeypatch, **env: str) -> Settings:
+    monkeypatch.setitem(Settings.model_config, "env_file", ())
+    for key, value in env.items():
+        monkeypatch.setenv(key, value)
+    return Settings()
+
+
+class TestBuildProviders:
+    def test_only_ddgs_when_nothing_configured(self, monkeypatch) -> None:
+        settings = _settings(monkeypatch)
+        providers = build_providers(settings)
+        assert list(providers) == ["ddgs"]
+
+    def test_keyed_provider_built_with_parsed_keys(self, monkeypatch) -> None:
+        settings = _settings(
+            monkeypatch, EXA_API_KEY="k1-aaaa1111bbbb, k2-cccc2222dddd"
+        )
+        providers = build_providers(settings)
+        exa = providers["exa"]
+        assert exa.config.api_keys == ("k1-aaaa1111bbbb", "k2-cccc2222dddd")
+        assert exa.config.credential_rotation == "failover"
+        assert exa.config.base_url == "https://api.exa.ai"
+
+    def test_single_key_defaults_to_single_policy(self, monkeypatch) -> None:
+        settings = _settings(monkeypatch, EXA_API_KEY="k1-aaaa1111bbbb")
+        assert build_provider(settings, "exa").config.credential_rotation == "single"
+
+    def test_rotation_policy_from_process_env(self, monkeypatch) -> None:
+        settings = _settings(
+            monkeypatch,
+            EXA_API_KEY="k1,k2",
+            EXA_API_KEY_ROTATION="round_robin",
+        )
+        assert build_provider(settings, "exa").config.credential_rotation == (
+            "round_robin"
+        )
+
+    def test_rotation_policy_from_dotenv(self, monkeypatch, tmp_path) -> None:
+        env_file = tmp_path / ".env"
+        env_file.write_text(
+            "TAVILY_API_KEY=tvly-aaaa1111bbbb\nTAVILY_API_KEY_ROTATION=least_used\n",
+            encoding="utf-8",
+        )
+        monkeypatch.delenv("TAVILY_API_KEY_ROTATION", raising=False)
+        monkeypatch.setitem(Settings.model_config, "env_file", (env_file,))
+        provider = build_provider(Settings(), "tavily")
+        assert provider.config.credential_rotation == "least_used"
+
+    def test_invalid_rotation_falls_back_to_default(self, monkeypatch) -> None:
+        settings = _settings(
+            monkeypatch, EXA_API_KEY="k1,k2", EXA_API_KEY_ROTATION="chaos"
+        )
+        assert build_provider(settings, "exa").config.credential_rotation == "failover"
+
+    def test_searxng_requires_base_url(self, monkeypatch) -> None:
+        settings = _settings(monkeypatch)
+        with pytest.raises(WebSearchConfigError, match="SEARXNG_BASE_URL"):
+            build_provider(settings, "searxng")
+
+    def test_searxng_built_with_base_url(self, monkeypatch) -> None:
+        settings = _settings(
+            monkeypatch, SEARXNG_BASE_URL="https://searxng.example.test/"
+        )
+        provider = build_provider(settings, "searxng")
+        assert provider.config.api_keys == ()
+        assert provider.config.base_url == "https://searxng.example.test/"
+
+    def test_unknown_provider_rejected(self, monkeypatch) -> None:
+        settings = _settings(monkeypatch)
+        with pytest.raises(WebSearchConfigError, match="unknown web search provider"):
+            build_provider(settings, "nope")
+
+    def test_websearch_proxy_env_flows_to_config(self, monkeypatch) -> None:
+        settings = _settings(
+            monkeypatch,
+            EXA_API_KEY="k1-aaaa1111bbbb",
+            WEBSEARCH_PROXY="http://proxy.test:8080",
+        )
+        assert build_provider(settings, "exa").config.proxy == (
+            "http://proxy.test:8080"
+        )
+
+
+class TestResolve:
+    def test_auto_picks_first_configured_catalog_provider(self, monkeypatch) -> None:
+        settings = _settings(monkeypatch, EXA_API_KEY="k1", TAVILY_API_KEY="k2")
+        assert resolve_provider_id(settings) == "exa"
+
+    def test_auto_honors_catalog_order(self, monkeypatch) -> None:
+        settings = _settings(monkeypatch, OLLAMA_SEARCH_API_KEY="k1", EXA_API_KEY="k2")
+        assert resolve_provider_id(settings) == "ollama"
+
+    def test_auto_falls_back_to_ddgs(self, monkeypatch) -> None:
+        assert resolve_provider_id(_settings(monkeypatch)) == "ddgs"
+
+    def test_auto_uses_configured_searxng(self, monkeypatch) -> None:
+        settings = _settings(monkeypatch, SEARXNG_BASE_URL="https://sx.test")
+        assert resolve_provider_id(settings) == "searxng"
+
+    def test_off_resolves_to_none(self, monkeypatch) -> None:
+        settings = _settings(monkeypatch, WEB_SEARCH_PROVIDER="off")
+        assert resolve_provider_id(settings) is None
+        assert active_provider(settings) is None
+
+    def test_explicit_provider_builds(self, monkeypatch) -> None:
+        settings = _settings(
+            monkeypatch, WEB_SEARCH_PROVIDER="exa", EXA_API_KEY="k1-aaaa1111bbbb"
+        )
+        provider = active_provider(settings)
+        assert provider is not None
+        assert provider.provider_id == "exa"
+
+    def test_explicit_unconfigured_provider_raises(self, monkeypatch) -> None:
+        settings = _settings(monkeypatch, WEB_SEARCH_PROVIDER="exa")
+        with pytest.raises(WebSearchConfigError, match="EXA_API_KEY"):
+            active_provider(settings)
+
+
+class TestRecorderSeam:
+    @pytest.mark.asyncio
+    async def test_success_outcome_recorded(self) -> None:
+        outcomes: list[SearchOutcome] = []
+        provider = StubWebSearchProvider(build_config(api_keys=("sk-live-0001wxyz",)))
+        response = await search(provider, "hello", recorder=outcomes.append)
+        assert response.results
+        (outcome,) = outcomes
+        assert outcome.provider == "stub"
+        assert outcome.status == "success"
+        assert outcome.key_index == 0
+        assert outcome.key_label == "sk-l…wxyz"
+        assert outcome.results_count == 1
+        assert outcome.duration_ms >= 0
+        assert outcome.error_kind is None
+        assert outcome.cost_usd is None
+        assert outcome.ts_iso
+
+    @pytest.mark.asyncio
+    async def test_error_outcome_recorded_with_kind_and_key(self) -> None:
+        outcomes: list[SearchOutcome] = []
+        provider = StubWebSearchProvider(
+            build_config(),
+            behavior={0: WebSearchUpstreamError("stub", "kaput " * 200)},
+        )
+        with pytest.raises(WebSearchUpstreamError):
+            await search(provider, "q", recorder=outcomes.append)
+        (outcome,) = outcomes
+        assert outcome.status == "error"
+        assert outcome.error_kind == "upstream"
+        assert outcome.key_index == 0
+        assert len(outcome.error_message or "") <= 500
+        assert outcome.results_count == 0
+
+    @pytest.mark.asyncio
+    async def test_non_websearch_error_recorded_as_internal(self) -> None:
+        outcomes: list[SearchOutcome] = []
+        provider = StubWebSearchProvider(
+            build_config(), behavior={0: RuntimeError("bug")}
+        )
+        with pytest.raises(RuntimeError):
+            await search(provider, "q", recorder=outcomes.append)
+        assert outcomes[0].error_kind == "internal"
+
+    @pytest.mark.asyncio
+    async def test_query_is_capped_at_256_chars(self) -> None:
+        outcomes: list[SearchOutcome] = []
+        provider = StubWebSearchProvider(build_config())
+        await search(provider, "x" * 1000, recorder=outcomes.append)
+        assert len(outcomes[0].query) == 256
+
+    @pytest.mark.asyncio
+    async def test_recorder_failure_does_not_break_search(self) -> None:
+        def bad_recorder(outcome: SearchOutcome) -> None:
+            raise RuntimeError("recorder bug")
+
+        provider = StubWebSearchProvider(build_config())
+        response = await search(provider, "q", recorder=bad_recorder)
+        assert response.results
+
+    @pytest.mark.asyncio
+    async def test_no_recorder_is_a_noop(self) -> None:
+        provider = StubWebSearchProvider(build_config())
+        assert (await search(provider, "q")).results
+
+    @pytest.mark.asyncio
+    async def test_search_with_logging_uses_explicit_recorder(self) -> None:
+        outcomes: list[SearchOutcome] = []
+        provider = StubWebSearchProvider(build_config())
+        await search_with_logging(provider, "q", recorder=outcomes.append)
+        assert len(outcomes) == 1
+
+    @pytest.mark.asyncio
+    async def test_search_with_logging_without_analytics_module_is_noop(self) -> None:
+        # websearch.analytics lands with Worker B; until then the seam is a no-op.
+        assert registry._default_recorder() is None
+        provider = StubWebSearchProvider(build_config())
+        assert (await search_with_logging(provider, "q")).results

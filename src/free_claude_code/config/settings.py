@@ -15,6 +15,7 @@ from .env_files import (
 from .nim import NimSettings
 from .provider_catalog import BEDROCK_DEFAULT_BASE, SUPPORTED_PROVIDER_IDS
 from .reasoning import ReasoningPreference
+from .websearch_catalog import SUPPORTED_WEBSEARCH_PROVIDER_IDS
 
 
 class Settings(BaseSettings):
@@ -243,6 +244,52 @@ class Settings(BaseSettings):
         default=False, validation_alias="WEB_FETCH_ALLOW_PRIVATE_NETWORKS"
     )
 
+    # ==================== Web Search Providers ====================
+    # Backend for the proxy-fulfilled web_search server tool:
+    # "auto" (first configured catalog provider, else ddgs), "off" (legacy scrape),
+    # or a provider id from config.websearch_catalog.
+    web_search_provider: str = Field(
+        default="auto", validation_alias="WEB_SEARCH_PROVIDER"
+    )
+    # One optional credential per provider; comma-separate multiple keys for rotation.
+    ollama_search_api_key: str | None = Field(
+        default=None, validation_alias="OLLAMA_SEARCH_API_KEY"
+    )
+    exa_api_key: str | None = Field(default=None, validation_alias="EXA_API_KEY")
+    tavily_api_key: str | None = Field(default=None, validation_alias="TAVILY_API_KEY")
+    brave_search_api_key: str | None = Field(
+        default=None, validation_alias="BRAVE_SEARCH_API_KEY"
+    )
+    jina_api_key: str | None = Field(default=None, validation_alias="JINA_API_KEY")
+    serper_api_key: str | None = Field(default=None, validation_alias="SERPER_API_KEY")
+    firecrawl_api_key: str | None = Field(
+        default=None, validation_alias="FIRECRAWL_API_KEY"
+    )
+    linkup_api_key: str | None = Field(default=None, validation_alias="LINKUP_API_KEY")
+    perplexity_search_api_key: str | None = Field(
+        default=None, validation_alias="PERPLEXITY_SEARCH_API_KEY"
+    )
+    parallel_api_key: str | None = Field(
+        default=None, validation_alias="PARALLEL_API_KEY"
+    )
+    searchapi_api_key: str | None = Field(
+        default=None, validation_alias="SEARCHAPI_API_KEY"
+    )
+    serpapi_api_key: str | None = Field(
+        default=None, validation_alias="SERPAPI_API_KEY"
+    )
+    # Base URL of a self-hosted SearXNG instance (format=json must be enabled).
+    searxng_base_url: str | None = Field(
+        default=None, validation_alias="SEARXNG_BASE_URL"
+    )
+    # Web search usage analytics (SQLite under ~/.fcc/logs/).
+    websearch_log_enabled: bool = Field(
+        default=True, validation_alias="WEBSEARCH_LOG_ENABLED"
+    )
+    websearch_log_max_rows: int = Field(
+        default=50000, validation_alias="WEBSEARCH_LOG_MAX_ROWS"
+    )
+
     # ==================== Debug / diagnostic logging (avoid sensitive content) ====================
     # Minimum log level for the JSON file sink (DEBUG, INFO, WARNING, ERROR, CRITICAL).
     log_level: str = Field(default="INFO", validation_alias="LOG_LEVEL")
@@ -326,6 +373,19 @@ class Settings(BaseSettings):
         "model_opus",
         "model_sonnet",
         "model_haiku",
+        "ollama_search_api_key",
+        "exa_api_key",
+        "tavily_api_key",
+        "brave_search_api_key",
+        "jina_api_key",
+        "serper_api_key",
+        "firecrawl_api_key",
+        "linkup_api_key",
+        "perplexity_search_api_key",
+        "parallel_api_key",
+        "searchapi_api_key",
+        "serpapi_api_key",
+        "searxng_base_url",
         mode="before",
     )
     @classmethod
@@ -390,6 +450,18 @@ class Settings(BaseSettings):
         if v <= 0:
             raise ValueError("messaging_rate_window must be > 0")
         return float(v)
+
+    @field_validator("web_search_provider")
+    @classmethod
+    def validate_web_search_provider(cls, v: str) -> str:
+        value = v.strip().lower()
+        allowed = {"auto", "off", *SUPPORTED_WEBSEARCH_PROVIDER_IDS}
+        if value not in allowed:
+            raise ValueError(
+                f"web_search_provider must be 'auto', 'off', or one of "
+                f"{SUPPORTED_WEBSEARCH_PROVIDER_IDS}, got {v!r}"
+            )
+        return value
 
     @field_validator("web_fetch_allowed_schemes")
     @classmethod
