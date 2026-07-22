@@ -1,4 +1,10 @@
-"""Firecrawl adapter (POST api.firecrawl.dev/v2/search with Bearer auth)."""
+"""Firecrawl adapter (POST api.firecrawl.dev/v2/search with Bearer auth).
+
+Advanced dotenv options: ``FIRECRAWL_SOURCES`` (web/news/images arrays),
+``FIRECRAWL_SCRAPE_FORMAT`` per-result scrape (summary -> snippet upgrade,
+markdown -> item.content; multiplies credits), ``FIRECRAWL_TBS`` date filter
+and ``FIRECRAWL_LOCATION`` geo.
+"""
 
 from typing import Any, ClassVar
 
@@ -10,6 +16,8 @@ from free_claude_code.core.websearch.models import (
 
 from ..base import BaseWebSearchProvider, WebSearchProviderConfig
 from .http import build_async_client, request_json
+
+_KNOWN_SOURCES = ("web", "news", "images")
 
 
 class FirecrawlWebSearchProvider(BaseWebSearchProvider):
@@ -33,11 +41,19 @@ class FirecrawlWebSearchProvider(BaseWebSearchProvider):
         allowed_domains: tuple[str, ...],
         blocked_domains: tuple[str, ...],
     ) -> WebSearchResponse:
+        options = self._config.options
+        sources = self._sources()
         payload: dict[str, Any] = {
             "query": query,
             "limit": max_results,
-            "sources": ["web"],
+            "sources": sources,
         }
+        if scrape_format := options.get("FIRECRAWL_SCRAPE_FORMAT", ""):
+            payload["scrapeOptions"] = {"formats": [{"type": scrape_format}]}
+        if tbs := options.get("FIRECRAWL_TBS", ""):
+            payload["tbs"] = tbs
+        if location := options.get("FIRECRAWL_LOCATION", ""):
+            payload["location"] = location
         # includeDomains/excludeDomains are mutually exclusive upstream.
         if allowed_domains:
             payload["includeDomains"] = list(allowed_domains)
@@ -52,29 +68,60 @@ class FirecrawlWebSearchProvider(BaseWebSearchProvider):
             json_body=payload,
         )
         section = data.get("data", {}) if isinstance(data, dict) else {}
-        rows = section.get("web", []) if isinstance(section, dict) else []
         items = []
-        for row in rows:
-            if not isinstance(row, dict):
+        for source in sources:
+            if source not in _KNOWN_SOURCES:
                 continue
-            url = _text(row.get("url"))
-            if not url:
-                continue
-            items.append(
-                WebSearchResultItem(
-                    title=_text(row.get("title")),
-                    url=url,
-                    snippet=_text(row.get("description")),
-                    content=_text(row.get("markdown")) or None,
-                    published=None,
-                )
-            )
+            rows = section.get(source, []) if isinstance(section, dict) else []
+            for row in rows:
+                if not isinstance(row, dict):
+                    continue
+                item = self._map_row(source, row)
+                if item is not None:
+                    items.append(item)
         return WebSearchResponse(
             provider=self.provider_id,
             query=query,
             results=tuple(items[:max_results]),
             key_index=key_index,
             cost_usd=None,
+        )
+
+    def _sources(self) -> list[str]:
+        raw = self._config.options.get("FIRECRAWL_SOURCES", "")
+        sources = [part.strip() for part in raw.split(",") if part.strip()]
+        return sources or ["web"]
+
+    @staticmethod
+    def _map_row(source: str, row: dict[str, Any]) -> WebSearchResultItem | None:
+        if source == "images":
+            url = _text(row.get("imageUrl")) or _text(row.get("url"))
+            if not url:
+                return None
+            return WebSearchResultItem(
+                title=_text(row.get("title")),
+                url=url,
+                snippet="",
+                content=None,
+                published=None,
+            )
+        url = _text(row.get("url"))
+        if not url:
+            return None
+        if source == "news":
+            return WebSearchResultItem(
+                title=_text(row.get("title")),
+                url=url,
+                snippet=_text(row.get("snippet")) or _text(row.get("description")),
+                content=_text(row.get("markdown")) or None,
+                published=_text(row.get("date")) or None,
+            )
+        return WebSearchResultItem(
+            title=_text(row.get("title")),
+            url=url,
+            snippet=_text(row.get("summary")) or _text(row.get("description")),
+            content=_text(row.get("markdown")) or None,
+            published=None,
         )
 
 

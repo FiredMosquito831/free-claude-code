@@ -1,7 +1,10 @@
 """Tavily adapter (POST api.tavily.com/search with Bearer auth).
 
-``search_depth`` is pinned to ``basic`` so ``auto_parameters`` cannot silently
-upgrade cost; HTTP 432 (plan usage limit) maps to a quota error.
+``search_depth`` defaults to ``basic`` so ``auto_parameters`` cannot silently
+upgrade cost; HTTP 432 (plan usage limit) maps to a quota error. Advanced
+dotenv options: depth/topic/time_range, ``TAVILY_INCLUDE_ANSWER`` (LLM answer
+-> response.answer) and ``TAVILY_INCLUDE_RAW_CONTENT`` (-> item.content).
+``auto_parameters`` is never enabled.
 """
 
 from typing import Any, ClassVar
@@ -40,11 +43,20 @@ class TavilyWebSearchProvider(BaseWebSearchProvider):
         allowed_domains: tuple[str, ...],
         blocked_domains: tuple[str, ...],
     ) -> WebSearchResponse:
+        options = self._config.options
         payload: dict[str, Any] = {
             "query": query,
             "max_results": max_results,
-            "search_depth": "basic",
+            "search_depth": options.get("TAVILY_SEARCH_DEPTH", "") or "basic",
         }
+        if topic := options.get("TAVILY_TOPIC", ""):
+            payload["topic"] = topic
+        if time_range := options.get("TAVILY_TIME_RANGE", ""):
+            payload["time_range"] = time_range
+        if include_answer := options.get("TAVILY_INCLUDE_ANSWER", ""):
+            payload["include_answer"] = include_answer
+        if raw_content := options.get("TAVILY_INCLUDE_RAW_CONTENT", ""):
+            payload["include_raw_content"] = raw_content
         if allowed_domains:
             payload["include_domains"] = list(allowed_domains)
         if blocked_domains:
@@ -75,12 +87,14 @@ class TavilyWebSearchProvider(BaseWebSearchProvider):
                     published=None,
                 )
             )
+        answer = _text(data.get("answer")) if isinstance(data, dict) else ""
         return WebSearchResponse(
             provider=self.provider_id,
             query=query,
             results=tuple(items[:max_results]),
             key_index=key_index,
             cost_usd=None,
+            answer=answer or None,
         )
 
 

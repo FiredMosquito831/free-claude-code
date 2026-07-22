@@ -40,15 +40,25 @@ class JinaWebSearchProvider(BaseWebSearchProvider):
         allowed_domains: tuple[str, ...],
         blocked_domains: tuple[str, ...],
     ) -> WebSearchResponse:
+        options = self._config.options
+        headers = {
+            "Authorization": f"Bearer {key}",
+            "Accept": "application/json",
+        }
+        if max_tokens := options.get("JINA_MAX_TOKENS", ""):
+            headers["X-Max-Tokens"] = max_tokens
+        params: dict[str, Any] = {}
+        if site := options.get("JINA_SITE", ""):
+            params["site"] = site
+        if gl := options.get("JINA_GL", ""):
+            params["gl"] = gl
         data = await request_json(
             self._require_client(),
             self.provider_id,
             "GET",
             f"{self._base_url}/{quote(query, safe='')}",
-            headers={
-                "Authorization": f"Bearer {key}",
-                "Accept": "application/json",
-            },
+            headers=headers,
+            params=params or None,
         )
         rows = data.get("data", []) if isinstance(data, dict) else []
         items = []

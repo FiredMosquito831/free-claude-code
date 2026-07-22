@@ -19,9 +19,14 @@ from free_claude_code.api.web_tools.outbound import (
     _read_response_body_capped,
     _run_web_fetch,
     _run_web_search,
+    _web_search_response_items,
 )
 from free_claude_code.api.web_tools.request import is_web_server_tool_request
-from free_claude_code.api.web_tools.streaming import stream_web_server_tool_response
+from free_claude_code.api.web_tools.streaming import (
+    _format_page_age,
+    _search_summary,
+    stream_web_server_tool_response,
+)
 from free_claude_code.application.errors import InvalidRequestError
 from free_claude_code.application.routing import (
     ModelRouter,
@@ -357,7 +362,7 @@ async def test_run_web_fetch_excess_redirects_raises():
 
 @pytest.mark.asyncio
 async def test_streams_web_search_server_tool_result(monkeypatch):
-    async def fake_search(query: str) -> list[dict[str, str]]:
+    async def fake_search(query: str, _settings: Settings) -> list[dict[str, str]]:
         assert query == "DeepSeek V4 model release 2026"
         return [{"title": "DeepSeek V4 Released", "url": "https://example.com/v4"}]
 
@@ -420,7 +425,7 @@ async def test_streams_web_search_server_tool_result(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_service_streams_forced_web_search_by_default(monkeypatch):
-    async def fake_search(_query: str) -> list[dict[str, str]]:
+    async def fake_search(_query: str, _settings: Settings) -> list[dict[str, str]]:
         return [{"title": "DeepSeek V4 Released", "url": "https://example.com/v4"}]
 
     monkeypatch.setattr(
@@ -454,7 +459,7 @@ async def test_service_streams_forced_web_search_by_default(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_service_aggregates_forced_web_search_when_stream_false(monkeypatch):
-    async def fake_search(_query: str) -> list[dict[str, str]]:
+    async def fake_search(_query: str, _settings: Settings) -> list[dict[str, str]]:
         return [{"title": "DeepSeek V4 Released", "url": "https://example.com/v4"}]
 
     monkeypatch.setattr(
@@ -798,8 +803,22 @@ async def test_run_web_search_routes_through_configured_provider(monkeypatch):
     results = await _run_web_search("test query", settings)
 
     assert results == [
-        {"title": "One", "url": "https://example.com/0"},
-        {"title": "Two", "url": "https://example.com/1"},
+        {
+            "title": "One",
+            "url": "https://example.com/0",
+            "snippet": "",
+            "published": "",
+            "answer": "",
+            "provider": "exa",
+        },
+        {
+            "title": "Two",
+            "url": "https://example.com/1",
+            "snippet": "",
+            "published": "",
+            "answer": "",
+            "provider": "exa",
+        },
     ]
     runtime_provider.assert_awaited_once_with(settings, "exa")
     search_with_logging.assert_awaited_once_with(
@@ -834,7 +853,16 @@ async def test_run_web_search_falls_back_to_ddgs_after_provider_error(monkeypatc
     results = await _run_web_search("test query", settings)
 
     assert requested == ["exa", "ddgs"]
-    assert results == [{"title": "Fallback", "url": "https://example.com/0"}]
+    assert results == [
+        {
+            "title": "Fallback",
+            "url": "https://example.com/0",
+            "snippet": "",
+            "published": "",
+            "answer": "",
+            "provider": "exa",
+        }
+    ]
 
 
 @pytest.mark.asyncio
@@ -936,7 +964,16 @@ async def test_run_web_search_builds_settings_when_not_passed(monkeypatch):
 
     results = await _run_web_search("test query")
 
-    assert results == [{"title": "Env", "url": "https://example.com/0"}]
+    assert results == [
+        {
+            "title": "Env",
+            "url": "https://example.com/0",
+            "snippet": "",
+            "published": "",
+            "answer": "",
+            "provider": "exa",
+        }
+    ]
     assert runtime_provider.await_args_list[0].args[1] == "exa"
 
 
@@ -959,3 +996,273 @@ async def test_service_rejects_listed_server_tools_for_every_provider(
     )
     with pytest.raises(InvalidRequestError, match="cannot pass listed Anthropic"):
         await service.create(request)
+
+
+# ==================== Rich digest pipeline ====================
+
+
+def _rich_response() -> WebSearchResponse:
+    return WebSearchResponse(
+        provider="tavily",
+        query="q",
+        results=(
+            WebSearchResultItem(
+                title="Alpha",
+                url="https://example.com/a",
+                snippet="Alpha snippet",
+                content=None,
+                published="2026-01-02",
+            ),
+            WebSearchResultItem(
+                title="Beta",
+                url="https://example.com/b",
+                snippet="",
+                content=None,
+                published=None,
+            ),
+        ),
+        key_index=0,
+        cost_usd=None,
+        answer="Provider answer lead.",
+    )
+
+
+def test_web_search_response_items_pass_richness_through() -> None:
+    items = _web_search_response_items(_rich_response())
+    assert items == [
+        {
+            "title": "Alpha",
+            "url": "https://example.com/a",
+            "snippet": "Alpha snippet",
+            "published": "2026-01-02",
+            "answer": "Provider answer lead.",
+            "provider": "tavily",
+        },
+        {
+            "title": "Beta",
+            "url": "https://example.com/b",
+            "snippet": "",
+            "published": "",
+            "answer": "Provider answer lead.",
+            "provider": "tavily",
+        },
+    ]
+
+
+class TestFormatPageAge:
+    def test_iso_date_becomes_human_string(self) -> None:
+        assert _format_page_age("2026-07-22") == "July 22, 2026"
+
+    def test_iso_datetime_with_z_becomes_human_string(self) -> None:
+        assert _format_page_age("2026-01-02T10:20:30Z") == "January 2, 2026"
+
+    def test_non_iso_passes_through(self) -> None:
+        assert _format_page_age("Jan 2, 2026") == "Jan 2, 2026"
+
+
+class TestSearchSummaryDigest:
+    def test_rich_digest_format_with_answer_lead_and_dates(self) -> None:
+        settings = Settings.model_validate({})
+        summary = _search_summary(
+            "q",
+            [
+                {
+                    "title": "Alpha",
+                    "url": "https://example.com/a",
+                    "snippet": "Alpha snippet",
+                    "published": "2026-01-02",
+                    "answer": "Provider answer lead.",
+                },
+                {
+                    "title": "Beta",
+                    "url": "https://example.com/b",
+                    "snippet": "Beta snippet",
+                    "published": "",
+                    "answer": "Provider answer lead.",
+                },
+            ],
+            settings,
+        )
+        assert summary == (
+            "Search results for: q\n\n"
+            "Provider answer lead.\n\n"
+            "1. Alpha (January 2, 2026)\nhttps://example.com/a\nAlpha snippet\n\n"
+            "2. Beta\nhttps://example.com/b\nBeta snippet"
+        )
+
+    def test_answer_lead_disabled_by_setting(self) -> None:
+        settings = Settings.model_validate({"WEBSEARCH_DIGEST_ANSWER": False})
+        summary = _search_summary(
+            "q",
+            [
+                {
+                    "title": "Alpha",
+                    "url": "https://example.com/a",
+                    "snippet": "S",
+                    "published": "",
+                    "answer": "Provider answer lead.",
+                }
+            ],
+            settings,
+        )
+        assert "Provider answer lead." not in summary
+        assert summary.startswith("Search results for: q\n\n1. Alpha")
+
+    def test_excerpt_capped_at_digest_chars(self) -> None:
+        settings = Settings.model_validate({"WEBSEARCH_DIGEST_CHARS": 10})
+        summary = _search_summary(
+            "q",
+            [
+                {
+                    "title": "Alpha",
+                    "url": "https://example.com/a",
+                    "snippet": "x" * 100,
+                    "published": "",
+                    "answer": "",
+                }
+            ],
+            settings,
+        )
+        assert summary.endswith("\n" + "x" * 10)
+        assert "x" * 11 not in summary
+
+    def test_content_used_when_snippet_missing(self) -> None:
+        settings = Settings.model_validate({})
+        summary = _search_summary(
+            "q",
+            [
+                {
+                    "title": "Alpha",
+                    "url": "https://example.com/a",
+                    "content": "fuller text",
+                    "published": "",
+                    "answer": "",
+                }
+            ],
+            settings,
+        )
+        assert summary.endswith("\nfuller text")
+
+    def test_legacy_title_url_only_shape_unchanged(self) -> None:
+        settings = Settings.model_validate({})
+        results = [
+            {"title": "One", "url": "https://a.io"},
+            {"title": "Two", "url": "https://b.io"},
+        ]
+        assert _search_summary("q", results, settings) == (
+            "Search results for: q\n\n1. One\nhttps://a.io\n\n2. Two\nhttps://b.io"
+        )
+
+    def test_no_results_message_unchanged(self) -> None:
+        settings = Settings.model_validate({})
+        assert (
+            _search_summary("q", [], settings) == "No web search results found for: q"
+        )
+
+
+@pytest.mark.asyncio
+async def test_stream_emits_page_age_and_rich_digest(monkeypatch):
+    async def fake_search(_query: str, _settings: Settings) -> list[dict[str, str]]:
+        return [
+            {
+                "title": "Alpha",
+                "url": "https://example.com/a",
+                "snippet": "Alpha snippet",
+                "published": "2026-01-02",
+                "answer": "Provider answer lead.",
+                "provider": "tavily",
+            },
+            {
+                "title": "Beta",
+                "url": "https://example.com/b",
+                "snippet": "",
+                "published": "",
+                "answer": "Provider answer lead.",
+                "provider": "tavily",
+            },
+        ]
+
+    monkeypatch.setitem(Settings.model_config, "env_file", ())
+    monkeypatch.setattr(
+        "free_claude_code.api.web_tools.outbound._run_web_search", fake_search
+    )
+    request = MessagesRequest(
+        model="claude-haiku-4-5-20251001",
+        max_tokens=100,
+        messages=[
+            Message(role="user", content="Perform a web search for the query: q")
+        ],
+        tools=[Tool(name="web_search", type="web_search_20250305")],
+        tool_choice={"type": "tool", "name": "web_search"},
+    )
+
+    raw = "".join(
+        [
+            event
+            async for event in stream_web_server_tool_response(
+                request, input_tokens=42, web_fetch_egress=_STRICT_EGRESS
+            )
+        ]
+    )
+    events = parse_sse_text(raw)
+    starts = [e for e in events if e.event == "content_block_start"]
+    content = starts[1].data["content_block"]["content"]
+    assert content[0] == {
+        "type": "web_search_result",
+        "title": "Alpha",
+        "url": "https://example.com/a",
+        "page_age": "January 2, 2026",
+    }
+    assert content[1] == {
+        "type": "web_search_result",
+        "title": "Beta",
+        "url": "https://example.com/b",
+    }
+    text = text_content(events)
+    assert "Provider answer lead." in text
+    assert "1. Alpha (January 2, 2026)\nhttps://example.com/a\nAlpha snippet" in text
+    assert "2. Beta\nhttps://example.com/b" in text
+
+
+@pytest.mark.asyncio
+async def test_stream_digest_honors_chars_and_answer_env(monkeypatch):
+    async def fake_search(_query: str, _settings: Settings) -> list[dict[str, str]]:
+        return [
+            {
+                "title": "Alpha",
+                "url": "https://example.com/a",
+                "snippet": "y" * 100,
+                "published": "",
+                "answer": "Provider answer lead.",
+                "provider": "tavily",
+            }
+        ]
+
+    monkeypatch.setitem(Settings.model_config, "env_file", ())
+    monkeypatch.setenv("WEBSEARCH_DIGEST_CHARS", "10")
+    monkeypatch.setenv("WEBSEARCH_DIGEST_ANSWER", "false")
+    monkeypatch.setattr(
+        "free_claude_code.api.web_tools.outbound._run_web_search", fake_search
+    )
+    request = MessagesRequest(
+        model="claude-haiku-4-5-20251001",
+        max_tokens=100,
+        messages=[
+            Message(role="user", content="Perform a web search for the query: q")
+        ],
+        tools=[Tool(name="web_search", type="web_search_20250305")],
+        tool_choice={"type": "tool", "name": "web_search"},
+    )
+
+    raw = "".join(
+        [
+            event
+            async for event in stream_web_server_tool_response(
+                request, input_tokens=42, web_fetch_egress=_STRICT_EGRESS
+            )
+        ]
+    )
+    text = text_content(parse_sse_text(raw))
+    assert "Provider answer lead." not in text
+    assert "y" * 10 in text
+    assert "y" * 11 not in text

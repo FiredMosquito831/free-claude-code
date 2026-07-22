@@ -39,13 +39,23 @@ class SearxngWebSearchProvider(BaseWebSearchProvider):
         allowed_domains: tuple[str, ...],
         blocked_domains: tuple[str, ...],
     ) -> WebSearchResponse:
+        options = self._config.options
+        params: dict[str, Any] = {"q": query, "format": "json"}
+        if engines := options.get("SEARXNG_ENGINES", ""):
+            params["engines"] = engines
+        if categories := options.get("SEARXNG_CATEGORIES", ""):
+            params["categories"] = categories
+        if time_range := options.get("SEARXNG_TIME_RANGE", ""):
+            params["time_range"] = time_range
+        if language := options.get("SEARXNG_LANGUAGE", ""):
+            params["language"] = language
         try:
             data = await request_json(
                 self._require_client(),
                 self.provider_id,
                 "GET",
                 f"{self._base_url}/search",
-                params={"q": query, "format": "json"},
+                params=params,
             )
         except WebSearchAuthError as error:
             # Most public instances disable format=json and answer 403.

@@ -1,6 +1,9 @@
 """Linkup adapter (POST api.linkup.so/v1/search with Bearer auth).
 
-Result titles live in the ``name`` field (not ``title``).
+Result titles live in the ``name`` field (not ``title``). Advanced dotenv
+options: ``LINKUP_DEPTH`` (deep = 10x cost) and ``LINKUP_OUTPUT_TYPE``;
+``sourcedAnswer`` returns an LLM ``answer`` plus ``sources[]`` (mapped to
+result items, answer -> response.answer).
 """
 
 from typing import Any, ClassVar
@@ -36,10 +39,12 @@ class LinkupWebSearchProvider(BaseWebSearchProvider):
         allowed_domains: tuple[str, ...],
         blocked_domains: tuple[str, ...],
     ) -> WebSearchResponse:
+        options = self._config.options
+        output_type = options.get("LINKUP_OUTPUT_TYPE", "") or "searchResults"
         payload: dict[str, Any] = {
             "q": query,
-            "depth": "standard",
-            "outputType": "searchResults",
+            "depth": options.get("LINKUP_DEPTH", "") or "standard",
+            "outputType": output_type,
         }
         if allowed_domains:
             payload["includeDomains"] = list(allowed_domains)
@@ -53,7 +58,14 @@ class LinkupWebSearchProvider(BaseWebSearchProvider):
             headers={"Authorization": f"Bearer {key}"},
             json_body=payload,
         )
-        rows = data.get("results", []) if isinstance(data, dict) else []
+        answer = ""
+        if isinstance(data, dict) and output_type == "sourcedAnswer":
+            answer = _text(data.get("answer"))
+            rows = data.get("sources", [])
+            snippet_field = "snippet"
+        else:
+            rows = data.get("results", []) if isinstance(data, dict) else []
+            snippet_field = "content"
         items = []
         for row in rows:
             if not isinstance(row, dict):
@@ -65,7 +77,7 @@ class LinkupWebSearchProvider(BaseWebSearchProvider):
                 WebSearchResultItem(
                     title=_text(row.get("name")),
                     url=url,
-                    snippet=_text(row.get("content")),
+                    snippet=_text(row.get(snippet_field)),
                     content=None,
                     published=None,
                 )
@@ -76,6 +88,7 @@ class LinkupWebSearchProvider(BaseWebSearchProvider):
             results=tuple(items[:max_results]),
             key_index=key_index,
             cost_usd=None,
+            answer=answer or None,
         )
 
 

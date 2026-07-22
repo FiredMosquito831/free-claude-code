@@ -1,7 +1,10 @@
 """SerpAPI adapter (GET serpapi.com/search, api_key query param).
 
 Result URLs live in the ``link`` field; error payloads can arrive with HTTP 200,
-so the body is checked for a top-level ``error``.
+so the body is checked for a top-level ``error``. Advanced dotenv options:
+``SERPAPI_ENGINE`` (google_light = smaller/cheaper payload)/``SERPAPI_TBS``/
+``SERPAPI_GL``/``SERPAPI_HL`` request params; ``answer_box``/
+``knowledge_graph`` are captured into ``response.answer`` when present.
 """
 
 from typing import Any, ClassVar
@@ -38,17 +41,25 @@ class SerpApiWebSearchProvider(BaseWebSearchProvider):
         allowed_domains: tuple[str, ...],
         blocked_domains: tuple[str, ...],
     ) -> WebSearchResponse:
+        options = self._config.options
+        params: dict[str, Any] = {
+            "engine": options.get("SERPAPI_ENGINE", "") or "google",
+            "q": query,
+            "api_key": key,
+            "num": max_results,
+        }
+        if tbs := options.get("SERPAPI_TBS", ""):
+            params["tbs"] = tbs
+        if gl := options.get("SERPAPI_GL", ""):
+            params["gl"] = gl
+        if hl := options.get("SERPAPI_HL", ""):
+            params["hl"] = hl
         data = await request_json(
             self._require_client(),
             self.provider_id,
             "GET",
             f"{self._base_url}/search",
-            params={
-                "engine": "google",
-                "q": query,
-                "api_key": key,
-                "num": max_results,
-            },
+            params=params,
         )
         if isinstance(data, dict) and data.get("error"):
             raise WebSearchUpstreamError(
@@ -71,13 +82,35 @@ class SerpApiWebSearchProvider(BaseWebSearchProvider):
                     published=_text(row.get("date")) or None,
                 )
             )
+        answer = _answer_lead(data) if isinstance(data, dict) else ""
         return WebSearchResponse(
             provider=self.provider_id,
             query=query,
             results=tuple(items[:max_results]),
             key_index=key_index,
             cost_usd=None,
+            answer=answer or None,
         )
+
+
+def _answer_lead(data: dict[str, Any]) -> str:
+    """answer_box lead, then knowledge_graph description as context."""
+
+    parts: list[str] = []
+    answer_box = data.get("answer_box")
+    if isinstance(answer_box, dict):
+        text = _text(answer_box.get("answer")) or _text(answer_box.get("snippet"))
+        if text:
+            parts.append(text)
+    knowledge_graph = data.get("knowledge_graph")
+    if isinstance(knowledge_graph, dict):
+        title = _text(knowledge_graph.get("title"))
+        description = _text(knowledge_graph.get("description"))
+        if title and description:
+            parts.append(f"{title}: {description}")
+        elif title or description:
+            parts.append(title or description)
+    return "\n\n".join(parts)
 
 
 def _text(value: Any) -> str:

@@ -27,3 +27,4 @@ class WebSearchResponse:
     results: tuple[WebSearchResultItem, ...]
     key_index: int  # which key served it (0-based)
     cost_usd: float | None
+    answer: str | None = None  # provider LLM answer / rich block lead when present
