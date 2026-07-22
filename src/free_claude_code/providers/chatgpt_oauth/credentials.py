@@ -94,7 +94,7 @@ def _load_codex_cli_source() -> _TokenSource:
 def _load_hermes_source() -> _TokenSource:
     path = _home() / ".hermes" / "auth.json"
     payload = _load_json(path)
-    provider = ((payload.get("providers") or {}).get("openai-codex") or {})
+    provider = (payload.get("providers") or {}).get("openai-codex") or {}
     tokens = provider.get("tokens") or {}
     return _TokenSource(
         name="hermes-openai-codex",
@@ -203,7 +203,9 @@ def _refresh_access_token(refresh_token: str) -> tuple[str, str | None, int | No
     new_refresh = payload.get("refresh_token") or refresh_token
     expires_in = payload.get("expires_in")
     if not isinstance(new_access, str) or not new_access:
-        raise ChatGPTOAuthError("OAuth refresh response did not contain an access token.")
+        raise ChatGPTOAuthError(
+            "OAuth refresh response did not contain an access token."
+        )
     expires_at = None
     if isinstance(expires_in, (int, float)):
         expires_at = int(time.time() + expires_in)
@@ -335,7 +337,9 @@ def load_chatgpt_oauth_credentials(
       2. Token files (~/.hermes/auth.json, ~/.codex/auth.json).
     """
     if access_token and access_token.strip():
-        resolved_account_id = (account_id or "").strip() or _extract_account_id(access_token)
+        resolved_account_id = (account_id or "").strip() or _extract_account_id(
+            access_token
+        )
         return ChatGPTOAuthCredentials(
             access_token=access_token.strip(),
             account_id=resolved_account_id,

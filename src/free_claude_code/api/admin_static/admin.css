@@ -425,7 +425,7 @@ textarea:focus-visible,
 }
 
 /* Credential key manager */
-.key-manager {
+.ws-key-manager {
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -848,6 +848,126 @@ textarea:focus-visible,
 
 .action-buttons button {
   min-width: 100px;
+}
+
+/* Web Search provider cards: key manager + analytics */
+.card-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+}
+
+.ws-key-manager {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.ws-key-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ws-key-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  justify-content: space-between;
+}
+
+.ws-key-label {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 13px;
+  color: var(--text-strong);
+}
+
+.ws-key-empty {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.ws-key-add {
+  display: flex;
+  gap: 8px;
+}
+
+.ws-key-add input {
+  flex: 1;
+  min-width: 0;
+  padding: 8px 12px;
+  background: var(--input);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+}
+
+.ws-key-add input:focus {
+  outline: none;
+  border-color: var(--accent-border);
+  background: var(--input-focus);
+}
+
+.period-toggle {
+  display: flex;
+  gap: 8px;
+}
+
+.period-button.active {
+  border-color: var(--accent-border);
+  color: var(--accent);
+  background: var(--accent-muted);
+}
+
+.analytics-body {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  color: var(--muted);
+}
+
+.analytics-summary {
+  font-weight: 600;
+  color: var(--text);
+}
+
+.analytics-block h4 {
+  margin: 0 0 8px;
+  font-size: 14px;
+  color: var(--text-strong);
+}
+
+.analytics-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.analytics-table th,
+.analytics-table td {
+  text-align: left;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--line);
+}
+
+.analytics-table th {
+  color: var(--muted);
+  font-weight: 600;
+  text-transform: uppercase;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+}
+
+.analytics-table td {
+  color: var(--text);
+}
+
+.analytics-table .analytics-empty {
+  color: var(--muted);
 }
 
 /* Tablet Layout Optimization */

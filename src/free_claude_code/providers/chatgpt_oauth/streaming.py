@@ -130,7 +130,9 @@ class ChatGPTOAuthStreamConverter:
         yield self._ledger.message_stop()
 
 
-async def iter_chatgpt_oauth_sse_events(raw_stream: Any) -> AsyncIterator[dict[str, Any]]:
+async def iter_chatgpt_oauth_sse_events(
+    raw_stream: Any,
+) -> AsyncIterator[dict[str, Any]]:
     """Parse a raw async SSE byte stream into ChatGPT Responses API event dicts."""
     buffer = ""
     async for chunk in raw_stream:
@@ -144,7 +146,7 @@ async def iter_chatgpt_oauth_sse_events(raw_stream: Any) -> AsyncIterator[dict[s
             line = line.strip()
             if not line or not line.startswith("data: "):
                 continue
-            data = line[len("data: "):].strip()
+            data = line[len("data: ") :].strip()
             if data == "[DONE]":
                 return
             try:

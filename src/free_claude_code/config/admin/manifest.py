@@ -1,8 +1,6 @@
 """Admin configuration manifest."""
 
 from collections.abc import Iterable
-from dataclasses import dataclass
-from typing import Literal
 
 from free_claude_code.config.reasoning import (
     ROOT_REASONING_PREFERENCES,
@@ -11,55 +9,19 @@ from free_claude_code.config.reasoning import (
 )
 from free_claude_code.config.settings import Settings
 
+# Spec types live in the neutral .spec module so catalog-derived generators
+# (provider_manifest, websearch_manifest) can use them without import cycles;
+# they remain importable from here for existing consumers.
 from .provider_manifest import provider_field_specs
+from .spec import ConfigFieldSpec, ConfigOptionSpec, ConfigSectionSpec, FieldType
+from .websearch_manifest import websearch_field_specs
 
-FieldType = Literal[
-    "text",
-    "secret",
-    "number",
-    "boolean",
-    "model",
-    "optional_model",
-    "select",
-    "textarea",
-    "oauth_login",
+__all__ = [
+    "ConfigFieldSpec",
+    "ConfigOptionSpec",
+    "ConfigSectionSpec",
+    "FieldType",
 ]
-
-
-@dataclass(frozen=True, slots=True)
-class ConfigSectionSpec:
-    """A group of config fields rendered together in the admin UI."""
-
-    section_id: str
-    label: str
-    description: str
-    advanced: bool = False
-
-
-@dataclass(frozen=True, slots=True)
-class ConfigFieldSpec:
-    """Typed metadata for one env-backed admin setting."""
-
-    key: str
-    label: str
-    section_id: str
-    field_type: FieldType = "text"
-    settings_attr: str | None = None
-    default: str = ""
-    options: tuple[str | ConfigOptionSpec, ...] = ()
-    secret: bool = False
-    advanced: bool = False
-    restart_required: bool = False
-    session_sensitive: bool = False
-    description: str = ""
-
-
-@dataclass(frozen=True, slots=True)
-class ConfigOptionSpec:
-    """A persisted option value and its user-facing label."""
-
-    value: str
-    label: str
 
 
 def _reasoning_options(
@@ -116,6 +78,11 @@ SECTIONS: tuple[ConfigSectionSpec, ...] = (
         "web_tools",
         "Web Tools",
         "Local Anthropic web_search and web_fetch behavior.",
+    ),
+    ConfigSectionSpec(
+        "websearch",
+        "Web Search",
+        "Web search provider selection, API keys, and key rotation.",
     ),
     ConfigSectionSpec(
         "diagnostics",
@@ -748,6 +715,7 @@ _NON_PROVIDER_FIELDS: tuple[ConfigFieldSpec, ...] = (
 FIELDS: tuple[ConfigFieldSpec, ...] = (
     *(ConfigFieldSpec(**spec) for spec in provider_field_specs()),
     *_NON_PROVIDER_FIELDS,
+    *(ConfigFieldSpec(**spec) for spec in websearch_field_specs()),
 )
 FIELD_BY_KEY = {field.key: field for field in FIELDS}
 

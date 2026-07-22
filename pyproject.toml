@@ -23,6 +23,7 @@ dependencies = [
     "loguru>=0.7.0",
     "aiohttp>=3.14.1",
     "jsonschema>=4.25.0",
+    "ddgs>=9.14.4",
 ]
 
 [project.scripts]

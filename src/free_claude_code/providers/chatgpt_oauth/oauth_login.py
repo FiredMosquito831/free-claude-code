@@ -24,9 +24,7 @@ from .credentials import (
 
 CHATGPT_OAUTH_ISSUER = "https://auth.openai.com"
 CHATGPT_OAUTH_DEVICE_URL = f"{CHATGPT_OAUTH_ISSUER}/api/accounts/deviceauth/usercode"
-CHATGPT_OAUTH_DEVICE_TOKEN_URL = (
-    f"{CHATGPT_OAUTH_ISSUER}/api/accounts/deviceauth/token"
-)
+CHATGPT_OAUTH_DEVICE_TOKEN_URL = f"{CHATGPT_OAUTH_ISSUER}/api/accounts/deviceauth/token"
 CHATGPT_OAUTH_DEVICE_VERIFICATION_URL = f"{CHATGPT_OAUTH_ISSUER}/codex/device"
 CHATGPT_OAUTH_DEVICE_CALLBACK = f"{CHATGPT_OAUTH_ISSUER}/deviceauth/callback"
 CHATGPT_OAUTH_POLL_SAFETY_MS = 3000
@@ -265,9 +263,7 @@ def perform_chatgpt_oauth_login(
     authorization_code = device_data.get("authorization_code")
     code_verifier = device_data.get("code_verifier")
     if not isinstance(authorization_code, str) or not authorization_code:
-        raise ChatGPTOAuthLoginError(
-            "Device auth response missing authorization_code"
-        )
+        raise ChatGPTOAuthLoginError("Device auth response missing authorization_code")
     if not isinstance(code_verifier, str) or not code_verifier:
         raise ChatGPTOAuthLoginError("Device auth response missing code_verifier")
 
@@ -322,9 +318,7 @@ def exchange_device_auth_for_tokens(
     authorization_code = device_data.get("authorization_code")
     code_verifier = device_data.get("code_verifier")
     if not isinstance(authorization_code, str) or not authorization_code:
-        raise ChatGPTOAuthLoginError(
-            "Device auth response missing authorization_code"
-        )
+        raise ChatGPTOAuthLoginError("Device auth response missing authorization_code")
     if not isinstance(code_verifier, str) or not code_verifier:
         raise ChatGPTOAuthLoginError("Device auth response missing code_verifier")
 

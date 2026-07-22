@@ -37,12 +37,14 @@ CHATGPT_OAUTH_DEFAULT_BASE = "https://chatgpt.com/backend-api"
 
 # Model allowlist aligned with OpenCode's ChatGPT/Codex OAuth filter.
 # https://github.com/anomalyco/opencode/blob/main/packages/opencode/src/plugin/openai/codex.ts
-_CHATGPT_OAUTH_ALLOWED_MODELS = frozenset({
-    "gpt-5.5",
-    "gpt-5.3-codex-spark",
-    "gpt-5.4",
-    "gpt-5.4-mini",
-})
+_CHATGPT_OAUTH_ALLOWED_MODELS = frozenset(
+    {
+        "gpt-5.5",
+        "gpt-5.3-codex-spark",
+        "gpt-5.4",
+        "gpt-5.4-mini",
+    }
+)
 _CHATGPT_OAUTH_DISALLOWED_MODELS = frozenset({"gpt-5.5-pro"})
 _CHATGPT_OAUTH_GPT_VERSION_RE = re.compile(r"^gpt-(\d+\.\d+)")
 
@@ -255,7 +257,9 @@ class ChatGPTOAuthProvider(BaseProvider):
                             )
 
                         yield ledger.message_start()
-                        async for event in iter_chatgpt_oauth_sse_events(response.aiter_raw()):
+                        async for event in iter_chatgpt_oauth_sse_events(
+                            response.aiter_raw()
+                        ):
                             for sse_event in converter.feed(event):
                                 yield sse_event
 

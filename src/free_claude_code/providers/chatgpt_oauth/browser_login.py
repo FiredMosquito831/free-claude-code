@@ -176,7 +176,9 @@ class _CallbackHandler(BaseHTTPRequestHandler):
     def log_message(self, format: str, *args: Any) -> None:
         return
 
-    def _send_page(self, status: int, title: str, message: str, *, success: bool) -> None:
+    def _send_page(
+        self, status: int, title: str, message: str, *, success: bool
+    ) -> None:
         body = _callback_page(title, message, success=success)
         self.send_response(status)
         self.send_header("Content-Type", "text/html; charset=utf-8")
@@ -191,7 +193,9 @@ class _CallbackHandler(BaseHTTPRequestHandler):
         if parsed.path == OAUTH_CANCEL_PATH:
             if flow is not None:
                 flow.finish_error("Login cancelled")
-            self._send_page(200, "Login cancelled", "The login was cancelled.", success=False)
+            self._send_page(
+                200, "Login cancelled", "The login was cancelled.", success=False
+            )
             return
 
         if parsed.path != OAUTH_CALLBACK_PATH:
@@ -325,7 +329,10 @@ def browser_login_status(
         tokens = flow.tokens
         access_token = tokens.get("access_token")
         if not isinstance(access_token, str) or not access_token:
-            return {"status": "error", "message": "Token exchange returned no access token"}
+            return {
+                "status": "error",
+                "message": "Token exchange returned no access token",
+            }
         account_id = extract_account_id_from_tokens(
             access_token=access_token,
             id_token=tokens.get("id_token"),
@@ -370,9 +377,7 @@ def perform_browser_login(
         )
 
     if not flow.done.wait(timeout=timeout_seconds):
-        raise ChatGPTOAuthLoginTimeoutError(
-            "Timed out waiting for the OAuth callback."
-        )
+        raise ChatGPTOAuthLoginTimeoutError("Timed out waiting for the OAuth callback.")
 
     if flow.tokens is None:
         raise ChatGPTOAuthBrowserLoginError(flow.error or "Browser login failed")

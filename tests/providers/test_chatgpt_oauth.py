@@ -79,7 +79,11 @@ def test_build_request_body_converts_messages():
     assert body["parallel_tool_calls"] is False
     assert "max_output_tokens" not in body
     assert body["input"] == [
-        {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "hi"}]}
+        {
+            "type": "message",
+            "role": "user",
+            "content": [{"type": "input_text", "text": "hi"}],
+        }
     ]
 
 
@@ -220,7 +224,9 @@ def test_stream_converter_emits_text_delta():
     ledger = AnthropicStreamLedger("msg_1", "gpt-5", input_tokens=0)
     converter = ChatGPTOAuthStreamConverter(ledger)
 
-    events = list(converter.feed({"type": "response.output_text.delta", "delta": "hello"}))
+    events = list(
+        converter.feed({"type": "response.output_text.delta", "delta": "hello"})
+    )
 
     assert any("content_block_start" in e and "text" in e for e in events)
     assert any("text_delta" in e and "hello" in e for e in events)
@@ -232,24 +238,44 @@ def test_stream_converter_emits_tool_call():
     ledger = AnthropicStreamLedger("msg_1", "gpt-5", input_tokens=0)
     converter = ChatGPTOAuthStreamConverter(ledger)
 
-    events = list(converter.feed({
-        "type": "response.output_item.added",
-        "item": {"type": "function_call", "id": "call_1", "name": "bash"},
-    }))
-    events += list(converter.feed({
-        "type": "response.function_call_arguments.delta",
-        "item_id": "call_1",
-        "delta": '{"command":',
-    }))
-    events += list(converter.feed({
-        "type": "response.function_call_arguments.delta",
-        "item_id": "call_1",
-        "delta": '"ls"}',
-    }))
-    events += list(converter.feed({
-        "type": "response.output_item.done",
-        "item": {"type": "function_call", "id": "call_1", "arguments": '{"command":"ls"}'},
-    }))
+    events = list(
+        converter.feed(
+            {
+                "type": "response.output_item.added",
+                "item": {"type": "function_call", "id": "call_1", "name": "bash"},
+            }
+        )
+    )
+    events += list(
+        converter.feed(
+            {
+                "type": "response.function_call_arguments.delta",
+                "item_id": "call_1",
+                "delta": '{"command":',
+            }
+        )
+    )
+    events += list(
+        converter.feed(
+            {
+                "type": "response.function_call_arguments.delta",
+                "item_id": "call_1",
+                "delta": '"ls"}',
+            }
+        )
+    )
+    events += list(
+        converter.feed(
+            {
+                "type": "response.output_item.done",
+                "item": {
+                    "type": "function_call",
+                    "id": "call_1",
+                    "arguments": '{"command":"ls"}',
+                },
+            }
+        )
+    )
 
     assert any("tool_use" in e for e in events)
     assert any('"bash"' in e for e in events)
@@ -315,7 +341,9 @@ def _jwt(payload_dict: dict) -> str:
     import base64
 
     header = base64.urlsafe_b64encode(b"{}").decode().rstrip("=")
-    payload = base64.urlsafe_b64encode(json.dumps(payload_dict).encode()).decode().rstrip("=")
+    payload = (
+        base64.urlsafe_b64encode(json.dumps(payload_dict).encode()).decode().rstrip("=")
+    )
     return f"{header}.{payload}."
 
 
@@ -405,13 +433,11 @@ def test_write_codex_auth_file_stores_id_token(tmp_path, monkeypatch):
 def test_load_credentials_extracts_account_id_from_jwt(tmp_path, monkeypatch):
     import base64
 
-    header = base64.urlsafe_b64encode(b'{}').decode().rstrip("=")
-    payload_dict = {
-        "https://api.openai.com/auth": {"chatgpt_account_id": "acct_123"}
-    }
-    payload = base64.urlsafe_b64encode(
-        json.dumps(payload_dict).encode()
-    ).decode().rstrip("=")
+    header = base64.urlsafe_b64encode(b"{}").decode().rstrip("=")
+    payload_dict = {"https://api.openai.com/auth": {"chatgpt_account_id": "acct_123"}}
+    payload = (
+        base64.urlsafe_b64encode(json.dumps(payload_dict).encode()).decode().rstrip("=")
+    )
     token = f"{header}.{payload}."
 
     codex_home = tmp_path / ".codex"
@@ -497,10 +523,16 @@ def test_perform_chatgpt_oauth_login_writes_auth_file(tmp_path, monkeypatch):
     monkeypatch.setenv("CODEX_HOME", str(tmp_path / ".codex"))
     monkeypatch.setattr(oauth_login, "CHATGPT_OAUTH_POLL_SAFETY_MS", 1)
 
-    header = base64.urlsafe_b64encode(b'{}').decode().rstrip("=")
-    payload = base64.urlsafe_b64encode(
-        json.dumps({"https://api.openai.com/auth": {"chatgpt_account_id": "acct_xyz"}}).encode()
-    ).decode().rstrip("=")
+    header = base64.urlsafe_b64encode(b"{}").decode().rstrip("=")
+    payload = (
+        base64.urlsafe_b64encode(
+            json.dumps(
+                {"https://api.openai.com/auth": {"chatgpt_account_id": "acct_xyz"}}
+            ).encode()
+        )
+        .decode()
+        .rstrip("=")
+    )
     access_token = f"{header}.{payload}."
 
     responses = {
@@ -566,7 +598,9 @@ def test_perform_chatgpt_oauth_login_writes_auth_file(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_stream_response_uses_send_not_stream_context_manager(chatgpt_oauth_provider):
+async def test_stream_response_uses_send_not_stream_context_manager(
+    chatgpt_oauth_provider,
+):
     """Regression: awaiting httpx.AsyncClient.stream() raises TypeError."""
     from unittest.mock import MagicMock
 

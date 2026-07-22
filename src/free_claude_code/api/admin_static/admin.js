@@ -5,6 +5,8 @@ const state = {
   modelOptions: [],
   modelComboboxes: new Set(),
   activeView: "providers",
+  webSearchStatsPeriod: "weekly",
+  webSearchAnalyticsLoaded: false,
 };
 
 const MASKED_SECRET = "********";
@@ -36,6 +38,13 @@ const VIEW_GROUPS = [
     title: "Requests",
     sections: [],
     containerId: "requestsSections",
+  },
+  {
+    id: "web_search",
+    label: "Web Search",
+    title: "Web Search",
+    sections: ["websearch"],
+    containerId: "webSearchSections",
   },
 ];
 
@@ -104,6 +113,7 @@ async function load() {
   renderNav();
   renderProviders(config.provider_status);
   renderSections(config.sections, config.fields);
+  renderWebSearchProviders();
   byId("configPath").textContent = config.paths.managed;
   await hydrateModelOptions();
   await validate(false);
@@ -153,6 +163,11 @@ function setActiveView(viewId, { scroll = false } = {}) {
     view.classList.toggle("active", selected);
     view.hidden = !selected;
   });
+
+  if (activeView.id === "web_search" && !state.webSearchAnalyticsLoaded) {
+    state.webSearchAnalyticsLoaded = true;
+    loadWebSearchAnalytics(state.webSearchStatsPeriod);
+  }
 
   if (scroll) {
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -1135,6 +1150,475 @@ function setModelOptions(models) {
   });
 }
 
+function webSearchProviders() {
+  const providerField = state.fields.get("WEB_SEARCH_PROVIDER");
+  if (!providerField) return [];
+  const credentialFields = Array.from(state.fields.values()).filter(
+    (field) => field.section === "websearch" && field.secret,
+  );
+  return providerField.options
+    .filter((item) => !["auto", "off"].includes(item.value))
+    .map((item) => {
+      const credential = credentialFields.find(
+        (field) => field.label === `${item.label} API Key`,
+      );
+      const baseUrlField =
+        item.value === "searxng" ? state.fields.get("SEARXNG_BASE_URL") : null;
+      const configured = credential
+        ? credential.configured
+        : baseUrlField
+          ? baseUrlField.configured
+          : true;
+      return {
+        id: item.value,
+        label: item.label,
+        envKey: credential ? credential.key : null,
+        rotationKey: credential ? `${credential.key}_ROTATION` : null,
+        configured,
+      };
+    });
+}
+
+function webSearchProviderMeta(provider, activeSelection) {
+  const parts = [];
+  if (activeSelection === provider.id) {
+    parts.push("Active provider");
+  } else if (activeSelection === "auto" && provider.configured) {
+    parts.push("Auto-eligible");
+  }
+  parts.push(
+    provider.envKey ||
+      (provider.id === "searxng" ? "SEARXNG_BASE_URL" : "No key required"),
+  );
+  return parts.join(" · ");
+}
+
+function renderWebSearchProviders() {
+  const grid = byId("webSearchGrid");
+  if (!grid) return;
+  grid.innerHTML = "";
+  const active = state.fields.get("WEB_SEARCH_PROVIDER")?.value || "auto";
+  webSearchProviders().forEach((provider) => {
+    const card = document.createElement("article");
+    card.className = "provider-card";
+    card.dataset.websearchProvider = provider.id;
+
+    const title = document.createElement("div");
+    title.className = "provider-title";
+    title.innerHTML = `<strong>${provider.label}</strong>`;
+    const pill = document.createElement("span");
+    pill.className = `status-pill ${provider.configured ? "ok" : "warn"}`;
+    pill.textContent = provider.configured ? "Configured" : "Missing key";
+    title.appendChild(pill);
+
+    const meta = document.createElement("div");
+    meta.className = "provider-meta";
+    meta.textContent = webSearchProviderMeta(provider, active);
+
+    const actions = document.createElement("div");
+    actions.className = "card-actions";
+
+    const testButton = document.createElement("button");
+    testButton.type = "button";
+    testButton.className = "test-button";
+    testButton.textContent = "Test";
+    testButton.addEventListener("click", () =>
+      testWebSearchProvider(provider, testButton),
+    );
+    actions.appendChild(testButton);
+
+    card.append(title, meta, actions);
+    if (provider.envKey) {
+      const manageButton = document.createElement("button");
+      manageButton.type = "button";
+      manageButton.className = "ghost-button";
+      manageButton.textContent = "Manage keys";
+      const panel = document.createElement("div");
+      panel.className = "ws-key-manager";
+      panel.hidden = true;
+      manageButton.addEventListener("click", () =>
+        toggleKeyManager(provider, panel, manageButton),
+      );
+      actions.appendChild(manageButton);
+      card.appendChild(panel);
+    }
+    grid.appendChild(card);
+  });
+}
+
+function updateWebSearchCard(providerId, status, label, metaText) {
+  const card = document.querySelector(`[data-websearch-provider="${providerId}"]`);
+  if (!card) return;
+  const pill = card.querySelector(".status-pill");
+  pill.className = `status-pill ${statusClass(status)}`;
+  pill.textContent = label;
+  if (metaText) {
+    card.querySelector(".provider-meta").textContent = metaText;
+  }
+}
+
+function updateWebSearchCardsFromState() {
+  const active = state.fields.get("WEB_SEARCH_PROVIDER")?.value || "auto";
+  webSearchProviders().forEach((provider) => {
+    const card = document.querySelector(
+      `[data-websearch-provider="${provider.id}"]`,
+    );
+    if (!card) return;
+    const pill = card.querySelector(".status-pill");
+    pill.className = `status-pill ${provider.configured ? "ok" : "warn"}`;
+    pill.textContent = provider.configured ? "Configured" : "Missing key";
+    card.querySelector(".provider-meta").textContent = webSearchProviderMeta(
+      provider,
+      active,
+    );
+  });
+}
+
+async function refreshConfigState() {
+  const config = await api("/admin/api/config");
+  state.config = config;
+  state.fields = new Map(config.fields.map((field) => [field.key, field]));
+  config.fields.forEach((field) => {
+    const input = document.querySelector(`[data-key="${field.key}"]`);
+    if (input && input.dataset) {
+      input.dataset.configured = field.configured ? "true" : "false";
+    }
+  });
+  updateWebSearchCardsFromState();
+}
+
+async function toggleKeyManager(provider, panel, button) {
+  if (panel.hidden) {
+    panel.hidden = false;
+    button.textContent = "Hide keys";
+    await loadKeyManager(provider, panel);
+  } else {
+    panel.hidden = true;
+    button.textContent = "Manage keys";
+  }
+}
+
+function keyHealthClass(health) {
+  if (!health) return "neutral";
+  if (health.state === "healthy") return "ok";
+  if (health.state === "cooldown") return "warn";
+  return "error";
+}
+
+function keyHealthText(health) {
+  if (!health) return "Unused";
+  const stateName = String(health.state || "unknown").replace(/_/g, " ");
+  return `${stateName} · ${health.requests} req · ${health.failures} err`;
+}
+
+async function loadKeyManager(provider, panel) {
+  panel.innerHTML = "";
+  const list = document.createElement("div");
+  list.className = "ws-key-list";
+  panel.appendChild(list);
+  let result;
+  try {
+    result = await api(`/admin/api/websearch/credentials/${provider.envKey}/keys`);
+  } catch (error) {
+    list.textContent = `Could not load keys: ${error.message}`;
+    return;
+  }
+  const healthByIndex = new Map(
+    ((result.health && result.health.keys) || []).map((entry) => [
+      entry.index,
+      entry,
+    ]),
+  );
+  if (result.keys.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "ws-key-empty";
+    empty.textContent = "No keys configured.";
+    list.appendChild(empty);
+  }
+  result.keys.forEach((entry) => {
+    const row = document.createElement("div");
+    row.className = "ws-key-row";
+    const label = document.createElement("span");
+    label.className = "ws-key-label";
+    label.textContent = entry.key_label || "(empty)";
+    const health = healthByIndex.get(entry.index);
+    const healthEl = document.createElement("span");
+    healthEl.className = `status-pill ${keyHealthClass(health)}`;
+    healthEl.textContent = keyHealthText(health);
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "ghost-button";
+    remove.textContent = "Delete";
+    remove.disabled = result.locked;
+    remove.addEventListener("click", () =>
+      deleteWebSearchKey(provider, entry.index, panel, remove),
+    );
+    row.append(label, healthEl, remove);
+    list.appendChild(row);
+  });
+  const form = document.createElement("div");
+  form.className = "ws-key-add";
+  const input = document.createElement("input");
+  input.type = "password";
+  input.placeholder = "Paste a new API key";
+  input.autocomplete = "off";
+  input.disabled = result.locked;
+  const add = document.createElement("button");
+  add.type = "button";
+  add.className = "secondary-button";
+  add.textContent = "Add key";
+  add.disabled = result.locked;
+  add.addEventListener("click", () => addWebSearchKey(provider, input, panel, add));
+  form.append(input, add);
+  panel.appendChild(form);
+  if (result.locked) {
+    const note = document.createElement("div");
+    note.className = "field-description";
+    note.textContent = "This credential is locked by an external source; edit it there.";
+    panel.appendChild(note);
+  }
+}
+
+async function addWebSearchKey(provider, input, panel, button) {
+  const key = input.value.trim();
+  if (!key) {
+    showMessage("Enter a key first", "warn");
+    return;
+  }
+  button.disabled = true;
+  try {
+    const result = await api(
+      `/admin/api/websearch/credentials/${provider.envKey}/keys`,
+      { method: "POST", body: JSON.stringify({ key }) },
+    );
+    if (!result.applied) {
+      showMessage((result.errors || []).join("; ") || "Key was not applied", "error");
+      return;
+    }
+    showMessage(`Added key to ${provider.envKey}`, "ok");
+    await refreshConfigState();
+    await loadKeyManager(provider, panel);
+  } catch (error) {
+    showMessage(`Could not add key: ${error.message}`, "error");
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function deleteWebSearchKey(provider, index, panel, button) {
+  button.disabled = true;
+  try {
+    const result = await api(
+      `/admin/api/websearch/credentials/${provider.envKey}/keys/${index}`,
+      { method: "DELETE" },
+    );
+    if (!result.applied) {
+      showMessage((result.errors || []).join("; ") || "Key was not applied", "error");
+      return;
+    }
+    showMessage(`Removed key ${index} from ${provider.envKey}`, "ok");
+    await refreshConfigState();
+    await loadKeyManager(provider, panel);
+  } catch (error) {
+    showMessage(`Could not delete key: ${error.message}`, "error");
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function testWebSearchProvider(provider, button) {
+  const original = button.textContent;
+  button.disabled = true;
+  button.textContent = "Testing";
+  try {
+    const result = await api(`/admin/api/websearch/providers/${provider.id}/test`, {
+      method: "POST",
+      body: "{}",
+    });
+    if (result.ok) {
+      const titles = (result.titles || []).filter(Boolean).slice(0, 2).join("; ");
+      updateWebSearchCard(
+        provider.id,
+        "ok",
+        `${result.result_count} results`,
+        `OK in ${Math.round(result.latency_ms)} ms${titles ? ` — ${titles}` : ""}`,
+      );
+    } else {
+      const error = result.error || {};
+      updateWebSearchCard(
+        provider.id,
+        "error",
+        error.kind || "error",
+        error.message || "Web search test failed",
+      );
+    }
+  } catch (error) {
+    updateWebSearchCard(provider.id, "error", "error", error.message);
+  } finally {
+    button.disabled = false;
+    button.textContent = original;
+  }
+}
+
+function asAnalyticsRows(value, keyName) {
+  if (Array.isArray(value)) return value;
+  if (value && typeof value === "object") {
+    return Object.entries(value).map(([name, row]) => ({ [keyName]: name, ...row }));
+  }
+  return [];
+}
+
+function analyticsTable(headers, rows, emptyText) {
+  const table = document.createElement("table");
+  table.className = "analytics-table";
+  const thead = document.createElement("thead");
+  const headRow = document.createElement("tr");
+  headers.forEach((header) => {
+    const th = document.createElement("th");
+    th.textContent = header;
+    headRow.appendChild(th);
+  });
+  thead.appendChild(headRow);
+  const tbody = document.createElement("tbody");
+  if (rows.length === 0) {
+    const tr = document.createElement("tr");
+    const td = document.createElement("td");
+    td.colSpan = headers.length;
+    td.className = "analytics-empty";
+    td.textContent = emptyText;
+    tr.appendChild(td);
+    tbody.appendChild(tr);
+  }
+  rows.forEach((cells) => {
+    const tr = document.createElement("tr");
+    cells.forEach((cell) => {
+      const td = document.createElement("td");
+      td.textContent = cell;
+      tr.appendChild(td);
+    });
+    tbody.appendChild(tr);
+  });
+  table.append(thead, tbody);
+  return table;
+}
+
+function analyticsBlock(title, table) {
+  const block = document.createElement("div");
+  block.className = "analytics-block";
+  const heading = document.createElement("h4");
+  heading.textContent = title;
+  block.append(heading, table);
+  return block;
+}
+
+function formatRequestTime(entry) {
+  const iso = entry.ts_iso || entry.ts || "";
+  const parsed = Date.parse(iso);
+  if (Number.isNaN(parsed)) return iso || "—";
+  return new Date(parsed).toLocaleString();
+}
+
+function renderWebSearchAnalytics(container, stats, requests, period) {
+  container.innerHTML = "";
+  const totals = (stats && stats.totals) || {};
+  const summary = document.createElement("div");
+  summary.className = "analytics-summary";
+  summary.textContent = stats
+    ? `${period === "monthly" ? "Monthly" : "Weekly"}: ` +
+      `${totals.requests ?? 0} requests · ${totals.errors ?? 0} errors · ` +
+      `${totals.results ?? 0} results`
+    : "Summary unavailable.";
+  container.appendChild(summary);
+
+  const providerRows = asAnalyticsRows(stats && stats.by_provider, "provider").map(
+    (row) => [
+      row.provider || "—",
+      row.requests ?? 0,
+      row.errors ?? 0,
+      row.avg_duration_ms != null ? Math.round(row.avg_duration_ms) : "—",
+      row.results ?? 0,
+    ],
+  );
+  container.appendChild(
+    analyticsBlock(
+      "Per provider",
+      analyticsTable(
+        ["Provider", "Requests", "Errors", "Avg ms", "Results"],
+        providerRows,
+        "No web searches recorded yet.",
+      ),
+    ),
+  );
+
+  const keyRows = asAnalyticsRows(stats && stats.by_key, "key_label").map((row) => [
+    row.provider || "—",
+    row.key_label || row.key || "—",
+    row.requests ?? 0,
+    row.errors ?? 0,
+  ]);
+  container.appendChild(
+    analyticsBlock(
+      "Per key",
+      analyticsTable(
+        ["Provider", "Key", "Requests", "Errors"],
+        keyRows,
+        "No key usage recorded yet.",
+      ),
+    ),
+  );
+
+  const requestItems = requests
+    ? requests.requests || requests.items || (Array.isArray(requests) ? requests : [])
+    : [];
+  const requestRows = requestItems.map((entry) => [
+    formatRequestTime(entry),
+    entry.provider || "—",
+    entry.key_label || "—",
+    entry.query || "—",
+    entry.results_count ?? 0,
+    entry.duration_ms != null ? Math.round(entry.duration_ms) : "—",
+    entry.status || "—",
+  ]);
+  container.appendChild(
+    analyticsBlock(
+      "Recent requests",
+      analyticsTable(
+        ["Time", "Provider", "Key", "Query", "Results", "ms", "Status"],
+        requestRows,
+        "No recent web search requests.",
+      ),
+    ),
+  );
+}
+
+async function loadWebSearchAnalytics(period) {
+  state.webSearchStatsPeriod = period;
+  document.querySelectorAll(".period-button").forEach((button) => {
+    const buttonPeriod = button.id === "webSearchStatsMonthly" ? "monthly" : "weekly";
+    button.classList.toggle("active", buttonPeriod === period);
+  });
+  const container = byId("webSearchAnalytics");
+  container.textContent = "Loading analytics…";
+  let stats = null;
+  let requests = null;
+  try {
+    stats = await api(`/admin/api/websearch/stats?period=${period}`);
+  } catch {
+    stats = null;
+  }
+  try {
+    requests = await api("/admin/api/websearch/requests?limit=25");
+  } catch {
+    requests = null;
+  }
+  if (!stats && !requests) {
+    container.textContent =
+      "Web search analytics are unavailable (log API not reachable).";
+    return;
+  }
+  renderWebSearchAnalytics(container, stats, requests, period);
+}
+
 function showMessage(message, kind = "") {
   const area = byId("messageArea");
   area.textContent = message;
@@ -1143,6 +1627,12 @@ function showMessage(message, kind = "") {
 
 byId("validateButton").addEventListener("click", () => validate(true));
 byId("applyButton").addEventListener("click", apply);
+byId("webSearchStatsWeekly").addEventListener("click", () =>
+  loadWebSearchAnalytics("weekly"),
+);
+byId("webSearchStatsMonthly").addEventListener("click", () =>
+  loadWebSearchAnalytics("monthly"),
+);
 document.addEventListener("pointerdown", (event) => {
   state.modelComboboxes.forEach((combobox) => {
     if (combobox.isOpen && !combobox.element.contains(event.target)) combobox.close();

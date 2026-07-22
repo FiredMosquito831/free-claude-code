@@ -47,9 +47,7 @@ def require_provider_credential(
 
 def parse_credential_keys(credential: str) -> tuple[str, ...]:
     """Split a comma-separated credential value into individual keys."""
-    return tuple(
-        key for key in (part.strip() for part in credential.split(",")) if key
-    )
+    return tuple(key for key in (part.strip() for part in credential.split(",")) if key)
 
 
 def credential_rotation_policy(

@@ -75,10 +75,25 @@ def test_list_paging_and_order(store: RequestLogStore) -> None:
 
 def test_list_filters(store: RequestLogStore) -> None:
     base = time.time()
-    store.enqueue(_record("a", provider="p1", resolved_model="m1", status="success", ts_epoch=base))
-    store.enqueue(_record("b", provider="p2", resolved_model="m2", status="error", ts_epoch=base + 10))
     store.enqueue(
-        _record("c", provider="p1", resolved_model="m2", status="cancelled", endpoint="/v1/responses", ts_epoch=base + 20)
+        _record(
+            "a", provider="p1", resolved_model="m1", status="success", ts_epoch=base
+        )
+    )
+    store.enqueue(
+        _record(
+            "b", provider="p2", resolved_model="m2", status="error", ts_epoch=base + 10
+        )
+    )
+    store.enqueue(
+        _record(
+            "c",
+            provider="p1",
+            resolved_model="m2",
+            status="cancelled",
+            endpoint="/v1/responses",
+            ts_epoch=base + 20,
+        )
     )
     store.close()
     rows, total = store.list_requests(provider="p1")
@@ -95,7 +110,9 @@ def test_list_filters(store: RequestLogStore) -> None:
 
 
 def test_list_text_search(store: RequestLogStore) -> None:
-    store.enqueue(_record("a", input_text="deploy the kubernetes cluster", output_text="done"))
+    store.enqueue(
+        _record("a", input_text="deploy the kubernetes cluster", output_text="done")
+    )
     store.enqueue(_record("b", input_text="hello", output_text="kubernetes is complex"))
     store.enqueue(_record("c", input_text="hello", output_text="world"))
     store.close()
@@ -129,7 +146,9 @@ def test_get_missing_returns_none(store: RequestLogStore) -> None:
 
 def test_stats_aggregates(store: RequestLogStore) -> None:
     base = time.time()
-    store.enqueue(_record("s1", ts_epoch=base, duration_ms=100.0, tokens_in=5, tokens_out=7))
+    store.enqueue(
+        _record("s1", ts_epoch=base, duration_ms=100.0, tokens_in=5, tokens_out=7)
+    )
     store.enqueue(
         _record(
             "s2",
@@ -142,7 +161,16 @@ def test_stats_aggregates(store: RequestLogStore) -> None:
             tokens_out=1,
         )
     )
-    store.enqueue(_record("s3", ts_epoch=base + 7200, duration_ms=None, status="cancelled", tokens_in=None, tokens_out=None))
+    store.enqueue(
+        _record(
+            "s3",
+            ts_epoch=base + 7200,
+            duration_ms=None,
+            status="cancelled",
+            tokens_in=None,
+            tokens_out=None,
+        )
+    )
     store.close()
     stats = store.stats()
     assert stats["total"] == 3

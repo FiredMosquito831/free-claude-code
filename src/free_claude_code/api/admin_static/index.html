@@ -139,6 +139,45 @@
               </div>
             </div>
           </section>
+
+          <section id="view-web_search" class="admin-view" data-view="web_search" hidden>
+            <section class="provider-strip" aria-label="Web search providers">
+              <div class="strip-header">
+                <h3>Web Search Providers</h3>
+              </div>
+              <div id="webSearchGrid" class="provider-grid"></div>
+            </section>
+            <div
+              id="webSearchSections"
+              class="form-sections"
+              aria-label="Web search configuration"
+            ></div>
+            <section class="settings-section" aria-label="Web search analytics">
+              <div class="section-heading">
+                <div>
+                  <h3>Analytics</h3>
+                  <p>Web search usage per provider and per key from the local log.</p>
+                </div>
+                <div class="period-toggle" role="group" aria-label="Analytics period">
+                  <button
+                    id="webSearchStatsWeekly"
+                    class="secondary-button period-button active"
+                    type="button"
+                  >
+                    Weekly
+                  </button>
+                  <button
+                    id="webSearchStatsMonthly"
+                    class="secondary-button period-button"
+                    type="button"
+                  >
+                    Monthly
+                  </button>
+                </div>
+              </div>
+              <div id="webSearchAnalytics" class="analytics-body"></div>
+            </section>
+          </section>
         </div>
       </main>
 

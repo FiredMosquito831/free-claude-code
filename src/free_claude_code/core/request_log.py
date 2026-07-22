@@ -336,9 +336,7 @@ class RequestLogStore:
 
     def get_request(self, request_id: str) -> dict[str, Any] | None:
         with self._connect() as conn:
-            cursor = conn.execute(
-                "SELECT * FROM requests WHERE id = ?", (request_id,)
-            )
+            cursor = conn.execute("SELECT * FROM requests WHERE id = ?", (request_id,))
             row = cursor.fetchone()
         if row is None:
             return None
@@ -473,9 +471,7 @@ class RequestLogStore:
         ).fetchone()
         low = since if since is not None else bounds[0]
         high = until if until is not None else bounds[1]
-        hourly = (
-            low is not None and high is not None and (high - low) < 48 * 3600
-        )
+        hourly = low is not None and high is not None and (high - low) < 48 * 3600
         fmt = "%Y-%m-%dT%H:00" if hourly else "%Y-%m-%d"
         cursor = conn.execute(
             "SELECT strftime(?, ts_epoch, 'unixepoch') AS bucket, COUNT(*) AS requests,"

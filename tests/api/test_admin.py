@@ -1290,9 +1290,7 @@ def test_admin_chatgpt_oauth_import_codex_returns_tokens(monkeypatch, tmp_path):
     assert data["account_id"] == "codex_acct"
 
 
-def test_admin_chatgpt_oauth_import_codex_reports_missing_tokens(
-    monkeypatch, tmp_path
-):
+def test_admin_chatgpt_oauth_import_codex_reports_missing_tokens(monkeypatch, tmp_path):
     _set_home(monkeypatch, tmp_path)
     _clear_process_config(monkeypatch)
     app = create_test_app()
