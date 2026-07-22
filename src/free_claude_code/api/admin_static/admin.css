@@ -912,6 +912,37 @@ textarea:focus-visible,
   background: var(--input-focus);
 }
 
+.ws-advanced {
+  border-top: 1px solid var(--line);
+  padding-top: 12px;
+}
+
+.ws-advanced summary {
+  cursor: pointer;
+  user-select: none;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.ws-advanced summary:hover {
+  color: var(--text);
+}
+
+.ws-advanced[open] summary {
+  margin-bottom: 12px;
+}
+
+.ws-advanced .field {
+  margin: 0 0 12px 8px;
+}
+
+/* Advanced option fields live outside .settings-section.show-advanced, so
+   undo the generic grid's advanced-field hiding inside the card group. */
+.ws-advanced .field.advanced-field {
+  display: flex;
+}
+
 .period-toggle {
   display: flex;
   gap: 8px;

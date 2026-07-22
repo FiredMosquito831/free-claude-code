@@ -250,9 +250,12 @@ function renderSections(sections, fields) {
       sectionEl.id = `section-${section.id}`;
 
       // Rotation selects are rendered inside the credential key manager
-      // instead of the generic grid.
+      // instead of the generic grid. Websearch advanced option fields are
+      // rendered inside the provider cards' collapsed groups.
       const gridFields = sectionFields.filter(
-        (field) => !field.key.endsWith("_ROTATION"),
+        (field) =>
+          !field.key.endsWith("_ROTATION") &&
+          !(field.section === "websearch" && field.advanced),
       );
 
       const heading = document.createElement("div");
@@ -275,7 +278,7 @@ function renderSections(sections, fields) {
       });
       sectionEl.appendChild(grid);
 
-      if (sectionFields.some((field) => field.advanced)) {
+      if (gridFields.some((field) => field.advanced)) {
         const toggle = document.createElement("button");
         toggle.type = "button";
         toggle.className = "ghost-button advanced-toggle";
@@ -1193,6 +1196,31 @@ function webSearchProviderMeta(provider, activeSelection) {
   return parts.join(" · ");
 }
 
+// Advanced option fields are dotenv-only catalog entries whose env names are
+// prefixed with the provider id (e.g. EXA_*, DDGS_*); the manifest marks them
+// advanced so they group under each provider card instead of the grid.
+function webSearchAdvancedFields(provider) {
+  const prefix = `${provider.id.toUpperCase()}_`;
+  return Array.from(state.fields.values()).filter(
+    (field) =>
+      field.section === "websearch" &&
+      field.advanced &&
+      field.key.startsWith(prefix),
+  );
+}
+
+function renderWebSearchAdvanced(provider) {
+  const fields = webSearchAdvancedFields(provider);
+  if (fields.length === 0) return null;
+  const details = document.createElement("details");
+  details.className = "ws-advanced";
+  const summary = document.createElement("summary");
+  summary.textContent = "Advanced options";
+  details.appendChild(summary);
+  fields.forEach((field) => details.appendChild(renderField(field)));
+  return details;
+}
+
 function renderWebSearchProviders() {
   const grid = byId("webSearchGrid");
   if (!grid) return;
@@ -1228,6 +1256,10 @@ function renderWebSearchProviders() {
     actions.appendChild(testButton);
 
     card.append(title, meta, actions);
+    const advanced = renderWebSearchAdvanced(provider);
+    if (advanced) {
+      card.appendChild(advanced);
+    }
     if (provider.envKey) {
       const manageButton = document.createElement("button");
       manageButton.type = "button";
