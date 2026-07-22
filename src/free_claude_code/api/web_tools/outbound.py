@@ -235,8 +235,18 @@ async def _provider_web_search(
 
 
 def _web_search_response_items(response: WebSearchResponse) -> list[dict[str, str]]:
+    """Pass provider richness through to the streaming digest (title/url only
+    was the v4.9.0 shape; snippet/published/answer/provider are additive)."""
+
     return [
-        {"title": item.title, "url": item.url}
+        {
+            "title": item.title,
+            "url": item.url,
+            "snippet": item.snippet,
+            "published": item.published or "",
+            "answer": response.answer or "",
+            "provider": response.provider,
+        }
         for item in response.results[:_MAX_SEARCH_RESULTS]
     ]
 

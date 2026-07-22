@@ -15,6 +15,7 @@ from free_claude_code.core.websearch.models import (
 
 from ..base import BaseWebSearchProvider, WebSearchProviderConfig
 from ..errors import WebSearchAuthError, WebSearchError
+from ..options import option_int
 from .http import build_async_client, request_json
 
 _EXTRA_STATUS_ERRORS: dict[int, type[WebSearchError]] = {451: WebSearchAuthError}
@@ -41,7 +42,17 @@ class PerplexityWebSearchProvider(BaseWebSearchProvider):
         allowed_domains: tuple[str, ...],
         blocked_domains: tuple[str, ...],
     ) -> WebSearchResponse:
+        options = self._config.options
         payload: dict[str, Any] = {"query": query, "max_results": max_results}
+        if recency := options.get("PERPLEXITY_SEARCH_RECENCY", ""):
+            payload["search_recency_filter"] = recency
+        # Upstream: use max_tokens_per_page OR search_context_size, not both.
+        if (
+            max_tokens := option_int(options.get("PERPLEXITY_MAX_TOKENS_PER_PAGE"))
+        ) is not None:
+            payload["max_tokens_per_page"] = max_tokens
+        elif context_size := options.get("PERPLEXITY_CONTEXT_SIZE", ""):
+            payload["search_context_size"] = context_size
         if allowed_domains:
             payload["search_domain_filter"] = list(allowed_domains)
         elif blocked_domains:

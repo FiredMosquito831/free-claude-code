@@ -13,6 +13,7 @@ from free_claude_code.core.websearch.models import (
 )
 
 from ..base import BaseWebSearchProvider, WebSearchProviderConfig
+from ..options import option_int
 from .http import build_async_client, request_json
 
 _SNIPPET_CHARS = 1000
@@ -40,17 +41,27 @@ class ParallelWebSearchProvider(BaseWebSearchProvider):
         allowed_domains: tuple[str, ...],
         blocked_domains: tuple[str, ...],
     ) -> WebSearchResponse:
+        options = self._config.options
+        payload: dict[str, Any] = {
+            "objective": query,
+            "search_queries": [query],
+            "max_results": max_results,
+        }
+        if mode := options.get("PARALLEL_MODE", ""):
+            payload["mode"] = mode
+        if (
+            excerpt_chars := option_int(options.get("PARALLEL_EXCERPT_CHARS"))
+        ) is not None:
+            payload["excerpts"] = {"max_chars_per_result": excerpt_chars}
+        if (total_chars := option_int(options.get("PARALLEL_TOTAL_CHARS"))) is not None:
+            payload["max_chars_total"] = total_chars
         data = await request_json(
             self._require_client(),
             self.provider_id,
             "POST",
             f"{self._base_url}/v1beta/search",
             headers={"x-api-key": key, "parallel-beta": _BETA_HEADER},
-            json_body={
-                "objective": query,
-                "search_queries": [query],
-                "max_results": max_results,
-            },
+            json_body=payload,
         )
         rows = data.get("results", []) if isinstance(data, dict) else []
         items = []

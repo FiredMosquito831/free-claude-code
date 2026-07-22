@@ -69,9 +69,19 @@ class DdgsWebSearchProvider(BaseWebSearchProvider):
         )
 
     def _run_text_search(self, query: str, max_results: int) -> list[dict[str, Any]]:
+        options = self._config.options
+        kwargs: dict[str, Any] = {"max_results": max_results}
+        if backend := options.get("DDGS_BACKEND", ""):
+            kwargs["backend"] = backend
+        if region := options.get("DDGS_REGION", ""):
+            kwargs["region"] = region
+        if timelimit := options.get("DDGS_TIMELIMIT", ""):
+            kwargs["timelimit"] = timelimit
+        if safesearch := options.get("DDGS_SAFESEARCH", ""):
+            kwargs["safesearch"] = safesearch
         return DDGS(
             proxy=self._config.proxy, timeout=int(self._config.http_timeout)
-        ).text(query, max_results=max_results)
+        ).text(query, **kwargs)
 
 
 def _text(value: Any) -> str:

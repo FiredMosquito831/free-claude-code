@@ -5,7 +5,8 @@ Concrete adapters implement :meth:`BaseWebSearchProvider._search_with_key`;
 """
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from collections.abc import Mapping
+from dataclasses import dataclass, field
 from typing import ClassVar
 
 import httpx
@@ -31,6 +32,8 @@ class WebSearchProviderConfig:
     base_url: str | None  # override (searxng self-host, testing)
     proxy: str | None
     http_timeout: float  # seconds, default 20
+    # Dotenv-only advanced options (env var name -> raw value), catalog-driven.
+    options: Mapping[str, str] = field(default_factory=dict)
 
 
 class BaseWebSearchProvider(ABC):

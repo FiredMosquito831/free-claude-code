@@ -288,6 +288,14 @@ class Settings(BaseSettings):
     websearch_log_max_rows: int = Field(
         default=50000, validation_alias="WEBSEARCH_LOG_MAX_ROWS"
     )
+    # Rich digest for the proxy-fulfilled web_search text block: per-result
+    # excerpt character cap and the optional provider answer lead.
+    websearch_digest_chars: int = Field(
+        default=600, validation_alias="WEBSEARCH_DIGEST_CHARS"
+    )
+    websearch_digest_answer: bool = Field(
+        default=True, validation_alias="WEBSEARCH_DIGEST_ANSWER"
+    )
 
     # ==================== Debug / diagnostic logging (avoid sensitive content) ====================
     # Minimum log level for the JSON file sink (DEBUG, INFO, WARNING, ERROR, CRITICAL).

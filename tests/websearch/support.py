@@ -24,6 +24,7 @@ def build_config(
     base_url: str | None = None,
     proxy: str | None = None,
     http_timeout: float = 20.0,
+    options: dict[str, str] | None = None,
 ) -> WebSearchProviderConfig:
     return WebSearchProviderConfig(
         api_keys=api_keys,
@@ -31,6 +32,7 @@ def build_config(
         base_url=base_url,
         proxy=proxy,
         http_timeout=http_timeout,
+        options=options or {},
     )
 
 

@@ -25,6 +25,7 @@ from free_claude_code.core.websearch.models import WebSearchResponse
 from .adapters import ADAPTER_CLASSES
 from .base import BaseWebSearchProvider, WebSearchProviderConfig
 from .errors import WebSearchConfigError, WebSearchError
+from .options import read_websearch_options
 from .rotation import (
     ROTATION_POLICIES,
     default_rotation_policy,
@@ -68,6 +69,7 @@ def build_provider(settings: Settings, provider_id: str) -> BaseWebSearchProvide
     base_url = _descriptor_base_url(descriptor, settings)
     rotation = _resolve_rotation_policy(descriptor, len(keys))
     proxy = _env_or_dotenv(WEBSEARCH_PROXY_ENV)
+    options = read_websearch_options(provider_id, descriptor)
     adapter_cls = ADAPTER_CLASSES[provider_id]
     return adapter_cls(
         WebSearchProviderConfig(
@@ -76,6 +78,7 @@ def build_provider(settings: Settings, provider_id: str) -> BaseWebSearchProvide
             base_url=base_url,
             proxy=proxy or None,
             http_timeout=DEFAULT_HTTP_TIMEOUT,
+            options=options,
         )
     )
 

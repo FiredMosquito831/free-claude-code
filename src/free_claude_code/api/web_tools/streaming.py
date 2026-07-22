@@ -5,6 +5,7 @@ from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from typing import Any
 
+from free_claude_code.config.settings import Settings
 from free_claude_code.core.anthropic import MessagesRequest
 from free_claude_code.core.anthropic.server_tool_sse import (
     SERVER_TOOL_USE,
@@ -25,13 +26,70 @@ from .request import (
     has_tool_named,
 )
 
+_MONTH_NAMES = (
+    "January",
+    "February",
+    "March",
+    "April",
+    "May",
+    "June",
+    "July",
+    "August",
+    "September",
+    "October",
+    "November",
+    "December",
+)
 
-def _search_summary(query: str, results: list[dict[str, str]]) -> str:
+
+def _format_page_age(published: str) -> str:
+    """Human date for Anthropic's ``page_age`` field (e.g. "July 22, 2026").
+
+    Non-ISO values (e.g. Serper's "Jan 2, 2026") pass through unchanged.
+    """
+
+    try:
+        parsed = datetime.fromisoformat(published.replace("Z", "+00:00"))
+    except ValueError:
+        return published
+    return f"{_MONTH_NAMES[parsed.month - 1]} {parsed.day}, {parsed.year}"
+
+
+def _web_search_result_block(result: dict[str, str]) -> dict[str, str]:
+    block = {
+        "type": "web_search_result",
+        "title": result["title"],
+        "url": result["url"],
+    }
+    if published := result.get("published", ""):
+        block["page_age"] = _format_page_age(published)
+    return block
+
+
+def _search_summary(
+    query: str, results: list[dict[str, str]], settings: Settings
+) -> str:
+    """Rich per-result digest: optional provider answer lead, then numbered
+    title (date) + url + excerpt capped at ``websearch_digest_chars``.
+
+    Legacy scrape items carry only title/url, which reproduces the old shape.
+    """
+
     if not results:
         return f"No web search results found for: {query}"
     lines = [f"Search results for: {query}"]
+    answer = results[0].get("answer", "") if settings.websearch_digest_answer else ""
+    if answer:
+        lines.append(answer)
     for index, result in enumerate(results, start=1):
-        lines.append(f"{index}. {result['title']}\n{result['url']}")
+        header = f"{index}. {result['title']}"
+        if published := result.get("published", ""):
+            header += f" ({_format_page_age(published)})"
+        block = f"{header}\n{result['url']}"
+        excerpt = result.get("snippet", "") or result.get("content", "")
+        if excerpt:
+            block += f"\n{excerpt[: settings.websearch_digest_chars]}"
+        lines.append(block)
     return "\n\n".join(lines)
 
 
@@ -107,16 +165,12 @@ async def stream_web_server_tool_response(
     try:
         if tool_name == "web_search":
             query = str(tool_input["query"])
-            results = await outbound._run_web_search(query)
+            settings = Settings()
+            results = await outbound._run_web_search(query, settings)
             result_content: Any = [
-                {
-                    "type": "web_search_result",
-                    "title": result["title"],
-                    "url": result["url"],
-                }
-                for result in results
+                _web_search_result_block(result) for result in results
             ]
-            summary = _search_summary(query, results)
+            summary = _search_summary(query, results, settings)
             result_block_type = WEB_SEARCH_TOOL_RESULT
         else:
             fetched = await outbound._run_web_fetch(

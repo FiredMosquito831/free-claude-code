@@ -107,3 +107,112 @@ def test_websearch_catalog_matches_adapter_registry() -> None:
             )
 
     assert problems == []
+
+
+# Exact advanced option sets per coordination spec (docs/AGENT_SPEC_WEBSEARCH_ADV.md).
+_EXPECTED_ADVANCED_ENVS: dict[str, tuple[str, ...]] = {
+    "ddgs": ("DDGS_BACKEND", "DDGS_REGION", "DDGS_TIMELIMIT", "DDGS_SAFESEARCH"),
+    "ollama": (),
+    "exa": (
+        "EXA_SEARCH_TYPE",
+        "EXA_CONTENTS",
+        "EXA_CATEGORY",
+        "EXA_MAX_AGE_HOURS",
+        "EXA_START_PUBLISHED_DATE",
+        "EXA_END_PUBLISHED_DATE",
+        "EXA_USER_LOCATION",
+    ),
+    "tavily": (
+        "TAVILY_SEARCH_DEPTH",
+        "TAVILY_TOPIC",
+        "TAVILY_TIME_RANGE",
+        "TAVILY_INCLUDE_ANSWER",
+        "TAVILY_INCLUDE_RAW_CONTENT",
+    ),
+    "brave": (
+        "BRAVE_SEARCH_MODE",
+        "BRAVE_EXTRA_SNIPPETS",
+        "BRAVE_FRESHNESS",
+        "BRAVE_COUNTRY",
+        "BRAVE_SEARCH_LANG",
+        "BRAVE_LLM_MAX_TOKENS",
+    ),
+    "searxng": (
+        "SEARXNG_ENGINES",
+        "SEARXNG_CATEGORIES",
+        "SEARXNG_TIME_RANGE",
+        "SEARXNG_LANGUAGE",
+    ),
+    "jina": ("JINA_MAX_TOKENS", "JINA_SITE", "JINA_GL"),
+    "serper": ("SERPER_GL", "SERPER_HL", "SERPER_TBS", "SERPER_RICH_BLOCKS"),
+    "firecrawl": (
+        "FIRECRAWL_SOURCES",
+        "FIRECRAWL_SCRAPE_FORMAT",
+        "FIRECRAWL_TBS",
+        "FIRECRAWL_LOCATION",
+    ),
+    "linkup": ("LINKUP_DEPTH", "LINKUP_OUTPUT_TYPE"),
+    "perplexity": (
+        "PERPLEXITY_SEARCH_RECENCY",
+        "PERPLEXITY_CONTEXT_SIZE",
+        "PERPLEXITY_MAX_TOKENS_PER_PAGE",
+    ),
+    "parallel": (
+        "PARALLEL_MODE",
+        "PARALLEL_EXCERPT_CHARS",
+        "PARALLEL_TOTAL_CHARS",
+    ),
+    "searchapi": (
+        "SEARCHAPI_ENGINE",
+        "SEARCHAPI_TIME_PERIOD",
+        "SEARCHAPI_GL",
+        "SEARCHAPI_HL",
+    ),
+    "serpapi": ("SERPAPI_ENGINE", "SERPAPI_TBS", "SERPAPI_GL", "SERPAPI_HL"),
+}
+
+_FIELD_TYPES = frozenset({"select", "text", "number", "boolean"})
+
+
+def test_websearch_catalog_advanced_option_envs_match_spec() -> None:
+    """The exact per-provider option env table from the coordination spec."""
+
+    actual = {
+        provider_id: tuple(spec.env for spec in desc.advanced_options)
+        for provider_id, desc in WEBSEARCH_CATALOG.items()
+    }
+    assert actual == _EXPECTED_ADVANCED_ENVS
+
+
+def test_websearch_catalog_option_specs_are_internally_consistent() -> None:
+    problems: list[str] = []
+    seen_envs: set[str] = set()
+    for provider_id, desc in WEBSEARCH_CATALOG.items():
+        prefix = f"{provider_id.upper()}_"
+        for spec in desc.advanced_options:
+            where = f"{provider_id}:{spec.env}"
+            if not spec.env.startswith(prefix):
+                problems.append(f"{where}: env does not start with {prefix!r}")
+            if spec.env in seen_envs:
+                problems.append(f"{where}: duplicate env across catalog")
+            seen_envs.add(spec.env)
+            if spec.field_type not in _FIELD_TYPES:
+                problems.append(f"{where}: field_type {spec.field_type!r}")
+            if not spec.label.strip():
+                problems.append(f"{where}: label is empty")
+            if spec.field_type == "select":
+                if not spec.options:
+                    problems.append(f"{where}: select without options")
+                elif spec.options[0][0] != spec.default:
+                    problems.append(
+                        f"{where}: first select option {spec.options[0][0]!r} "
+                        f"!= default {spec.default!r}"
+                    )
+                values = [value for value, _label in spec.options]
+                if len(set(values)) != len(values):
+                    problems.append(f"{where}: duplicate select values")
+            elif spec.options:
+                problems.append(f"{where}: non-select with options")
+            if spec.field_type != "boolean" and spec.default != "":
+                problems.append(f"{where}: unexpected default {spec.default!r}")
+    assert problems == []
