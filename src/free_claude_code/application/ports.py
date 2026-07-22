@@ -49,6 +49,10 @@ class RequestRuntimeLease(Protocol):
 
     async def release(self) -> None: ...
 
+    async def __aenter__(self) -> RequestRuntimeLease: ...
+
+    async def __aexit__(self, *_exc: object) -> None: ...
+
 
 class RequestRuntimePort(Protocol):
     """Provider generation and model metadata required by application requests."""

@@ -1,6 +1,7 @@
 """Unit tests for the SQLite request log store."""
 
 import time
+from typing import Any
 
 import pytest
 
@@ -21,7 +22,7 @@ def store(tmp_path):
 
 
 def _record(request_id: str, **overrides) -> RequestRecord:
-    defaults = {
+    defaults: dict[str, Any] = {
         "id": request_id,
         "endpoint": "/v1/messages",
         "protocol": "anthropic",

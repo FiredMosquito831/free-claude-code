@@ -614,5 +614,7 @@ async def test_stream_response_uses_send_not_stream_context_manager(
     assert any("content_block_start" in chunk and "text" in chunk for chunk in chunks)
     assert any("text_delta" in chunk and "hello" in chunk for chunk in chunks)
     client.send.assert_awaited_once()
-    assert client.send.await_args.kwargs.get("stream") is True
+    send_call = client.send.await_args
+    assert send_call is not None
+    assert send_call.kwargs.get("stream") is True
     fake_response.aclose.assert_awaited_once()

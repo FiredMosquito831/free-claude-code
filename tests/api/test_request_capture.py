@@ -3,6 +3,7 @@
 import asyncio
 import json
 from collections.abc import AsyncIterator
+from typing import Any
 
 import pytest
 
@@ -12,8 +13,10 @@ from free_claude_code.api.request_capture import (
     extract_input_text,
     extract_request_params,
 )
+from free_claude_code.api.response_streams import ManagedStreamingResponse
 from free_claude_code.config.settings import Settings
 from free_claude_code.core.anthropic.models import Message, MessagesRequest
+from free_claude_code.core.async_iterators import AsyncCloseable
 from free_claude_code.core.failures import ExecutionFailure, FailureKind
 from free_claude_code.core.request_log import (
     RequestLogStore,
@@ -33,9 +36,8 @@ def _events(*frames: tuple[str, dict]) -> list[str]:
     return [f"event: {event}\ndata: {json.dumps(data)}\n\n" for event, data in frames]
 
 
-def _make_capture(store: RequestLogStore, **overrides) -> RequestCapture:
-    defaults = {
-        "store": store,
+def _make_capture(store: RequestLogStore | None, **overrides) -> RequestCapture:
+    defaults: dict[str, Any] = {
         "request_id": "req_test",
         "endpoint": "/v1/messages",
         "protocol": "anthropic",
@@ -45,7 +47,7 @@ def _make_capture(store: RequestLogStore, **overrides) -> RequestCapture:
         "params": {"max_tokens": 100},
     }
     defaults.update(overrides)
-    return RequestCapture(**defaults)
+    return RequestCapture(store, **defaults)
 
 
 async def _collect(body: AsyncIterator[str]) -> list[str]:
@@ -168,6 +170,7 @@ async def test_client_disconnect_records_cancelled(store: RequestLogStore) -> No
     capture = _make_capture(store)
     stream = capture.wrap(body())
     await anext(stream)
+    assert isinstance(stream, AsyncCloseable)
     await stream.aclose()
     store.close()
 
@@ -399,6 +402,7 @@ async def test_messages_handler_end_to_end_capture() -> None:
         messages=[Message(role="user", content="hello")],
     )
     response = await handler.create(request, request_id="req_e2e")
+    assert isinstance(response, ManagedStreamingResponse)
     async for _ in response.body_iterator:
         pass
     await response.aclose()

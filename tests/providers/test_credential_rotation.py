@@ -31,7 +31,8 @@ class _InvalidRequestError(Exception):
 
 
 def _settings(**overrides) -> Settings:
-    return Settings(_env_file=None, **overrides)
+    # conftest disables dotenv loading for Settings during tests.
+    return Settings(**overrides)
 
 
 def _request() -> MessagesRequest:

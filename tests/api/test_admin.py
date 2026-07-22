@@ -1,5 +1,5 @@
 from pathlib import Path
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 import pytest
@@ -12,6 +12,9 @@ from free_claude_code.application.model_metadata import (
 from free_claude_code.config.admin.values import MASKED_SECRET
 from free_claude_code.config.server_urls import local_admin_url
 from free_claude_code.config.settings import Settings
+from free_claude_code.providers.base import BaseProvider, ProviderConfig
+from free_claude_code.providers.credential_rotation import CredentialRotationState
+from free_claude_code.providers.runtime.rotating import RotatingProvider
 from tests.api.support import create_test_app, provider_manager_for_app
 
 
@@ -500,6 +503,42 @@ def test_credential_key_management_flow(monkeypatch, tmp_path):
     listed = client.get("/admin/api/credentials/NVIDIA_NIM_API_KEY/keys").json()
     assert listed["count"] == 1
     assert listed["keys"] == ["sk-sec…5678"]
+
+
+def test_credential_key_listing_reports_cached_rotating_health(monkeypatch, tmp_path):
+    """Key health must be populated from the cached RotatingProvider.
+
+    Regression: the runtime-lease acquisition dropped its ``await``, so the
+    ``async with`` raised TypeError, the informational fallback swallowed it,
+    and every health entry silently stayed null.
+    """
+    _set_home(monkeypatch, tmp_path)
+    _clear_process_config(monkeypatch)
+    rotating = RotatingProvider(
+        ProviderConfig(
+            api_key="sk-first-key-1234",
+            base_url="http://x",
+            api_keys=("sk-first-key-1234", "sk-second-key-5678"),
+            credential_rotation="round_robin",
+        ),
+        [MagicMock(spec=BaseProvider), MagicMock(spec=BaseProvider)],
+        CredentialRotationState(2, "round_robin"),
+    )
+    app = create_test_app(providers={"nvidia_nim": rotating})
+    client = _local_client(app)
+
+    applied = client.post(
+        "/admin/api/config/apply",
+        json={"values": {"NVIDIA_NIM_API_KEY": "sk-first-key-1234,sk-second-key-5678"}},
+    )
+    assert applied.status_code == 200
+
+    listed = client.get("/admin/api/credentials/NVIDIA_NIM_API_KEY/keys")
+
+    assert listed.status_code == 200
+    health = listed.json()["health"]
+    assert len(health) == 2
+    assert [entry["state"] for entry in health] == ["HEALTHY", "HEALTHY"]
 
 
 def test_credential_key_management_rejects_duplicates_and_bad_input(

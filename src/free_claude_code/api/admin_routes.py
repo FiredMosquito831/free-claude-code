@@ -245,7 +245,7 @@ async def list_credential_keys(
     )
     if provider_id is not None:
         try:
-            async with services.requests.acquire() as lease:
+            async with await services.requests.acquire() as lease:
                 if lease.is_provider_cached(provider_id):
                     provider = lease.resolve_provider(provider_id)
                     if isinstance(provider, RotatingProvider):

@@ -180,7 +180,9 @@ def _access_token_seconds_remaining(access_token: str) -> int | None:
     return int(exp - time.time())
 
 
-def _refresh_access_token(refresh_token: str) -> tuple[str, str | None, int | None]:
+def _refresh_access_token(
+    refresh_token: str,
+) -> tuple[str, str | None, int | None, str | None]:
     """Refresh an OAuth access token and return the new credential set."""
     response = httpx.post(
         CODEX_OAUTH_TOKEN_URL,
@@ -208,6 +210,8 @@ def _refresh_access_token(refresh_token: str) -> tuple[str, str | None, int | No
     if isinstance(expires_in, (int, float)):
         expires_at = int(time.time() + expires_in)
     new_id_token = payload.get("id_token")
+    if not isinstance(new_id_token, str):
+        new_id_token = None
     return new_access, new_refresh, expires_at, new_id_token
 
 
@@ -278,8 +282,9 @@ def _ensure_fresh_source(source: _TokenSource) -> _TokenSource:
     with _REFRESH_LOCK:
         # Another thread may have refreshed while we waited on the lock.
         current = _reload_source(source)
-        if current.has_access_token:
-            remaining = _access_token_seconds_remaining(current.access_token)
+        current_access_token = current.access_token
+        if current.has_access_token and current_access_token is not None:
+            remaining = _access_token_seconds_remaining(current_access_token)
             if remaining is not None and remaining > 300:
                 return current
         if not current.has_refresh_token or current.refresh_token is None:
