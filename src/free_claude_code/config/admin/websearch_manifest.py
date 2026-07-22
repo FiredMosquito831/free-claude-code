@@ -1,4 +1,4 @@
-"""Catalog-derived Admin web search fields (selection, credentials, rotation)."""
+"""Catalog-derived Admin web search fields (selection, credentials, options)."""
 
 from typing import Any
 
@@ -36,6 +36,7 @@ def websearch_field_specs() -> tuple[dict[str, Any], ...]:
         _provider_select_spec(),
         _searxng_base_url_spec(),
         *_credential_field_specs(),
+        *_advanced_option_field_specs(),
     )
 
 
@@ -114,4 +115,43 @@ def _credential_field_specs() -> tuple[dict[str, Any], ...]:
                 ),
             }
         )
+    return tuple(specs)
+
+
+# WebSearchOptionSpec.field_type -> ConfigFieldSpec.field_type. Unrecognized
+# option types degrade to a plain text input so the admin UI keeps working if
+# the catalog later grows new option types.
+_ADVANCED_OPTION_FIELD_TYPES: dict[str, str] = {
+    "select": "select",
+    "text": "text",
+    "number": "number",
+    "boolean": "boolean",
+}
+
+
+def _advanced_option_field_specs() -> tuple[dict[str, Any], ...]:
+    """Return dotenv-only advanced option fields from catalog descriptors."""
+
+    specs: list[dict[str, Any]] = []
+    for descriptor in WEBSEARCH_CATALOG.values():
+        # Descriptors predate advanced_options on this branch; tolerate both
+        # shapes so the manifest works before and after the catalog lands.
+        for option in getattr(descriptor, "advanced_options", ()):
+            spec: dict[str, Any] = {
+                "key": option.env,
+                "label": option.label,
+                "section_id": "websearch",
+                "field_type": _ADVANCED_OPTION_FIELD_TYPES.get(
+                    option.field_type,
+                    "text",
+                ),
+                "default": option.default,
+                "advanced": True,
+                "description": option.cost_note or "Dotenv-only advanced option.",
+            }
+            if option.field_type == "select":
+                spec["options"] = tuple(
+                    ConfigOptionSpec(value, label) for value, label in option.options
+                )
+            specs.append(spec)
     return tuple(specs)

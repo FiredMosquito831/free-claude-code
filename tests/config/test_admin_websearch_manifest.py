@@ -1,8 +1,12 @@
 """Admin manifest contract for catalog-derived web search fields."""
 
+from types import SimpleNamespace
+
+from free_claude_code.config.admin import websearch_manifest
 from free_claude_code.config.admin.manifest import (
     FIELD_BY_KEY,
     SECTIONS,
+    ConfigFieldSpec,
     ConfigOptionSpec,
 )
 from free_claude_code.config.admin.websearch_manifest import (
@@ -21,6 +25,48 @@ def _option_values(field) -> tuple[str, ...]:
         option.value if isinstance(option, ConfigOptionSpec) else option
         for option in field.options
     )
+
+
+def _fake_option(
+    env: str,
+    label: str,
+    field_type: str,
+    *,
+    default: str = "",
+    options: tuple[tuple[str, str], ...] = (),
+    cost_note: str = "",
+):
+    """Duck-typed stand-in for the catalog's WebSearchOptionSpec."""
+
+    return SimpleNamespace(
+        env=env,
+        label=label,
+        field_type=field_type,
+        default=default,
+        options=options,
+        cost_note=cost_note,
+    )
+
+
+def _fake_descriptor(provider_id: str, options: list | None = None):
+    """Duck-typed WebSearchDescriptor; advanced_options only when provided."""
+
+    descriptor = SimpleNamespace(
+        provider_id=provider_id,
+        display_name=f"Fake {provider_id}",
+        credential_env=None,
+        credential_url=None,
+        settings_attr=None,
+        free_tier="free",
+    )
+    if options is not None:
+        descriptor.advanced_options = tuple(options)
+    return descriptor
+
+
+def _fake_fields(catalog: dict, monkeypatch) -> dict[str, ConfigFieldSpec]:
+    monkeypatch.setattr(websearch_manifest, "WEBSEARCH_CATALOG", catalog)
+    return {spec["key"]: ConfigFieldSpec(**spec) for spec in websearch_field_specs()}
 
 
 def test_websearch_section_follows_web_tools_section() -> None:
@@ -114,6 +160,145 @@ def test_websearch_field_specs_cover_section_fields() -> None:
             for descriptor in WEBSEARCH_CATALOG.values()
             if descriptor.credential_env is not None
         ),
+        *(
+            option.env
+            for descriptor in WEBSEARCH_CATALOG.values()
+            for option in getattr(descriptor, "advanced_options", ())
+        ),
     }
     assert keys == expected
     assert all(spec["section_id"] == "websearch" for spec in websearch_field_specs())
+
+
+def test_advanced_option_fields_generated_per_provider(monkeypatch) -> None:
+    catalog = {
+        "exa": _fake_descriptor(
+            "exa",
+            [
+                _fake_option(
+                    "EXA_SEARCH_TYPE",
+                    "Search type",
+                    "select",
+                    options=(
+                        ("", "auto"),
+                        ("instant", "instant"),
+                        ("deep", "deep"),
+                    ),
+                    cost_note="deep* = $0.015/query vs $0.005",
+                ),
+                _fake_option("EXA_MAX_AGE_HOURS", "Max age hours", "number"),
+            ],
+        ),
+        "ddgs": _fake_descriptor(
+            "ddgs",
+            [
+                _fake_option(
+                    "DDGS_SAFESEARCH",
+                    "Safe search",
+                    "select",
+                    options=(("", "moderate"), ("on", "on"), ("off", "off")),
+                ),
+            ],
+        ),
+    }
+    fields = _fake_fields(catalog, monkeypatch)
+
+    search_type = fields["EXA_SEARCH_TYPE"]
+    assert search_type.section_id == "websearch"
+    assert search_type.field_type == "select"
+    assert search_type.advanced is True
+    # Dotenv-only: it must not bind a Settings attribute or be secret.
+    assert search_type.settings_attr is None
+    assert search_type.secret is False
+    assert search_type.label == "Search type"
+    assert search_type.default == ""
+    assert search_type.description == "deep* = $0.015/query vs $0.005"
+    assert search_type.options == (
+        ConfigOptionSpec("", "auto"),
+        ConfigOptionSpec("instant", "instant"),
+        ConfigOptionSpec("deep", "deep"),
+    )
+
+    max_age = fields["EXA_MAX_AGE_HOURS"]
+    assert max_age.field_type == "number"
+    assert max_age.advanced is True
+    assert max_age.settings_attr is None
+    assert max_age.options == ()
+
+    safesearch = fields["DDGS_SAFESEARCH"]
+    assert safesearch.field_type == "select"
+    assert safesearch.advanced is True
+    assert _option_values(safesearch) == ("", "on", "off")
+
+
+def test_advanced_option_field_type_mapping(monkeypatch) -> None:
+    catalog = {
+        "probe": _fake_descriptor(
+            "probe",
+            [
+                _fake_option(
+                    "PROBE_SELECT",
+                    "Select",
+                    "select",
+                    options=(("a", "A"), ("b", "B")),
+                ),
+                _fake_option("PROBE_TEXT", "Text", "text", default="us-en"),
+                _fake_option("PROBE_NUMBER", "Number", "number"),
+                _fake_option("PROBE_BOOL", "Bool", "boolean", default="true"),
+            ],
+        ),
+    }
+    fields = _fake_fields(catalog, monkeypatch)
+
+    assert fields["PROBE_SELECT"].field_type == "select"
+    assert fields["PROBE_SELECT"].options == (
+        ConfigOptionSpec("a", "A"),
+        ConfigOptionSpec("b", "B"),
+    )
+    assert fields["PROBE_TEXT"].field_type == "text"
+    assert fields["PROBE_TEXT"].default == "us-en"
+    assert fields["PROBE_NUMBER"].field_type == "number"
+    assert fields["PROBE_BOOL"].field_type == "boolean"
+    assert fields["PROBE_BOOL"].default == "true"
+    for key in ("PROBE_TEXT", "PROBE_NUMBER", "PROBE_BOOL"):
+        assert fields[key].options == ()
+
+
+def test_advanced_option_description_uses_cost_note_or_fallback(
+    monkeypatch,
+) -> None:
+    catalog = {
+        "probe": _fake_descriptor(
+            "probe",
+            [
+                _fake_option("PROBE_PLAIN", "Plain", "text"),
+                _fake_option(
+                    "PROBE_COSTLY",
+                    "Costly",
+                    "text",
+                    cost_note="2 credits/query",
+                ),
+            ],
+        ),
+    }
+    fields = _fake_fields(catalog, monkeypatch)
+
+    assert fields["PROBE_COSTLY"].description == "2 credits/query"
+    # Empty cost notes still yield a short dotenv-only hint for the UI.
+    assert fields["PROBE_PLAIN"].description
+
+
+def test_descriptors_without_advanced_options_emit_no_advanced_fields(
+    monkeypatch,
+) -> None:
+    catalog = {
+        "legacy": _fake_descriptor("legacy"),
+        "empty": _fake_descriptor("empty", []),
+    }
+    monkeypatch.setattr(websearch_manifest, "WEBSEARCH_CATALOG", catalog)
+
+    specs = websearch_field_specs()
+    assert [spec for spec in specs if spec.get("advanced")] == []
+    # The legacy descriptor still participates in the provider select.
+    provider = next(spec for spec in specs if spec["key"] == "WEB_SEARCH_PROVIDER")
+    assert "legacy" in tuple(option.value for option in provider["options"])
