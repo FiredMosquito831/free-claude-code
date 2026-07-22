@@ -211,8 +211,24 @@ class TestRecorderSeam:
         assert len(outcomes) == 1
 
     @pytest.mark.asyncio
-    async def test_search_with_logging_without_analytics_module_is_noop(self) -> None:
-        # websearch.analytics lands with Worker B; until then the seam is a no-op.
-        assert registry._default_recorder() is None
-        provider = StubWebSearchProvider(build_config())
-        assert (await search_with_logging(provider, "q")).results
+    async def test_search_with_logging_defaults_to_analytics_recorder(
+        self, monkeypatch, tmp_path
+    ) -> None:
+        # Worker B landed: the seam resolves to websearch.analytics.record_search.
+        from free_claude_code.websearch.analytics import (
+            default_websearch_db_path,
+            record_search,
+            reset_analytics_state,
+        )
+
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.setenv("USERPROFILE", str(tmp_path))
+        monkeypatch.setenv("WEBSEARCH_LOG_ENABLED", "false")
+        reset_analytics_state()
+        try:
+            assert registry._default_recorder() is record_search
+            provider = StubWebSearchProvider(build_config())
+            assert (await search_with_logging(provider, "q")).results
+            assert not default_websearch_db_path().exists()
+        finally:
+            reset_analytics_state()
