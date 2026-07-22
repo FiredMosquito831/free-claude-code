@@ -11,6 +11,7 @@ import base64
 import hashlib
 import secrets
 import string
+import sys
 import threading
 import time
 import webbrowser
@@ -29,6 +30,7 @@ from .oauth_login import (
     ChatGPTOAuthLoginError,
     ChatGPTOAuthLoginTimeoutError,
     _write_codex_auth_file,
+    perform_chatgpt_oauth_login,
 )
 
 CHATGPT_OAUTH_ISSUER = "https://auth.openai.com"
@@ -397,3 +399,29 @@ def perform_browser_login(
     if account_id:
         print(f"Account ID: {account_id}", flush=True)
     return tokens
+
+
+def chatgpt_oauth_login_command() -> None:
+    """CLI entry point for ``fcc-chatgpt-oauth-login``.
+
+    Uses the browser PKCE flow by default (opens the login page automatically)
+    and falls back to the headless device-code flow when a browser cannot be
+    opened. ``--device`` forces the device flow.
+    """
+    force_device = "--device" in sys.argv[1:]
+
+    try:
+        if not force_device:
+            try:
+                perform_browser_login()
+                return
+            except ChatGPTOAuthBrowserUnavailableError as exc:
+                print(f"Browser login unavailable: {exc}", file=sys.stderr, flush=True)
+                print("Falling back to device-code login...", flush=True)
+        perform_chatgpt_oauth_login()
+    except ChatGPTOAuthLoginTimeoutError as exc:
+        print(f"Timeout: {exc}", file=sys.stderr, flush=True)
+        raise SystemExit(1) from exc
+    except ChatGPTOAuthLoginError as exc:
+        print(f"Login failed: {exc}", file=sys.stderr, flush=True)
+        raise SystemExit(1) from exc

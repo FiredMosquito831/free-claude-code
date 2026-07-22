@@ -5,6 +5,7 @@ from collections.abc import AsyncIterator
 import pytest
 
 from free_claude_code.config.admin.manifest import FIELD_BY_KEY
+from free_claude_code.config.credentials import parse_credential_keys
 from free_claude_code.config.provider_catalog import PROVIDER_CATALOG
 from free_claude_code.config.settings import Settings
 from free_claude_code.core.anthropic.models import Message, MessagesRequest
@@ -17,7 +18,6 @@ from free_claude_code.providers.credential_rotation import (
 from free_claude_code.providers.runtime.config import (
     build_provider_config,
     credential_rotation_policy,
-    parse_credential_keys,
 )
 from free_claude_code.providers.runtime.rotating import RotatingProvider
 

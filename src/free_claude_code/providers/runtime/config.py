@@ -3,6 +3,7 @@
 import os
 
 from free_claude_code.application.errors import ApplicationUnavailableError
+from free_claude_code.config.credentials import parse_credential_keys
 from free_claude_code.config.env_files import env_file_override
 from free_claude_code.config.provider_catalog import ProviderDescriptor
 from free_claude_code.config.settings import Settings
@@ -43,11 +44,6 @@ def require_provider_credential(
     if descriptor.credential_url:
         message = f"{message} Get a key at {descriptor.credential_url}"
     raise ApplicationUnavailableError(message)
-
-
-def parse_credential_keys(credential: str) -> tuple[str, ...]:
-    """Split a comma-separated credential value into individual keys."""
-    return tuple(key for key in (part.strip() for part in credential.split(",")) if key)
 
 
 def credential_rotation_policy(

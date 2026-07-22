@@ -59,6 +59,20 @@ IMPORT_EXCEPTIONS: dict[tuple[str, str], str] = {
         "Owner: admin dashboard ChatGPT OAuth import API. "
         "Reason: admin routes expose the Codex CLI token import endpoint backed by the provider utility."
     ),
+    (
+        "free_claude_code.api.admin_routes",
+        "free_claude_code.providers.chatgpt_oauth.browser_login",
+    ): (
+        "Owner: admin dashboard ChatGPT OAuth browser login API. "
+        "Reason: admin routes expose browser-based OAuth login endpoints backed by the provider utility."
+    ),
+    (
+        "free_claude_code.api.admin_routes",
+        "free_claude_code.providers.runtime.rotating",
+    ): (
+        "Owner: admin dashboard credential key health API. "
+        "Reason: admin routes read live per-key health from cached rotating providers."
+    ),
 }
 
 FACADE_ONLY_BOUNDARIES = {

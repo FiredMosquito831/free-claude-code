@@ -17,6 +17,7 @@ from free_claude_code.config.admin.manifest import FIELD_BY_KEY
 from free_claude_code.config.admin.persistence import validate_updates
 from free_claude_code.config.admin.sources import is_locked_source
 from free_claude_code.config.admin.values import load_config_response, load_value_state
+from free_claude_code.config.credentials import parse_credential_keys
 from free_claude_code.config.model_refs import configured_chat_model_refs
 from free_claude_code.config.provider_catalog import PROVIDER_CATALOG
 from free_claude_code.config.settings import Settings
@@ -42,7 +43,6 @@ from free_claude_code.providers.chatgpt_oauth.oauth_login import (
 from free_claude_code.providers.chatgpt_oauth.oauth_login import (
     ChatGPTOAuthLoginError as ChatGPTOAuthLoginFlowError,
 )
-from free_claude_code.providers.runtime.config import parse_credential_keys
 from free_claude_code.providers.runtime.rotating import RotatingProvider
 from free_claude_code.websearch.errors import WebSearchError
 from free_claude_code.websearch.registry import search_with_logging
