@@ -17,7 +17,7 @@ ALLOWED_PACKAGE_DEPENDENCIES: dict[str, set[str]] = {
     "messaging": {"core"},
     "providers": {"application", "config", "core"},
     "websearch": {"config", "core"},
-    "api": {"application", "config", "core"},
+    "api": {"application", "config", "core", "websearch"},
     "cli": {"config", "core"},
     "runtime": {
         "api",

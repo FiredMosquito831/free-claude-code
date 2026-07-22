@@ -11,6 +11,14 @@ from aiohttp import ClientSession, ClientTimeout, TCPConnector
 from aiohttp.abc import AbstractResolver, ResolveResult
 from loguru import logger
 
+from free_claude_code.config.settings import Settings
+from free_claude_code.core.websearch.models import WebSearchResponse
+from free_claude_code.websearch.errors import WebSearchError
+from free_claude_code.websearch.registry import (
+    resolve_provider_id,
+    search_with_logging,
+)
+
 from . import constants
 from .constants import (
     _MAX_FETCH_CHARS,
@@ -26,6 +34,7 @@ from .egress import (
     get_validated_stream_addrinfos_for_egress,
 )
 from .parsers import HTMLTextParser, SearchResultParser
+from .search_providers import runtime_provider
 
 
 def _safe_public_host_for_logs(url: str) -> str:
@@ -182,7 +191,57 @@ async def _drain_aiohttp_body_capped(
             break
 
 
-async def _run_web_search(query: str) -> list[dict[str, str]]:
+async def _run_web_search(
+    query: str, settings: Settings | None = None
+) -> list[dict[str, str]]:
+    """Run web_search: configured provider -> ddgs -> legacy DuckDuckGo scrape."""
+
+    settings = settings if settings is not None else Settings()
+    if settings.web_search_provider != "off":
+        results = await _provider_web_search(query, settings)
+        if results is not None:
+            return results
+    return await _legacy_web_search_scrape(query)
+
+
+async def _provider_web_search(
+    query: str, settings: Settings
+) -> list[dict[str, str]] | None:
+    """Search via the websearch registry; None means fall back to the legacy scrape."""
+
+    provider_id = resolve_provider_id(settings)
+    if provider_id is None:
+        return None
+    try:
+        provider = await runtime_provider(settings, provider_id)
+        response = await search_with_logging(
+            provider, query, max_results=_MAX_SEARCH_RESULTS
+        )
+    except WebSearchError as error:
+        logger.warning("web_search provider {} failed: {}", provider_id, error)
+    else:
+        return _web_search_response_items(response)
+    if provider_id == "ddgs":
+        return None
+    try:
+        ddgs_provider = await runtime_provider(settings, "ddgs")
+        response = await search_with_logging(
+            ddgs_provider, query, max_results=_MAX_SEARCH_RESULTS
+        )
+    except WebSearchError as error:
+        logger.warning("web_search ddgs fallback failed: {}", error)
+        return None
+    return _web_search_response_items(response)
+
+
+def _web_search_response_items(response: WebSearchResponse) -> list[dict[str, str]]:
+    return [
+        {"title": item.title, "url": item.url}
+        for item in response.results[:_MAX_SEARCH_RESULTS]
+    ]
+
+
+async def _legacy_web_search_scrape(query: str) -> list[dict[str, str]]:
     async with (
         httpx.AsyncClient(
             timeout=_REQUEST_TIMEOUT_S,

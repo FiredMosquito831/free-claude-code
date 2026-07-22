@@ -1,6 +1,7 @@
 """Local admin UI routes and APIs."""
 
 import ipaddress
+import time
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
@@ -13,11 +14,20 @@ from pydantic import BaseModel, Field
 from free_claude_code.application.model_metadata import ProviderModelRefreshResult
 from free_claude_code.config.admin.manifest import FIELD_BY_KEY
 from free_claude_code.config.admin.persistence import validate_updates
-from free_claude_code.config.admin.values import load_config_response
+from free_claude_code.config.admin.sources import is_locked_source
+from free_claude_code.config.admin.values import load_config_response, load_value_state
 from free_claude_code.config.model_refs import configured_chat_model_refs
+from free_claude_code.config.websearch_catalog import (
+    WEBSEARCH_CATALOG,
+    WebSearchDescriptor,
+)
+from free_claude_code.websearch.errors import WebSearchError
+from free_claude_code.websearch.registry import search_with_logging
+from free_claude_code.websearch.rotation import mask_key_label, parse_websearch_keys
 
 from .dependencies import get_services
 from .ports import ApiServices
+from .web_tools.search_providers import cached_key_pool_snapshot, runtime_provider
 
 router = APIRouter()
 
@@ -33,6 +43,12 @@ class AdminConfigPayload(BaseModel):
     """Partial config update submitted by the admin UI."""
 
     values: dict[str, Any] = Field(default_factory=dict)
+
+
+class WebSearchKeyPayload(BaseModel):
+    """Single web search credential key submitted by the admin UI."""
+
+    key: str
 
 
 def _is_loopback_host(host: str | None) -> bool:
@@ -152,6 +168,137 @@ async def models(
 ):
     require_loopback_admin(request)
     return _model_options(services)
+
+
+@router.get("/admin/api/websearch/credentials/{env_key}/keys")
+async def list_websearch_credential_keys(env_key: str, request: Request):
+    require_loopback_admin(request)
+    descriptor = _websearch_descriptor_for_env(env_key)
+    state = load_value_state()
+    entry = state.get(env_key, {"value": "", "source": "default"})
+    keys = parse_websearch_keys(entry["value"])
+    return {
+        "provider_id": descriptor.provider_id,
+        "env_key": env_key,
+        "locked": is_locked_source(entry["source"]),
+        "keys": [
+            {"index": index, "key_label": mask_key_label(key)}
+            for index, key in enumerate(keys)
+        ],
+        "health": cached_key_pool_snapshot(descriptor.provider_id),
+    }
+
+
+@router.post("/admin/api/websearch/credentials/{env_key}/keys")
+async def add_websearch_credential_key(
+    env_key: str,
+    payload: WebSearchKeyPayload,
+    request: Request,
+    services: ApiServices = Depends(get_services),
+):
+    require_loopback_admin(request)
+    descriptor = _websearch_descriptor_for_env(env_key)
+    key = payload.key.strip()
+    if not key or "," in key:
+        raise HTTPException(
+            status_code=422,
+            detail="API key must be non-empty and must not contain commas",
+        )
+    keys = _editable_websearch_keys(env_key)
+    result = await services.admin.apply_admin_config({env_key: ",".join([*keys, key])})
+    return result | {
+        "provider_id": descriptor.provider_id,
+        "keys": _masked_keys(env_key),
+    }
+
+
+@router.delete("/admin/api/websearch/credentials/{env_key}/keys/{index}")
+async def delete_websearch_credential_key(
+    env_key: str,
+    index: int,
+    request: Request,
+    services: ApiServices = Depends(get_services),
+):
+    require_loopback_admin(request)
+    descriptor = _websearch_descriptor_for_env(env_key)
+    keys = _editable_websearch_keys(env_key)
+    if index < 0 or index >= len(keys):
+        raise HTTPException(status_code=404, detail="Web search key index out of range")
+    del keys[index]
+    result = await services.admin.apply_admin_config({env_key: ",".join(keys)})
+    return result | {
+        "provider_id": descriptor.provider_id,
+        "keys": _masked_keys(env_key),
+    }
+
+
+@router.post("/admin/api/websearch/providers/{provider_id}/test")
+async def test_websearch_provider(
+    provider_id: str,
+    request: Request,
+    services: ApiServices = Depends(get_services),
+):
+    require_loopback_admin(request)
+    if provider_id not in WEBSEARCH_CATALOG:
+        raise HTTPException(status_code=404, detail="Unknown web search provider")
+    settings = services.requests.current_settings()
+    started = time.perf_counter()
+    try:
+        provider = await runtime_provider(settings, provider_id)
+        response = await search_with_logging(provider, "web search", max_results=3)
+    except WebSearchError as error:
+        return {
+            "provider_id": provider_id,
+            "ok": False,
+            "latency_ms": _elapsed_millis(started),
+            "error": _websearch_error_payload(error),
+        }
+    return {
+        "provider_id": provider_id,
+        "ok": True,
+        "latency_ms": _elapsed_millis(started),
+        "result_count": len(response.results),
+        "titles": [item.title for item in response.results[:3]],
+    }
+
+
+def _websearch_descriptor_for_env(env_key: str) -> WebSearchDescriptor:
+    for descriptor in WEBSEARCH_CATALOG.values():
+        if descriptor.credential_env == env_key:
+            return descriptor
+    raise HTTPException(status_code=404, detail="Unknown web search credential")
+
+
+def _editable_websearch_keys(env_key: str) -> list[str]:
+    """Current parsed keys, refusing mutation when an external source owns the value."""
+
+    entry = load_value_state().get(env_key, {"value": "", "source": "default"})
+    if is_locked_source(entry["source"]):
+        raise HTTPException(
+            status_code=409,
+            detail=f"{env_key} comes from a locked source ({entry['source']})",
+        )
+    return list(parse_websearch_keys(entry["value"]))
+
+
+def _masked_keys(env_key: str) -> list[dict[str, Any]]:
+    entry = load_value_state().get(env_key, {"value": "", "source": "default"})
+    return [
+        {"index": index, "key_label": mask_key_label(key)}
+        for index, key in enumerate(parse_websearch_keys(entry["value"]))
+    ]
+
+
+def _websearch_error_payload(error: WebSearchError) -> dict[str, Any]:
+    return {
+        "kind": error.kind,
+        "message": error.message,
+        "status_code": error.status_code,
+    }
+
+
+def _elapsed_millis(started: float) -> float:
+    return round((time.perf_counter() - started) * 1000.0, 3)
 
 
 @router.post("/admin/api/models/refresh")
