@@ -1,0 +1,88 @@
+"""Web search usage analytics admin API (loopback-only, like the admin UI)."""
+
+from datetime import UTC, datetime
+from typing import Any, Literal
+
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+
+from free_claude_code.websearch.analytics import WebSearchLogStore, get_shared_store
+
+from .admin_routes import require_loopback_admin
+
+router = APIRouter()
+
+_MAX_LIMIT = 500
+
+Period = Literal["weekly", "monthly"]
+
+
+def get_websearch_log_store() -> WebSearchLogStore:
+    """Resolve the shared analytics store (dependency-overridable in tests)."""
+
+    return get_shared_store()
+
+
+@router.get("/admin/api/websearch/stats")
+async def websearch_stats(
+    request: Request,
+    period: Period = "weekly",
+    store: WebSearchLogStore = Depends(get_websearch_log_store),
+) -> dict[str, Any]:
+    """Per-provider/per-key rollups bucketed by ISO week or month."""
+
+    require_loopback_admin(request)
+    return store.stats(period)
+
+
+@router.get("/admin/api/websearch/requests")
+async def websearch_requests(
+    request: Request,
+    limit: int = Query(50, ge=1, le=_MAX_LIMIT),
+    offset: int = Query(0, ge=0),
+    provider: str | None = None,
+    status: Literal["success", "error"] | None = None,
+    q: str | None = None,
+    since: str | None = None,
+    until: str | None = None,
+    store: WebSearchLogStore = Depends(get_websearch_log_store),
+) -> dict[str, Any]:
+    """Paged request log (newest first) with provider/status/text/date filters."""
+
+    require_loopback_admin(request)
+    return store.requests(
+        limit=limit,
+        offset=offset,
+        provider=provider,
+        status=status,
+        q=q,
+        since_epoch=_parse_iso_bound(since, "since"),
+        until_epoch=_parse_iso_bound(until, "until"),
+    )
+
+
+@router.delete("/admin/api/websearch/requests")
+async def websearch_requests_clear(
+    request: Request,
+    store: WebSearchLogStore = Depends(get_websearch_log_store),
+) -> dict[str, Any]:
+    """Delete every recorded web search request."""
+
+    require_loopback_admin(request)
+    deleted = store.clear()
+    return {"cleared": True, "deleted": deleted}
+
+
+def _parse_iso_bound(value: str | None, name: str) -> float | None:
+    if value is None or not value.strip():
+        return None
+    text = value.strip()
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail=f"invalid {name} ISO timestamp: {value!r}",
+        ) from None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=UTC)
+    return parsed.timestamp()
