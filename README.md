@@ -14,7 +14,7 @@ Use Claude Code, Codex, Pi, or their IDE extensions through your own provider-ba
 
 Run your coding agents with free, paid, or local models. Choose and validate providers from one local Admin UI.
 
-[Quick Start](#quick-start) · [Providers](#choose-a-provider) · [Clients](#connect-your-client) · [Integrations](#optional-integrations) · [Manage](#manage-your-installation)
+[Quick Start](#quick-start) · [Providers](#choose-a-provider) · [Fork Additions](#fork-additions) · [Clients](#connect-your-client) · [Integrations](#optional-integrations) · [Manage](#manage-your-installation)
 
 </div>
 
@@ -43,13 +43,168 @@ Run your coding agents with free, paid, or local models. Choose and validate pro
 ## What You Get
 
 - Launch Claude Code with `fcc-claude`, Codex with `fcc-codex`, or Pi with `fcc-pi`.
-- Switch among 25 cloud and local providers from the Admin UI.
+- Switch among 27 cloud and local providers from the Admin UI.
 - Use each coding agent's native model picker.
 - Route Fable, Opus, Sonnet, Haiku, and fallback traffic to different models.
 - Keep streaming, tool use, reasoning, and image input across compatible models.
 - Connect Claude Code and Codex in VS Code or Claude Code through JetBrains ACP.
 - Optionally run Claude Code sessions through Discord or Telegram with voice-note transcription.
 - Protect the local proxy with optional token authentication.
+
+<a id="fork-additions"></a>
+
+## Fork Additions (vs Upstream)
+
+This fork layers the following features on top of upstream `main`:
+
+- **Proxy-level web search** for Claude Code's official `web_search` server tool, backed by 14 real search providers (plus advanced per-provider options and a rich result digest).
+- **Multi-key credential rotation** for model and web search providers (comma-separated keys, rotation policies, health tracking, admin key management).
+- **Full request analytics** — a persistent SQLite log of every request plus Requests and Web Search tabs in the Admin UI.
+- **Two extra model providers**: Kimi For Coding and the experimental ChatGPT OAuth provider.
+
+All of it is configured through the same `.env` file (see [.env.example](.env.example)) and the Admin UI.
+
+### Web Search Providers
+
+Claude Code's `web_search` is an Anthropic **server tool**: normally Anthropic's servers execute the search and bill you for it. FCC fulfills that server tool at the proxy level instead — the client emits a `web_search` tool-use block, FCC runs the search against a provider you choose (or the keyless default), and streams the results back as a regular text block. No Anthropic search credits are used, and the whole flow works with any model provider.
+
+FCC supports 14 search backends, resolved by `WEB_SEARCH_PROVIDER`:
+
+| Provider | Env var | Free tier | Get a key |
+| --- | --- | --- | --- |
+| DuckDuckGo (`ddgs`) | — (keyless) | Free, keyless (unofficial metasearch; engines may IP-rate-limit) | — |
+| Ollama Web Search | `OLLAMA_SEARCH_API_KEY` | Free hosted tier with a free Ollama account | [ollama.com/settings/keys](https://ollama.com/settings/keys) |
+| Exa | `EXA_API_KEY` | $20 signup credit + $10/month free ongoing | [dashboard.exa.ai/api-keys](https://dashboard.exa.ai/api-keys) |
+| Tavily | `TAVILY_API_KEY` | 1,000 credits/month free, no card | [app.tavily.com/home](https://app.tavily.com/home) |
+| Brave Search | `BRAVE_SEARCH_API_KEY` | $5 in free credits every month | [api-dashboard.search.brave.com](https://api-dashboard.search.brave.com/) |
+| SearXNG | `SEARXNG_BASE_URL` | Free, self-hosted (AGPL); instance must enable `format=json` | self-hosted |
+| Jina Search | `JINA_API_KEY` | 10M free tokens for new keys | [jina.ai/api-dashboard](https://jina.ai/api-dashboard/) |
+| Serper (Google) | `SERPER_API_KEY` | 2,500 free one-time queries | [serper.dev/api-key](https://serper.dev/api-key) |
+| Firecrawl | `FIRECRAWL_API_KEY` | One-time free credit grant on signup | [firecrawl.dev/app/api-keys](https://www.firecrawl.dev/app/api-keys) |
+| Linkup | `LINKUP_API_KEY` | $20 free credit, topped back up monthly | [app.linkup.so](https://app.linkup.so/) |
+| Perplexity Search | `PERPLEXITY_SEARCH_API_KEY` | No meaningful free tier (prepaid credit; mint a fresh key) | [perplexity.ai/settings/api](https://www.perplexity.ai/settings/api) |
+| Parallel | `PARALLEL_API_KEY` | Pay-per-use from $0.005 per 10 results (Search API beta) | [platform.parallel.ai](https://platform.parallel.ai/) |
+| SearchAPI.io | `SEARCHAPI_API_KEY` | 100 free one-time requests | [searchapi.io](https://www.searchapi.io/) |
+| SerpAPI | `SERPAPI_API_KEY` | 250 free searches/month | [serpapi.com/manage-api-key](https://serpapi.com/manage-api-key) |
+
+`WEB_SEARCH_PROVIDER` accepts `auto` (default), `off`, or one of the provider IDs `ddgs | ollama | exa | tavily | brave | searxng | jina | serper | firecrawl | linkup | perplexity | parallel | searchapi | serpapi`:
+
+- **`auto`** picks the first configured provider in catalog order; with no keys set it falls back to keyless `ddgs`, so search works **zero-config out of the box**.
+- **`off`** disables the provider system and uses the legacy DuckDuckGo HTML scrape.
+- An explicit ID pins that provider.
+
+Full fallback chain: **explicitly configured provider → auto-resolved configured provider → `ddgs` (keyless) → legacy scrape (`off`)**.
+
+Minimal `.env` example (two keys with round-robin, see below):
+
+```bash
+WEB_SEARCH_PROVIDER=auto
+TAVILY_API_KEY="tvly-key1,tvly-key2"
+TAVILY_API_KEY_ROTATION=round_robin
+# Optional outbound proxy for web search (http/socks5):
+WEBSEARCH_PROXY=""
+```
+
+You can also configure everything from **Admin UI → Web Search**: provider cards show free-tier notes and key status, each card has an **Advanced options** drawer, and an analytics view with a weekly/monthly toggle shows usage per provider and per key. Deep per-provider pricing, free-tier details, and a capability matrix live in [research/web-search-providers.md](research/web-search-providers.md) and [research/web-search-advanced.md](research/web-search-advanced.md).
+
+#### Multi-key rotation (web search keys)
+
+Comma-separate multiple keys in the same variable and pick a policy via `{ENV}_ROTATION`:
+
+```bash
+EXA_API_KEY="exa-key-a,exa-key-b,exa-key-c"
+EXA_API_KEY_ROTATION=failover   # single | round_robin | least_used | failover (on_error)
+```
+
+The default is `failover` when multiple keys are set, `single` otherwise. See [Model-Provider Key Rotation](#model-provider-key-rotation) below for policy and health semantics — web search keys share the same engine.
+
+#### Advanced options
+
+Each provider exposes dotenv-only knobs (never in pydantic Settings); empty/unset values reproduce default behavior exactly. All of them are editable from the Web Search tab's **Advanced options** drawers. Highlights — cost warnings apply as noted:
+
+| Provider | Notable options |
+| --- | --- |
+| Exa | `EXA_SEARCH_TYPE` (`deep*` = $0.015/query vs $0.005), `EXA_CONTENTS` modes incl. `full` (+$0.001/page per content type), `EXA_CATEGORY` verticals (company/people disable date+exclude filters), `EXA_MAX_AGE_HOURS`, published-date bounds, `EXA_USER_LOCATION` |
+| Brave | `BRAVE_SEARCH_MODE=llm-context` ($5/1k, returns pre-extracted page text), `BRAVE_LLM_MAX_TOKENS` (1024–32768, llm-context only), `BRAVE_FRESHNESS`, country/language, plan-gated `BRAVE_EXTRA_SNIPPETS` |
+| Tavily | `TAVILY_SEARCH_DEPTH=advanced` (2 credits/query), `TAVILY_TOPIC`, `TAVILY_TIME_RANGE`, `TAVILY_INCLUDE_ANSWER` (basic/advanced LLM answer lead), `TAVILY_INCLUDE_RAW_CONTENT` (free full page text, may add latency) |
+| Serper | `SERPER_GL`/`SERPER_HL`/`SERPER_TBS`, `SERPER_RICH_BLOCKS` (default on: answerBox/knowledgeGraph/peopleAlsoAsk feed the answer lead) |
+| Linkup | `LINKUP_DEPTH=deep` (10x cost, $0.05/query), `LINKUP_OUTPUT_TYPE=sourcedAnswer` (+$0.001, returns answer+sources) |
+| Perplexity | `PERPLEXITY_SEARCH_RECENCY`, `PERPLEXITY_CONTEXT_SIZE` (omitted when `PERPLEXITY_MAX_TOKENS_PER_PAGE` is set) |
+| Parallel | `PARALLEL_MODE` (turbo cheapest → advanced highest quality), `PARALLEL_EXCERPT_CHARS`, `PARALLEL_TOTAL_CHARS` |
+| Firecrawl | `FIRECRAWL_SOURCES` (web/news/images), `FIRECRAWL_SCRAPE_FORMAT` summary/markdown (multiplies credits per result), `FIRECRAWL_TBS`, `FIRECRAWL_LOCATION` |
+| Jina | `JINA_MAX_TOKENS` (token-billed; best cost guardrail), `JINA_SITE`, `JINA_GL` |
+| SearXNG | `SEARXNG_ENGINES`, `SEARXNG_CATEGORIES`, `SEARXNG_TIME_RANGE`, `SEARXNG_LANGUAGE` |
+| ddgs | `DDGS_BACKEND` (pin one free engine to dodge per-engine rate limits), `DDGS_REGION`, `DDGS_TIMELIMIT`, `DDGS_SAFESEARCH` |
+| SerpAPI | `SERPAPI_ENGINE` (`google_light` is cheaper, `num=100` works), `SERPAPI_TBS`, `SERPAPI_GL`, `SERPAPI_HL` |
+| SearchAPI.io | `SEARCHAPI_ENGINE` (google/news/scholar/bing), `SEARCHAPI_TIME_PERIOD`, `SEARCHAPI_GL`, `SEARCHAPI_HL` |
+
+See the **Web Search Advanced Options** block in [.env.example](.env.example) for the full list with inline cost notes.
+
+#### Rich digest
+
+Search results are rendered as a richer digest than upstream's title/URL list: an optional provider **answer lead** (from Exa/Tavily/Linkup/Serper rich blocks, etc.), then numbered results with title, publication date (`page_age` where the provider exposes it), URL, and an excerpt capped per result:
+
+```bash
+WEBSEARCH_DIGEST_CHARS=600     # per-result excerpt character cap
+WEBSEARCH_DIGEST_ANSWER=true   # include the provider answer lead
+```
+
+#### Web search analytics
+
+Every search is recorded (non-blocking, background-writer SQLite at `~/.fcc/logs/websearch.db`) with provider, key label, query (256 chars), result count, duration, status, and cost where known. The Admin UI Web Search tab aggregates this into weekly/monthly rollups per provider and per key, plus top errors:
+
+```bash
+WEBSEARCH_LOG_ENABLED=true
+WEBSEARCH_LOG_MAX_ROWS=50000   # retention cap; oldest rows pruned
+```
+
+<a id="model-provider-key-rotation"></a>
+
+### Model-Provider Key Rotation
+
+The same rotation engine works for model provider API keys: put multiple keys in one variable, comma-separated, and choose a policy with `{ENV}_ROTATION`:
+
+```bash
+OPENROUTER_API_KEY="sk-or-key1,sk-or-key2,sk-or-key3"
+OPENROUTER_API_KEY_ROTATION=round_robin
+```
+
+Policies:
+
+| Policy | Behavior |
+| --- | --- |
+| `single` | Always the first key (default when one key is set). |
+| `round_robin` | Spread requests across healthy keys in turn. |
+| `least_used` | Healthy key with the fewest requests goes first. |
+| `failover` (alias `on_error`) | Stick to the first healthy key until it fails, then move to the next (default when multiple keys are set). |
+
+Health model: a key that fails is benched with tiered cooldowns (10s → 30s → 60s → 120s); three consecutive failures open the circuit until cooldown elapses, after which a single half-open probe is allowed through. Auth failures (401/403) trigger an escalating lockout (5 min → 1 h → 24 h) followed by a probe before full reuse. Rotation only happens for errors another key could fix (auth, rate limits, 5xx/overload, transport) — a plain 400 is not rotated. All of this is visible and manageable from **Admin UI → Providers → Manage keys**, which shows per-key state/usage and lets you reset keys, plus a **Test** button per provider.
+
+### Request Analytics
+
+FCC keeps a persistent log of every completed request (non-blocking background writer, SQLite at `~/.fcc/logs/requests.db`) and surfaces it in **Admin UI → Requests**. Each record captures endpoint/protocol, requested and resolved model, provider, stream flag, input/output text (capped at 50k chars) with SHA-256 hashes and lengths, reasoning and params, token counts, TTFT and duration, status (success/error/cancelled), and error details. The tab offers search, filters (provider/model/status/endpoint/time range), per-request detail views, aggregate stats (totals, error rate, p50/p95 latency, per-provider and per-model breakdowns, top errors, hourly/daily series), and a clear-all action (`/admin/api/requests*` endpoints back it).
+
+```bash
+REQUEST_LOG_ENABLED=true
+REQUEST_LOG_MAX_ROWS=50000        # retention cap; oldest rows pruned periodically
+REQUEST_LOG_CAPTURE_BODIES=true   # false stores only body lengths + SHA-256 hashes
+```
+
+**Privacy note:** request bodies are stored locally on disk by default. They never leave your machine, but set `REQUEST_LOG_CAPTURE_BODIES=false` (or disable the log entirely) if you'd rather not persist conversation text.
+
+### ChatGPT OAuth Provider (experimental)
+
+FCC can talk directly to `chatgpt.com/backend-api/codex/responses` (OpenAI Responses API) using your ChatGPT subscription's OAuth tokens. Three login paths:
+
+1. **Admin UI → Providers → ChatGPT OAuth Login** — browser PKCE flow.
+2. `fcc-chatgpt-oauth-login` — headless device flow from the CLI.
+3. `codex login` — leave `CHATGPT_OAUTH_ACCESS_TOKEN` empty and FCC reads `~/.codex/auth.json`.
+
+Use models like `chatgpt_oauth/gpt-5.5`. This is **experimental and unsanctioned** (not an official OpenAI API product); the backend exposes only a limited set of built-in tools, so custom FCC tools may be rejected — see the provider notes under [Choose A Provider](#choose-a-provider). Optional overrides: `CHATGPT_OAUTH_ACCOUNT_ID`, `CHATGPT_OAUTH_BASE_URL`, `CHATGPT_OAUTH_PROXY`.
+
+### Kimi For Coding Provider
+
+Moonshot's coding-plan endpoint, separate from the standard Kimi platform: OpenAI-compatible at `api.kimi.com/coding/v1`. Set `KIMI_CODING_API_KEY` from [kimi.com/coding](https://kimi.com/coding) and pick a model such as `kimi_coding/kimi-k2.5`.
 
 ## Quick Start
 
