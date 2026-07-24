@@ -2,19 +2,19 @@
 
 # 🤖 Free Claude Code
 
-Use Claude Code, Codex, Pi, or their IDE extensions through your own provider-backed proxy.
+An Anthropic-compatible local proxy for Claude Code, Codex, Pi, and their IDE extensions — backed by 27 model providers, with multi-key rotation everywhere, built-in web search providers, and full request analytics.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=for-the-badge)](https://opensource.org/licenses/MIT)
 [![Python 3.14](https://img.shields.io/badge/python-3.14-3776ab.svg?style=for-the-badge&logo=python&logoColor=white)](https://www.python.org/downloads/)
 [![uv](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/uv/main/assets/badge/v0.json&style=for-the-badge)](https://github.com/astral-sh/uv)
-[![Tested with Pytest](https://img.shields.io/badge/testing-Pytest-00c0ff.svg?style=for-the-badge)](https://github.com/Alishahryar1/free-claude-code/actions/workflows/tests.yml)
+[![Tested with Pytest](https://img.shields.io/badge/testing-Pytest-00c0ff.svg?style=for-the-badge)](https://github.com/FiredMosquito831/free-claude-code/actions/workflows/tests.yml)
 [![Type checking: Ty](https://img.shields.io/badge/type%20checking-ty-ffcc00.svg?style=for-the-badge)](https://pypi.org/project/ty/)
 [![Code style: Ruff](https://img.shields.io/badge/code%20formatting-ruff-f5a623.svg?style=for-the-badge)](https://github.com/astral-sh/ruff)
 [![Logging: Loguru](https://img.shields.io/badge/logging-loguru-4ecdc4.svg?style=for-the-badge)](https://github.com/Delgan/loguru)
 
 Run your coding agents with free, paid, or local models. Choose and validate providers from one local Admin UI.
 
-[Quick Start](#quick-start) · [Providers](#choose-a-provider) · [Fork Additions](#fork-additions) · [Clients](#connect-your-client) · [Integrations](#optional-integrations) · [Manage](#manage-your-installation)
+[Features](#features) · [Quick Start](#quick-start) · [Model Providers](#model-providers) · [Web Search](#web-search) · [Admin Dashboard](#admin-dashboard) · [Clients](#connect-your-client) · [Integrations](#optional-integrations) · [Manage](#manage-your-installation)
 
 </div>
 
@@ -40,171 +40,24 @@ Run your coding agents with free, paid, or local models. Choose and validate pro
   <p><em>Codex native <code>/model</code> picker with the generated FCC catalog.</em></p>
 </div>
 
-## What You Get
+<a id="features"></a>
 
-- Launch Claude Code with `fcc-claude`, Codex with `fcc-codex`, or Pi with `fcc-pi`.
-- Switch among 27 cloud and local providers from the Admin UI.
-- Use each coding agent's native model picker.
-- Route Fable, Opus, Sonnet, Haiku, and fallback traffic to different models.
-- Keep streaming, tool use, reasoning, and image input across compatible models.
-- Connect Claude Code and Codex in VS Code or Claude Code through JetBrains ACP.
-- Optionally run Claude Code sessions through Discord or Telegram with voice-note transcription.
-- Protect the local proxy with optional token authentication.
+## Features
 
-<a id="fork-additions"></a>
-
-## Fork Additions (vs Upstream)
-
-This fork layers the following features on top of upstream `main`:
-
-- **Proxy-level web search** for Claude Code's official `web_search` server tool, backed by 14 real search providers (plus advanced per-provider options and a rich result digest).
-- **Multi-key credential rotation** for model and web search providers (comma-separated keys, rotation policies, health tracking, admin key management).
-- **Full request analytics** — a persistent SQLite log of every request plus Requests and Web Search tabs in the Admin UI.
-- **Two extra model providers**: Kimi For Coding and the experimental ChatGPT OAuth provider.
-
-All of it is configured through the same `.env` file (see [.env.example](.env.example)) and the Admin UI.
-
-### Web Search Providers
-
-Claude Code's `web_search` is an Anthropic **server tool**: normally Anthropic's servers execute the search and bill you for it. FCC fulfills that server tool at the proxy level instead — the client emits a `web_search` tool-use block, FCC runs the search against a provider you choose (or the keyless default), and streams the results back as a regular text block. No Anthropic search credits are used, and the whole flow works with any model provider.
-
-FCC supports 14 search backends, resolved by `WEB_SEARCH_PROVIDER`:
-
-| Provider | Env var | Free tier | Get a key |
-| --- | --- | --- | --- |
-| DuckDuckGo (`ddgs`) | — (keyless) | Free, keyless (unofficial metasearch; engines may IP-rate-limit) | — |
-| Ollama Web Search | `OLLAMA_SEARCH_API_KEY` | Free hosted tier with a free Ollama account | [ollama.com/settings/keys](https://ollama.com/settings/keys) |
-| Exa | `EXA_API_KEY` | $20 signup credit + $10/month free ongoing | [dashboard.exa.ai/api-keys](https://dashboard.exa.ai/api-keys) |
-| Tavily | `TAVILY_API_KEY` | 1,000 credits/month free, no card | [app.tavily.com/home](https://app.tavily.com/home) |
-| Brave Search | `BRAVE_SEARCH_API_KEY` | $5 in free credits every month | [api-dashboard.search.brave.com](https://api-dashboard.search.brave.com/) |
-| SearXNG | `SEARXNG_BASE_URL` | Free, self-hosted (AGPL); instance must enable `format=json` | self-hosted |
-| Jina Search | `JINA_API_KEY` | 10M free tokens for new keys | [jina.ai/api-dashboard](https://jina.ai/api-dashboard/) |
-| Serper (Google) | `SERPER_API_KEY` | 2,500 free one-time queries | [serper.dev/api-key](https://serper.dev/api-key) |
-| Firecrawl | `FIRECRAWL_API_KEY` | One-time free credit grant on signup | [firecrawl.dev/app/api-keys](https://www.firecrawl.dev/app/api-keys) |
-| Linkup | `LINKUP_API_KEY` | $20 free credit, topped back up monthly | [app.linkup.so](https://app.linkup.so/) |
-| Perplexity Search | `PERPLEXITY_SEARCH_API_KEY` | No meaningful free tier (prepaid credit; mint a fresh key) | [perplexity.ai/settings/api](https://www.perplexity.ai/settings/api) |
-| Parallel | `PARALLEL_API_KEY` | Pay-per-use from $0.005 per 10 results (Search API beta) | [platform.parallel.ai](https://platform.parallel.ai/) |
-| SearchAPI.io | `SEARCHAPI_API_KEY` | 100 free one-time requests | [searchapi.io](https://www.searchapi.io/) |
-| SerpAPI | `SERPAPI_API_KEY` | 250 free searches/month | [serpapi.com/manage-api-key](https://serpapi.com/manage-api-key) |
-
-`WEB_SEARCH_PROVIDER` accepts `auto` (default), `off`, or one of the provider IDs `ddgs | ollama | exa | tavily | brave | searxng | jina | serper | firecrawl | linkup | perplexity | parallel | searchapi | serpapi`:
-
-- **`auto`** picks the first configured provider in catalog order; with no keys set it falls back to keyless `ddgs`, so search works **zero-config out of the box**.
-- **`off`** disables the provider system and uses the legacy DuckDuckGo HTML scrape.
-- An explicit ID pins that provider.
-
-Full fallback chain: **explicitly configured provider → auto-resolved configured provider → `ddgs` (keyless) → legacy scrape (`off`)**.
-
-Minimal `.env` example (two keys with round-robin, see below):
-
-```bash
-WEB_SEARCH_PROVIDER=auto
-TAVILY_API_KEY="tvly-key1,tvly-key2"
-TAVILY_API_KEY_ROTATION=round_robin
-# Optional outbound proxy for web search (http/socks5):
-WEBSEARCH_PROXY=""
-```
-
-You can also configure everything from **Admin UI → Web Search**: provider cards show free-tier notes and key status, each card has an **Advanced options** drawer, and an analytics view with a weekly/monthly toggle shows usage per provider and per key. Deep per-provider pricing, free-tier details, and a capability matrix live in [research/web-search-providers.md](research/web-search-providers.md) and [research/web-search-advanced.md](research/web-search-advanced.md).
-
-#### Multi-key rotation (web search keys)
-
-Comma-separate multiple keys in the same variable and pick a policy via `{ENV}_ROTATION`:
-
-```bash
-EXA_API_KEY="exa-key-a,exa-key-b,exa-key-c"
-EXA_API_KEY_ROTATION=failover   # single | round_robin | least_used | failover (on_error)
-```
-
-The default is `failover` when multiple keys are set, `single` otherwise. See [Model-Provider Key Rotation](#model-provider-key-rotation) below for policy and health semantics — web search keys share the same engine.
-
-#### Advanced options
-
-Each provider exposes dotenv-only knobs (never in pydantic Settings); empty/unset values reproduce default behavior exactly. All of them are editable from the Web Search tab's **Advanced options** drawers. Highlights — cost warnings apply as noted:
-
-| Provider | Notable options |
+| Area | What you get |
 | --- | --- |
-| Exa | `EXA_SEARCH_TYPE` (`deep*` = $0.015/query vs $0.005), `EXA_CONTENTS` modes incl. `full` (+$0.001/page per content type), `EXA_CATEGORY` verticals (company/people disable date+exclude filters), `EXA_MAX_AGE_HOURS`, published-date bounds, `EXA_USER_LOCATION` |
-| Brave | `BRAVE_SEARCH_MODE=llm-context` ($5/1k, returns pre-extracted page text), `BRAVE_LLM_MAX_TOKENS` (1024–32768, llm-context only), `BRAVE_FRESHNESS`, country/language, plan-gated `BRAVE_EXTRA_SNIPPETS` |
-| Tavily | `TAVILY_SEARCH_DEPTH=advanced` (2 credits/query), `TAVILY_TOPIC`, `TAVILY_TIME_RANGE`, `TAVILY_INCLUDE_ANSWER` (basic/advanced LLM answer lead), `TAVILY_INCLUDE_RAW_CONTENT` (free full page text, may add latency) |
-| Serper | `SERPER_GL`/`SERPER_HL`/`SERPER_TBS`, `SERPER_RICH_BLOCKS` (default on: answerBox/knowledgeGraph/peopleAlsoAsk feed the answer lead) |
-| Linkup | `LINKUP_DEPTH=deep` (10x cost, $0.05/query), `LINKUP_OUTPUT_TYPE=sourcedAnswer` (+$0.001, returns answer+sources) |
-| Perplexity | `PERPLEXITY_SEARCH_RECENCY`, `PERPLEXITY_CONTEXT_SIZE` (omitted when `PERPLEXITY_MAX_TOKENS_PER_PAGE` is set) |
-| Parallel | `PARALLEL_MODE` (turbo cheapest → advanced highest quality), `PARALLEL_EXCERPT_CHARS`, `PARALLEL_TOTAL_CHARS` |
-| Firecrawl | `FIRECRAWL_SOURCES` (web/news/images), `FIRECRAWL_SCRAPE_FORMAT` summary/markdown (multiplies credits per result), `FIRECRAWL_TBS`, `FIRECRAWL_LOCATION` |
-| Jina | `JINA_MAX_TOKENS` (token-billed; best cost guardrail), `JINA_SITE`, `JINA_GL` |
-| SearXNG | `SEARXNG_ENGINES`, `SEARXNG_CATEGORIES`, `SEARXNG_TIME_RANGE`, `SEARXNG_LANGUAGE` |
-| ddgs | `DDGS_BACKEND` (pin one free engine to dodge per-engine rate limits), `DDGS_REGION`, `DDGS_TIMELIMIT`, `DDGS_SAFESEARCH` |
-| SerpAPI | `SERPAPI_ENGINE` (`google_light` is cheaper, `num=100` works), `SERPAPI_TBS`, `SERPAPI_GL`, `SERPAPI_HL` |
-| SearchAPI.io | `SEARCHAPI_ENGINE` (google/news/scholar/bing), `SEARCHAPI_TIME_PERIOD`, `SEARCHAPI_GL`, `SEARCHAPI_HL` |
+| **Coding agents** | Launch Claude Code with `fcc-claude`, Codex with `fcc-codex`, or Pi with `fcc-pi`; each agent's native model picker works against the FCC catalog. |
+| **Model providers** | 27 cloud and local providers, including Kimi For Coding and an experimental ChatGPT OAuth provider. Switch and validate providers from the Admin UI. |
+| **Model-tier routing** | Route Fable, Opus, Sonnet, Haiku, and fallback traffic to different models. |
+| **Protocol fidelity** | Streaming, tool use, reasoning, and image input preserved across compatible models, with configurable reasoning control. |
+| **Key rotation** | Multi-key credential rotation for both model and web search providers: comma-separated keys, four rotation policies, health tracking with cooldowns/circuit breaking/lockout, and per-key admin management. |
+| **Web search** | Claude Code's official `web_search` server tool fulfilled at the proxy level by 14 search providers, with 50+ advanced per-provider options, rich result digests, and zero-config keyless fallback. |
+| **Request analytics** | Persistent SQLite log of every request, plus Requests and Web Search tabs in the Admin UI with filters, stats, and weekly/monthly rollups. |
+| **Editor integrations** | Claude Code and Codex in VS Code, or Claude Code through JetBrains ACP. |
+| **Messaging** | Optionally run Claude Code sessions through Discord or Telegram with voice-note transcription. |
+| **Security** | Optional token authentication for the local proxy. |
 
-See the **Web Search Advanced Options** block in [.env.example](.env.example) for the full list with inline cost notes.
-
-#### Rich digest
-
-Search results are rendered as a richer digest than upstream's title/URL list: an optional provider **answer lead** (from Exa/Tavily/Linkup/Serper rich blocks, etc.), then numbered results with title, publication date (`page_age` where the provider exposes it), URL, and an excerpt capped per result:
-
-```bash
-WEBSEARCH_DIGEST_CHARS=600     # per-result excerpt character cap
-WEBSEARCH_DIGEST_ANSWER=true   # include the provider answer lead
-```
-
-#### Web search analytics
-
-Every search is recorded (non-blocking, background-writer SQLite at `~/.fcc/logs/websearch.db`) with provider, key label, query (256 chars), result count, duration, status, and cost where known. The Admin UI Web Search tab aggregates this into weekly/monthly rollups per provider and per key, plus top errors:
-
-```bash
-WEBSEARCH_LOG_ENABLED=true
-WEBSEARCH_LOG_MAX_ROWS=50000   # retention cap; oldest rows pruned
-```
-
-<a id="model-provider-key-rotation"></a>
-
-### Model-Provider Key Rotation
-
-The same rotation engine works for model provider API keys: put multiple keys in one variable, comma-separated, and choose a policy with `{ENV}_ROTATION`:
-
-```bash
-OPENROUTER_API_KEY="sk-or-key1,sk-or-key2,sk-or-key3"
-OPENROUTER_API_KEY_ROTATION=round_robin
-```
-
-Policies:
-
-| Policy | Behavior |
-| --- | --- |
-| `single` | Always the first key (default when one key is set). |
-| `round_robin` | Spread requests across healthy keys in turn. |
-| `least_used` | Healthy key with the fewest requests goes first. |
-| `failover` (alias `on_error`) | Stick to the first healthy key until it fails, then move to the next (default when multiple keys are set). |
-
-Health model: a key that fails is benched with tiered cooldowns (10s → 30s → 60s → 120s); three consecutive failures open the circuit until cooldown elapses, after which a single half-open probe is allowed through. Auth failures (401/403) trigger an escalating lockout (5 min → 1 h → 24 h) followed by a probe before full reuse. Rotation only happens for errors another key could fix (auth, rate limits, 5xx/overload, transport) — a plain 400 is not rotated. All of this is visible and manageable from **Admin UI → Providers → Manage keys**, which shows per-key state/usage and lets you reset keys, plus a **Test** button per provider.
-
-### Request Analytics
-
-FCC keeps a persistent log of every completed request (non-blocking background writer, SQLite at `~/.fcc/logs/requests.db`) and surfaces it in **Admin UI → Requests**. Each record captures endpoint/protocol, requested and resolved model, provider, stream flag, input/output text (capped at 50k chars) with SHA-256 hashes and lengths, reasoning and params, token counts, TTFT and duration, status (success/error/cancelled), and error details. The tab offers search, filters (provider/model/status/endpoint/time range), per-request detail views, aggregate stats (totals, error rate, p50/p95 latency, per-provider and per-model breakdowns, top errors, hourly/daily series), and a clear-all action (`/admin/api/requests*` endpoints back it).
-
-```bash
-REQUEST_LOG_ENABLED=true
-REQUEST_LOG_MAX_ROWS=50000        # retention cap; oldest rows pruned periodically
-REQUEST_LOG_CAPTURE_BODIES=true   # false stores only body lengths + SHA-256 hashes
-```
-
-**Privacy note:** request bodies are stored locally on disk by default. They never leave your machine, but set `REQUEST_LOG_CAPTURE_BODIES=false` (or disable the log entirely) if you'd rather not persist conversation text.
-
-### ChatGPT OAuth Provider (experimental)
-
-FCC can talk directly to `chatgpt.com/backend-api/codex/responses` (OpenAI Responses API) using your ChatGPT subscription's OAuth tokens. Three login paths:
-
-1. **Admin UI → Providers → ChatGPT OAuth Login** — browser PKCE flow.
-2. `fcc-chatgpt-oauth-login` — headless device flow from the CLI.
-3. `codex login` — leave `CHATGPT_OAUTH_ACCESS_TOKEN` empty and FCC reads `~/.codex/auth.json`.
-
-Use models like `chatgpt_oauth/gpt-5.5`. This is **experimental and unsanctioned** (not an official OpenAI API product); the backend exposes only a limited set of built-in tools, so custom FCC tools may be rejected — see the provider notes under [Choose A Provider](#choose-a-provider). Optional overrides: `CHATGPT_OAUTH_ACCOUNT_ID`, `CHATGPT_OAUTH_BASE_URL`, `CHATGPT_OAUTH_PROXY`.
-
-### Kimi For Coding Provider
-
-Moonshot's coding-plan endpoint, separate from the standard Kimi platform: OpenAI-compatible at `api.kimi.com/coding/v1`. Set `KIMI_CODING_API_KEY` from [kimi.com/coding](https://kimi.com/coding) and pick a model such as `kimi_coding/kimi-k2.5`.
+Everything is configured through the same `.env` file (see [.env.example](.env.example)) and the Admin UI.
 
 ## Quick Start
 
@@ -215,13 +68,13 @@ Moonshot's coding-plan endpoint, separate from the standard Kimi platform: OpenA
 macOS/Linux:
 
 ```bash
-curl -fsSL "https://raw.githubusercontent.com/Alishahryar1/free-claude-code/main/scripts/install.sh" | sh
+curl -fsSL "https://raw.githubusercontent.com/FiredMosquito831/free-claude-code/main/scripts/install.sh" | sh
 ```
 
 Windows PowerShell:
 
 ```powershell
-& ([scriptblock]::Create((irm "https://raw.githubusercontent.com/Alishahryar1/free-claude-code/main/scripts/install.ps1")))
+& ([scriptblock]::Create((irm "https://raw.githubusercontent.com/FiredMosquito831/free-claude-code/main/scripts/install.ps1")))
 ```
 
 Re-run the same command whenever you want to update. You can review the installers before running them: [install.sh](scripts/install.sh) and [install.ps1](scripts/install.ps1).
@@ -286,87 +139,6 @@ fcc-codex exec "hello"
 
 `fcc-pi` registers FCC only for that Pi process; your existing Pi settings, sessions, credentials, and extensions remain unchanged.
 
-## Choose A Provider
-
-Enter the listed setting in the Admin UI, open **Model Config**, then search the `MODEL` dropdown and select a model. FCC constructs each slug as `<provider-id>/<exact-provider-model-id>`; free-text entry remains available when a provider cannot list a model. Click **Validate** and **Apply**. Provider names link to their key, model, or setup pages.
-
-| Provider | Admin UI setting | Example `MODEL` |
-| --- | --- | --- |
-| [NVIDIA NIM](https://build.nvidia.com/settings/api-keys) | `NVIDIA_NIM_API_KEY` | `nvidia_nim/nvidia/nemotron-3-super-120b-a12b` |
-| [OpenRouter](https://openrouter.ai/keys) | `OPENROUTER_API_KEY` | `open_router/openrouter/free` |
-| [Google AI Studio (Gemini)](https://aistudio.google.com/apikey) | `GEMINI_API_KEY` | `gemini/models/gemini-3.1-flash-lite` |
-| [DeepSeek](https://platform.deepseek.com/api_keys) | `DEEPSEEK_API_KEY` | `deepseek/deepseek-chat` |
-| [Mistral La Plateforme](https://console.mistral.ai/) | `MISTRAL_API_KEY` | `mistral/devstral-small-latest` |
-| [Mistral Codestral](https://console.mistral.ai/) | `CODESTRAL_API_KEY` | `mistral_codestral/codestral-latest` |
-| [OpenCode Zen](https://opencode.ai/auth) | `OPENCODE_API_KEY` | `opencode/gpt-5.3-codex` |
-| [OpenCode Go](https://opencode.ai/auth) | `OPENCODE_API_KEY` | `opencode_go/minimax-m2.7` |
-| [Vercel AI Gateway](https://vercel.com/docs/ai-gateway/models-and-providers) | `AI_GATEWAY_API_KEY` | `vercel/openai/gpt-5.5` |
-| [Hugging Face Inference Providers](https://huggingface.co/settings/tokens) | `HUGGINGFACE_API_KEY` | `huggingface/Qwen/Qwen3-Coder-480B-A35B-Instruct:fastest` |
-| [Cohere](https://dashboard.cohere.com/api-keys) | `COHERE_API_KEY` | `cohere/command-a-plus-05-2026` |
-| [GitHub Models](https://github.com/marketplace?type=models) | `GITHUB_MODELS_TOKEN` | `github_models/openai/gpt-4.1` |
-| [Wafer](https://wafer.ai/) | `WAFER_API_KEY` | `wafer/DeepSeek-V4-Pro` |
-| [Kimi](https://platform.moonshot.ai/console/api-keys) | `KIMI_API_KEY` | `kimi/kimi-k2.5` |
-| [Kimi Coding](https://kimi.com/coding) | `KIMI_CODING_API_KEY` | `kimi_coding/kimi-k2.5` |
-| [ChatGPT OAuth](https://github.com/openai/codex) (experimental) | `CHATGPT_OAUTH_ACCESS_TOKEN` + `CHATGPT_OAUTH_BASE_URL` | `chatgpt_oauth/gpt-5` |
-| [MiniMax](https://platform.minimax.io/user-center/basic-information/interface-key) | `MINIMAX_API_KEY` | `minimax/MiniMax-M3` |
-| [Cerebras Inference](https://cloud.cerebras.ai/) | `CEREBRAS_API_KEY` | `cerebras/gpt-oss-120b` |
-| [Groq](https://console.groq.com/keys) | `GROQ_API_KEY` | `groq/llama-3.3-70b-versatile` |
-| [SambaNova](https://cloud.sambanova.ai/apis) | `SAMBANOVA_API_KEY` | `sambanova/Meta-Llama-3.3-70B-Instruct` |
-| [Fireworks AI](https://fireworks.ai/account/api-keys) | `FIREWORKS_API_KEY` | `fireworks/accounts/fireworks/models/llama-v3p3-70b-instruct` |
-| [Cloudflare Workers AI](https://developers.cloudflare.com/workers-ai/) | `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` | `cloudflare/@cf/moonshotai/kimi-k2.6` |
-| [Z.ai](https://z.ai/manage-apikey/apikey-list) | `ZAI_API_KEY` | `zai/glm-5.2` |
-| [Ollama Cloud](https://ollama.com/settings/keys) | `OLLAMA_API_KEY` | `ollama_cloud/qwen3-coder:480b` |
-| [LM Studio](https://lmstudio.ai/) | `LM_STUDIO_BASE_URL` | `lmstudio/<model-id>` |
-| [llama.cpp](https://github.com/ggml-org/llama.cpp) | `LLAMACPP_BASE_URL` | `llamacpp/<model-id>` |
-| [Ollama](https://ollama.com/) | `OLLAMA_BASE_URL` | `ollama/<model-tag>` |
-
-Important provider notes:
-
-- Mistral Codestral uses a separate key from Mistral La Plateforme.
-- OpenCode Zen and OpenCode Go share `OPENCODE_API_KEY` but use different model prefixes.
-- Cloudflare requires both its API token and account ID.
-- **ChatGPT OAuth is experimental and unsanctioned.** It is not an official OpenAI API product. The provider posts directly to `chatgpt.com/backend-api/codex/responses` using an OAuth access token. You can log in from the admin dashboard (Providers → ChatGPT OAuth Login), run `fcc-chatgpt-oauth-login` (headless device flow), or run `codex login`; leave `CHATGPT_OAUTH_ACCESS_TOKEN` empty so FCC reads `~/.codex/auth.json`. Supported models include `chatgpt_oauth/gpt-5.5`, `chatgpt_oauth/gpt-5.4`, `chatgpt_oauth/gpt-5.4-mini`, and `chatgpt_oauth/gpt-5.3-codex-spark`. The ChatGPT/Codex backend only exposes a limited set of built-in tools, so custom FCC tools may be rejected; use it at your own risk.
-- Ollama Cloud connects directly to `ollama.com`; use the exact model IDs shown
-  by FCC's model picker. Local Ollama remains available through the separate
-  `ollama/` prefix.
-- Prefer tool-capable models for coding agents. Local models also need enough context for the agent's system prompt and tool definitions.
-
-<details>
-<summary><strong>Local provider setup</strong></summary>
-
-### LM Studio
-
-Start LM Studio's local server, load a tool-capable model, and use the model identifier shown by LM Studio with the `lmstudio/` prefix. The default URL is `http://localhost:1234/v1`.
-
-### llama.cpp
-
-Start `llama-server` with its OpenAI-compatible Chat Completions API and enough context for the model. Use the local model ID with the `llamacpp/` prefix. `LLAMACPP_BASE_URL` defaults to `http://localhost:8080/v1`; FCC accepts either the server root or an explicit `/v1` suffix.
-
-### Ollama
-
-```bash
-ollama pull llama3.1
-ollama serve
-```
-
-Use the tag shown by `ollama list` with the `ollama/` prefix. `OLLAMA_BASE_URL` defaults to `http://localhost:11434`; FCC accepts either the root URL or an explicit `/v1` suffix.
-
-</details>
-
-### Optional Model-Tier Routing
-
-`MODEL` is the fallback for every request. Select a model for `MODEL_FABLE`, `MODEL_OPUS`, `MODEL_SONNET`, or `MODEL_HAIKU` to override an individual Claude Code tier; select **None** to use `MODEL`.
-
-For example, route Opus to `nvidia_nim/moonshotai/kimi-k2.6`, Sonnet to `open_router/openrouter/free`, Haiku to `lmstudio/qwen3.5-coder`, and keep `MODEL` on `zai/glm-5.2`.
-
-### Reasoning Control
-
-Open **Admin UI → Model Config → Reasoning** to choose how FCC handles client reasoning controls. The default **From client** option preserves reasoning effort sent by Claude Code, Codex, or Pi; when the client sends no control, the provider keeps its own default.
-
-You can instead select **Off**, **Low**, **Medium**, **High**, **X-High**, or **Max**. Fable, Opus, Sonnet, and Haiku each have the same choices plus **Inherit**, which uses the root policy. Providers with named effort receive those names; numeric-budget providers map **Low=512**, **Medium=1,024**, **High=2,048**, **X-High=4,096**, and **Max=8,192** reasoning tokens; boolean providers receive on or off. Unsupported controls safely remain provider-defined.
-
-<a id="connect-your-client"></a>
-
 ## Connect Claude Code (CLI & Desktop)
 
 Two ways to point Claude Code at your local FCC server (`http://127.0.0.1:8082`, auth token `freecc` — match these to the Admin UI if you changed them). No custom model overrides are needed in either case: FCC exposes native **Fable / Opus / Sonnet / Haiku** tier models, so Claude Code's built-in model picker works as-is.
@@ -410,6 +182,254 @@ Visual walkthroughs from other gateway tutorials (same dialogs, different URLs):
 - [Bifrost docs — Claude Desktop](https://docs.getbifrost.ai/cli-agents/claude-desktop): [Developer tab → Inference provider = Gateway](https://kimi-web-img.moonshot.cn/prod-data/online-image/search-upload/4befc03b3922a39e8d1f6b486e4164ce.png) · [Gateway fields (base URL / auth scheme / key)](https://kimi-web-img.moonshot.cn/prod-data/online-image/search-upload/127dede83b3b9a57e8cdcd2eeb0c7ec9.png)
 - [Merge docs — Claude Code via Gateway](https://docs.merge.dev/merge-gateway/features/use-in-your-ide/claude-code) (Developer mode → add endpoint → add API key)
 - [CodeGateway — Claude Desktop Developer Mode custom endpoint](https://www.codegateway.dev/en/blog/claude-desktop-developer-mode-api-proxy) (older-build flow via `claude_desktop_config.json`)
+
+<a id="model-providers"></a>
+
+## Model Providers
+
+Enter the listed setting in the Admin UI, open **Model Config**, then search the `MODEL` dropdown and select a model. FCC constructs each slug as `<provider-id>/<exact-provider-model-id>`; free-text entry remains available when a provider cannot list a model. Click **Validate** and **Apply**. Provider names link to their key, model, or setup pages.
+
+| Provider | Admin UI setting | Example `MODEL` |
+| --- | --- | --- |
+| [NVIDIA NIM](https://build.nvidia.com/settings/api-keys) | `NVIDIA_NIM_API_KEY` | `nvidia_nim/nvidia/nemotron-3-super-120b-a12b` |
+| [OpenRouter](https://openrouter.ai/keys) | `OPENROUTER_API_KEY` | `open_router/openrouter/free` |
+| [Google AI Studio (Gemini)](https://aistudio.google.com/apikey) | `GEMINI_API_KEY` | `gemini/models/gemini-3.1-flash-lite` |
+| [DeepSeek](https://platform.deepseek.com/api_keys) | `DEEPSEEK_API_KEY` | `deepseek/deepseek-chat` |
+| [Mistral La Plateforme](https://console.mistral.ai/) | `MISTRAL_API_KEY` | `mistral/devstral-small-latest` |
+| [Mistral Codestral](https://console.mistral.ai/) | `CODESTRAL_API_KEY` | `mistral_codestral/codestral-latest` |
+| [OpenCode Zen](https://opencode.ai/auth) | `OPENCODE_API_KEY` | `opencode/gpt-5.3-codex` |
+| [OpenCode Go](https://opencode.ai/auth) | `OPENCODE_API_KEY` | `opencode_go/minimax-m2.7` |
+| [Vercel AI Gateway](https://vercel.com/docs/ai-gateway/models-and-providers) | `AI_GATEWAY_API_KEY` | `vercel/openai/gpt-5.5` |
+| [Hugging Face Inference Providers](https://huggingface.co/settings/tokens) | `HUGGINGFACE_API_KEY` | `huggingface/Qwen/Qwen3-Coder-480B-A35B-Instruct:fastest` |
+| [Cohere](https://dashboard.cohere.com/api-keys) | `COHERE_API_KEY` | `cohere/command-a-plus-05-2026` |
+| [GitHub Models](https://github.com/marketplace?type=models) | `GITHUB_MODELS_TOKEN` | `github_models/openai/gpt-4.1` |
+| [Wafer](https://wafer.ai/) | `WAFER_API_KEY` | `wafer/DeepSeek-V4-Pro` |
+| [Kimi](https://platform.moonshot.ai/console/api-keys) | `KIMI_API_KEY` | `kimi/kimi-k2.5` |
+| [Kimi Coding](https://kimi.com/coding) | `KIMI_CODING_API_KEY` | `kimi_coding/kimi-k2.5` |
+| [ChatGPT OAuth](https://github.com/openai/codex) (experimental) | `CHATGPT_OAUTH_ACCESS_TOKEN` + `CHATGPT_OAUTH_BASE_URL` | `chatgpt_oauth/gpt-5` |
+| [MiniMax](https://platform.minimax.io/user-center/basic-information/interface-key) | `MINIMAX_API_KEY` | `minimax/MiniMax-M3` |
+| [Cerebras Inference](https://cloud.cerebras.ai/) | `CEREBRAS_API_KEY` | `cerebras/gpt-oss-120b` |
+| [Groq](https://console.groq.com/keys) | `GROQ_API_KEY` | `groq/llama-3.3-70b-versatile` |
+| [SambaNova](https://cloud.sambanova.ai/apis) | `SAMBANOVA_API_KEY` | `sambanova/Meta-Llama-3.3-70B-Instruct` |
+| [Fireworks AI](https://fireworks.ai/account/api-keys) | `FIREWORKS_API_KEY` | `fireworks/accounts/fireworks/models/llama-v3p3-70b-instruct` |
+| [Cloudflare Workers AI](https://developers.cloudflare.com/workers-ai/) | `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` | `cloudflare/@cf/moonshotai/kimi-k2.6` |
+| [Z.ai](https://z.ai/manage-apikey/apikey-list) | `ZAI_API_KEY` | `zai/glm-5.2` |
+| [Ollama Cloud](https://ollama.com/settings/keys) | `OLLAMA_API_KEY` | `ollama_cloud/qwen3-coder:480b` |
+| [LM Studio](https://lmstudio.ai/) | `LM_STUDIO_BASE_URL` | `lmstudio/<model-id>` |
+| [llama.cpp](https://github.com/ggml-org/llama.cpp) | `LLAMACPP_BASE_URL` | `llamacpp/<model-id>` |
+| [Ollama](https://ollama.com/) | `OLLAMA_BASE_URL` | `ollama/<model-tag>` |
+
+Important provider notes:
+
+- Mistral Codestral uses a separate key from Mistral La Plateforme.
+- OpenCode Zen and OpenCode Go share `OPENCODE_API_KEY` but use different model prefixes.
+- Cloudflare requires both its API token and account ID.
+- Ollama Cloud connects directly to `ollama.com`; use the exact model IDs shown
+  by FCC's model picker. Local Ollama remains available through the separate
+  `ollama/` prefix.
+- Prefer tool-capable models for coding agents. Local models also need enough context for the agent's system prompt and tool definitions.
+
+<details>
+<summary><strong>Local provider setup</strong></summary>
+
+### LM Studio
+
+Start LM Studio's local server, load a tool-capable model, and use the model identifier shown by LM Studio with the `lmstudio/` prefix. The default URL is `http://localhost:1234/v1`.
+
+### llama.cpp
+
+Start `llama-server` with its OpenAI-compatible Chat Completions API and enough context for the model. Use the local model ID with the `llamacpp/` prefix. `LLAMACPP_BASE_URL` defaults to `http://localhost:8080/v1`; FCC accepts either the server root or an explicit `/v1` suffix.
+
+### Ollama
+
+```bash
+ollama pull llama3.1
+ollama serve
+```
+
+Use the tag shown by `ollama list` with the `ollama/` prefix. `OLLAMA_BASE_URL` defaults to `http://localhost:11434`; FCC accepts either the root URL or an explicit `/v1` suffix.
+
+</details>
+
+<a id="model-provider-key-rotation"></a>
+
+### Multi-Key Rotation
+
+Put multiple API keys in one variable, comma-separated, and choose a policy with `{ENV}_ROTATION`:
+
+```bash
+OPENROUTER_API_KEY="sk-or-key1,sk-or-key2,sk-or-key3"
+OPENROUTER_API_KEY_ROTATION=round_robin
+```
+
+Policies:
+
+| Policy | Behavior |
+| --- | --- |
+| `single` | Always the first key (default when one key is set). |
+| `round_robin` | Spread requests across healthy keys in turn. |
+| `least_used` | Healthy key with the fewest requests goes first. |
+| `failover` (alias `on_error`) | Stick to the first healthy key until it fails, then move to the next (default when multiple keys are set). |
+
+Health model: a key that fails is benched with tiered cooldowns (10s → 30s → 60s → 120s); three consecutive failures open the circuit until cooldown elapses, after which a single half-open probe is allowed through. Auth failures (401/403) trigger an escalating lockout (5 min → 1 h → 24 h) followed by a probe before full reuse. Rotation only happens for errors another key could fix (auth, rate limits, 5xx/overload, transport) — a plain 400 is not rotated. All of this is visible and manageable from **Admin UI → Providers → Manage keys**, which shows per-key state/usage and lets you reset keys, plus a **Test** button per provider.
+
+Web search provider keys share the same rotation engine — see [Web Search → Multi-key rotation](#multi-key-rotation-web-search-keys).
+
+### Optional Model-Tier Routing
+
+`MODEL` is the fallback for every request. Select a model for `MODEL_FABLE`, `MODEL_OPUS`, `MODEL_SONNET`, or `MODEL_HAIKU` to override an individual Claude Code tier; select **None** to use `MODEL`.
+
+For example, route Opus to `nvidia_nim/moonshotai/kimi-k2.6`, Sonnet to `open_router/openrouter/free`, Haiku to `lmstudio/qwen3.5-coder`, and keep `MODEL` on `zai/glm-5.2`.
+
+### Reasoning Control
+
+Open **Admin UI → Model Config → Reasoning** to choose how FCC handles client reasoning controls. The default **From client** option preserves reasoning effort sent by Claude Code, Codex, or Pi; when the client sends no control, the provider keeps its own default.
+
+You can instead select **Off**, **Low**, **Medium**, **High**, **X-High**, or **Max**. Fable, Opus, Sonnet, and Haiku each have the same choices plus **Inherit**, which uses the root policy. Providers with named effort receive those names; numeric-budget providers map **Low=512**, **Medium=1,024**, **High=2,048**, **X-High=4,096**, and **Max=8,192** reasoning tokens; boolean providers receive on or off. Unsupported controls safely remain provider-defined.
+
+<a id="web-search"></a>
+
+## Web Search
+
+Claude Code's `web_search` is an Anthropic **server tool**: normally Anthropic's servers execute the search and bill you for it. FCC fulfills that server tool at the proxy level instead — the client emits a `web_search` tool-use block, FCC runs the search against a provider you choose (or the keyless default), and streams the results back as a regular text block. No Anthropic search credits are used, and the whole flow works with any model provider.
+
+### Search Providers
+
+FCC supports 14 search backends, resolved by `WEB_SEARCH_PROVIDER`:
+
+| Provider | Env var | Free tier | Get a key |
+| --- | --- | --- | --- |
+| DuckDuckGo (`ddgs`) | — (keyless) | Free, keyless (unofficial metasearch; engines may IP-rate-limit) | — |
+| Ollama Web Search | `OLLAMA_SEARCH_API_KEY` | Free hosted tier with a free Ollama account | [ollama.com/settings/keys](https://ollama.com/settings/keys) |
+| Exa | `EXA_API_KEY` | $20 signup credit + $10/month free ongoing | [dashboard.exa.ai/api-keys](https://dashboard.exa.ai/api-keys) |
+| Tavily | `TAVILY_API_KEY` | 1,000 credits/month free, no card | [app.tavily.com/home](https://app.tavily.com/home) |
+| Brave Search | `BRAVE_SEARCH_API_KEY` | $5 in free credits every month | [api-dashboard.search.brave.com](https://api-dashboard.search.brave.com/) |
+| SearXNG | `SEARXNG_BASE_URL` | Free, self-hosted (AGPL); instance must enable `format=json` | self-hosted |
+| Jina Search | `JINA_API_KEY` | 10M free tokens for new keys | [jina.ai/api-dashboard](https://jina.ai/api-dashboard/) |
+| Serper (Google) | `SERPER_API_KEY` | 2,500 free one-time queries | [serper.dev/api-key](https://serper.dev/api-key) |
+| Firecrawl | `FIRECRAWL_API_KEY` | One-time free credit grant on signup | [firecrawl.dev/app/api-keys](https://www.firecrawl.dev/app/api-keys) |
+| Linkup | `LINKUP_API_KEY` | $20 free credit, topped back up monthly | [app.linkup.so](https://app.linkup.so/) |
+| Perplexity Search | `PERPLEXITY_SEARCH_API_KEY` | No meaningful free tier (prepaid credit; mint a fresh key) | [perplexity.ai/settings/api](https://www.perplexity.ai/settings/api) |
+| Parallel | `PARALLEL_API_KEY` | Pay-per-use from $0.005 per 10 results (Search API beta) | [platform.parallel.ai](https://platform.parallel.ai/) |
+| SearchAPI.io | `SEARCHAPI_API_KEY` | 100 free one-time requests | [searchapi.io](https://www.searchapi.io/) |
+| SerpAPI | `SERPAPI_API_KEY` | 250 free searches/month | [serpapi.com/manage-api-key](https://serpapi.com/manage-api-key) |
+
+`WEB_SEARCH_PROVIDER` accepts `auto` (default), `off`, or one of the provider IDs `ddgs | ollama | exa | tavily | brave | searxng | jina | serper | firecrawl | linkup | perplexity | parallel | searchapi | serpapi`:
+
+- **`auto`** picks the first configured provider in catalog order; with no keys set it falls back to keyless `ddgs`, so search works **zero-config out of the box**.
+- **`off`** disables the provider system and uses the legacy DuckDuckGo HTML scrape.
+- An explicit ID pins that provider.
+
+Full fallback chain: **explicitly configured provider → auto-resolved configured provider → `ddgs` (keyless) → legacy scrape (`off`)**.
+
+Minimal `.env` example (two keys with round-robin, see below):
+
+```bash
+WEB_SEARCH_PROVIDER=auto
+TAVILY_API_KEY="tvly-key1,tvly-key2"
+TAVILY_API_KEY_ROTATION=round_robin
+# Optional outbound proxy for web search (http/socks5):
+WEBSEARCH_PROXY=""
+```
+
+You can also configure everything from **Admin UI → Web Search**: provider cards show free-tier notes and key status, each card has an **Advanced options** drawer, and an analytics view with a weekly/monthly toggle shows usage per provider and per key. Deep per-provider pricing, free-tier details, and a capability matrix live in [research/web-search-providers.md](research/web-search-providers.md) and [research/web-search-advanced.md](research/web-search-advanced.md).
+
+### Multi-key rotation (web search keys)
+
+Comma-separate multiple keys in the same variable and pick a policy via `{ENV}_ROTATION`:
+
+```bash
+EXA_API_KEY="exa-key-a,exa-key-b,exa-key-c"
+EXA_API_KEY_ROTATION=failover   # single | round_robin | least_used | failover (on_error)
+```
+
+The default is `failover` when multiple keys are set, `single` otherwise. Web search keys share the same engine and health semantics as model provider keys — see [Model Providers → Multi-Key Rotation](#model-provider-key-rotation).
+
+### Advanced options
+
+Each provider exposes dotenv-only knobs (never in pydantic Settings); empty/unset values reproduce default behavior exactly. All of them are editable from the Web Search tab's **Advanced options** drawers. Highlights — cost warnings apply as noted:
+
+| Provider | Notable options |
+| --- | --- |
+| Exa | `EXA_SEARCH_TYPE` (`deep*` = $0.015/query vs $0.005), `EXA_CONTENTS` modes incl. `full` (+$0.001/page per content type), `EXA_CATEGORY` verticals (company/people disable date+exclude filters), `EXA_MAX_AGE_HOURS`, published-date bounds, `EXA_USER_LOCATION` |
+| Brave | `BRAVE_SEARCH_MODE=llm-context` ($5/1k, returns pre-extracted page text), `BRAVE_LLM_MAX_TOKENS` (1024–32768, llm-context only), `BRAVE_FRESHNESS`, country/language, plan-gated `BRAVE_EXTRA_SNIPPETS` |
+| Tavily | `TAVILY_SEARCH_DEPTH=advanced` (2 credits/query), `TAVILY_TOPIC`, `TAVILY_TIME_RANGE`, `TAVILY_INCLUDE_ANSWER` (basic/advanced LLM answer lead), `TAVILY_INCLUDE_RAW_CONTENT` (free full page text, may add latency) |
+| Serper | `SERPER_GL`/`SERPER_HL`/`SERPER_TBS`, `SERPER_RICH_BLOCKS` (default on: answerBox/knowledgeGraph/peopleAlsoAsk feed the answer lead) |
+| Linkup | `LINKUP_DEPTH=deep` (10x cost, $0.05/query), `LINKUP_OUTPUT_TYPE=sourcedAnswer` (+$0.001, returns answer+sources) |
+| Perplexity | `PERPLEXITY_SEARCH_RECENCY`, `PERPLEXITY_CONTEXT_SIZE` (omitted when `PERPLEXITY_MAX_TOKENS_PER_PAGE` is set) |
+| Parallel | `PARALLEL_MODE` (turbo cheapest → advanced highest quality), `PARALLEL_EXCERPT_CHARS`, `PARALLEL_TOTAL_CHARS` |
+| Firecrawl | `FIRECRAWL_SOURCES` (web/news/images), `FIRECRAWL_SCRAPE_FORMAT` summary/markdown (multiplies credits per result), `FIRECRAWL_TBS`, `FIRECRAWL_LOCATION` |
+| Jina | `JINA_MAX_TOKENS` (token-billed; best cost guardrail), `JINA_SITE`, `JINA_GL` |
+| SearXNG | `SEARXNG_ENGINES`, `SEARXNG_CATEGORIES`, `SEARXNG_TIME_RANGE`, `SEARXNG_LANGUAGE` |
+| ddgs | `DDGS_BACKEND` (pin one free engine to dodge per-engine rate limits), `DDGS_REGION`, `DDGS_TIMELIMIT`, `DDGS_SAFESEARCH` |
+| SerpAPI | `SERPAPI_ENGINE` (`google_light` is cheaper, `num=100` works), `SERPAPI_TBS`, `SERPAPI_GL`, `SERPAPI_HL` |
+| SearchAPI.io | `SEARCHAPI_ENGINE` (google/news/scholar/bing), `SEARCHAPI_TIME_PERIOD`, `SEARCHAPI_GL`, `SEARCHAPI_HL` |
+
+See the **Web Search Advanced Options** block in [.env.example](.env.example) for the full list with inline cost notes.
+
+### Rich digest
+
+Search results are rendered as a richer digest than a plain title/URL list: an optional provider **answer lead** (from Exa/Tavily/Linkup/Serper rich blocks, etc.), then numbered results with title, publication date (`page_age` where the provider exposes it), URL, and an excerpt capped per result:
+
+```bash
+WEBSEARCH_DIGEST_CHARS=600     # per-result excerpt character cap
+WEBSEARCH_DIGEST_ANSWER=true   # include the provider answer lead
+```
+
+### Web search analytics
+
+Every search is recorded (non-blocking, background-writer SQLite at `~/.fcc/logs/websearch.db`) with provider, key label, query (256 chars), result count, duration, status, and cost where known. The Admin UI Web Search tab aggregates this into weekly/monthly rollups per provider and per key, plus top errors:
+
+```bash
+WEBSEARCH_LOG_ENABLED=true
+WEBSEARCH_LOG_MAX_ROWS=50000   # retention cap; oldest rows pruned
+```
+
+<a id="admin-dashboard"></a>
+
+## Admin Dashboard
+
+The Admin UI (`http://127.0.0.1:8082/admin`, local-only) is the control center for the whole proxy:
+
+- **Providers** — API keys, model catalog, **Validate** / **Apply**, per-provider **Test**, and **Manage keys** for multi-key rotation state (per-key health/usage, key reset).
+- **Model Config** — the `MODEL` picker, model-tier routing (`MODEL_FABLE` / `MODEL_OPUS` / `MODEL_SONNET` / `MODEL_HAIKU`), and reasoning control.
+- **Web Search** — provider cards with free-tier notes and key status, per-card **Advanced options** drawers, and weekly/monthly analytics per provider and per key.
+- **Requests** — the full request analytics log (see below).
+- **Messaging** — Discord/Telegram bot and voice-note settings.
+
+### Request Analytics
+
+FCC keeps a persistent log of every completed request (non-blocking background writer, SQLite at `~/.fcc/logs/requests.db`) and surfaces it in **Admin UI → Requests**. Each record captures endpoint/protocol, requested and resolved model, provider, stream flag, input/output text (capped at 50k chars) with SHA-256 hashes and lengths, reasoning and params, token counts, TTFT and duration, status (success/error/cancelled), and error details. The tab offers search, filters (provider/model/status/endpoint/time range), per-request detail views, aggregate stats (totals, error rate, p50/p95 latency, per-provider and per-model breakdowns, top errors, hourly/daily series), and a clear-all action (`/admin/api/requests*` endpoints back it).
+
+```bash
+REQUEST_LOG_ENABLED=true
+REQUEST_LOG_MAX_ROWS=50000        # retention cap; oldest rows pruned periodically
+REQUEST_LOG_CAPTURE_BODIES=true   # false stores only body lengths + SHA-256 hashes
+```
+
+**Privacy note:** request bodies are stored locally on disk by default. They never leave your machine, but set `REQUEST_LOG_CAPTURE_BODIES=false` (or disable the log entirely) if you'd rather not persist conversation text.
+
+<a id="oauth-providers"></a>
+
+## OAuth Providers
+
+### ChatGPT OAuth Provider (experimental)
+
+FCC can talk directly to `chatgpt.com/backend-api/codex/responses` (OpenAI Responses API) using your ChatGPT subscription's OAuth tokens. Three login paths:
+
+1. **Admin UI → Providers → ChatGPT OAuth Login** — browser PKCE flow.
+2. `fcc-chatgpt-oauth-login` — headless device flow from the CLI.
+3. `codex login` — leave `CHATGPT_OAUTH_ACCESS_TOKEN` empty and FCC reads `~/.codex/auth.json`.
+
+Supported models include `chatgpt_oauth/gpt-5.5`, `chatgpt_oauth/gpt-5.4`, `chatgpt_oauth/gpt-5.4-mini`, and `chatgpt_oauth/gpt-5.3-codex-spark`. Optional overrides: `CHATGPT_OAUTH_ACCOUNT_ID`, `CHATGPT_OAUTH_BASE_URL`, `CHATGPT_OAUTH_PROXY`.
+
+**ChatGPT OAuth is experimental and unsanctioned.** It is not an official OpenAI API product. The ChatGPT/Codex backend only exposes a limited set of built-in tools, so custom FCC tools may be rejected; use it at your own risk.
+
+### Kimi For Coding Provider
+
+Moonshot's coding-plan endpoint, separate from the standard Kimi platform: OpenAI-compatible at `api.kimi.com/coding/v1`. Set `KIMI_CODING_API_KEY` from [kimi.com/coding](https://kimi.com/coding) and pick a model such as `kimi_coding/kimi-k2.5`.
+
+<a id="connect-your-client"></a>
 
 ## Connect Your Client
 
@@ -565,32 +585,32 @@ macOS/Linux:
 
 ```bash
 # NVIDIA NIM transcription
-curl -fsSL "https://raw.githubusercontent.com/Alishahryar1/free-claude-code/main/scripts/install.sh" | sh -s -- --voice-nim
+curl -fsSL "https://raw.githubusercontent.com/FiredMosquito831/free-claude-code/main/scripts/install.sh" | sh -s -- --voice-nim
 
 # Local Whisper on CPU or CUDA
-curl -fsSL "https://raw.githubusercontent.com/Alishahryar1/free-claude-code/main/scripts/install.sh" | sh -s -- --voice-local
+curl -fsSL "https://raw.githubusercontent.com/FiredMosquito831/free-claude-code/main/scripts/install.sh" | sh -s -- --voice-local
 
 # Both backends
-curl -fsSL "https://raw.githubusercontent.com/Alishahryar1/free-claude-code/main/scripts/install.sh" | sh -s -- --voice-all
+curl -fsSL "https://raw.githubusercontent.com/FiredMosquito831/free-claude-code/main/scripts/install.sh" | sh -s -- --voice-all
 
 # Local Whisper with the CUDA 13.0 PyTorch backend
-curl -fsSL "https://raw.githubusercontent.com/Alishahryar1/free-claude-code/main/scripts/install.sh" | sh -s -- --voice-local --torch-backend cu130
+curl -fsSL "https://raw.githubusercontent.com/FiredMosquito831/free-claude-code/main/scripts/install.sh" | sh -s -- --voice-local --torch-backend cu130
 ```
 
 Windows PowerShell:
 
 ```powershell
 # NVIDIA NIM transcription
-& ([scriptblock]::Create((irm "https://raw.githubusercontent.com/Alishahryar1/free-claude-code/main/scripts/install.ps1"))) -VoiceNim
+& ([scriptblock]::Create((irm "https://raw.githubusercontent.com/FiredMosquito831/free-claude-code/main/scripts/install.ps1"))) -VoiceNim
 
 # Local Whisper on CPU or CUDA
-& ([scriptblock]::Create((irm "https://raw.githubusercontent.com/Alishahryar1/free-claude-code/main/scripts/install.ps1"))) -VoiceLocal
+& ([scriptblock]::Create((irm "https://raw.githubusercontent.com/FiredMosquito831/free-claude-code/main/scripts/install.ps1"))) -VoiceLocal
 
 # Both backends
-& ([scriptblock]::Create((irm "https://raw.githubusercontent.com/Alishahryar1/free-claude-code/main/scripts/install.ps1"))) -VoiceAll
+& ([scriptblock]::Create((irm "https://raw.githubusercontent.com/FiredMosquito831/free-claude-code/main/scripts/install.ps1"))) -VoiceAll
 
 # Local Whisper with the CUDA 13.0 PyTorch backend
-& ([scriptblock]::Create((irm "https://raw.githubusercontent.com/Alishahryar1/free-claude-code/main/scripts/install.ps1"))) -VoiceLocal -TorchBackend cu130
+& ([scriptblock]::Create((irm "https://raw.githubusercontent.com/FiredMosquito831/free-claude-code/main/scripts/install.ps1"))) -VoiceLocal -TorchBackend cu130
 ```
 
 Restart `fcc-server`. In **Admin UI → Messaging → Voice**, enable voice notes, select `cpu`, `cuda`, or `nvidia_nim`, and choose the Whisper model. Local gated models need `HUGGINGFACE_API_KEY`; NVIDIA NIM transcription needs `NVIDIA_NIM_API_KEY`.
@@ -610,18 +630,28 @@ Stop every running FCC command first. The uninstaller removes the FCC uv tool, v
 macOS/Linux:
 
 ```bash
-curl -fsSL "https://raw.githubusercontent.com/Alishahryar1/free-claude-code/main/scripts/uninstall.sh" | sh
+curl -fsSL "https://raw.githubusercontent.com/FiredMosquito831/free-claude-code/main/scripts/uninstall.sh" | sh
 ```
 
 Windows PowerShell:
 
 ```powershell
-& ([scriptblock]::Create((irm "https://raw.githubusercontent.com/Alishahryar1/free-claude-code/main/scripts/uninstall.ps1")))
+& ([scriptblock]::Create((irm "https://raw.githubusercontent.com/FiredMosquito831/free-claude-code/main/scripts/uninstall.ps1")))
 ```
+
+## Configuration Reference
+
+Every setting documented above — model providers, rotation policies, web search providers and advanced options, request/websearch logging, messaging, and voice — lives in [.env.example](.env.example) with inline comments and cost notes. Deep-dive research documents for the web search system are under [research/](research/); the internal architecture is covered in [ARCHITECTURE.md](ARCHITECTURE.md).
+
+## Development
+
+- Local CI sequence: `./scripts/ci.sh` (macOS/Linux) or `.\scripts\ci.ps1` (Windows) — Ruff format/check, `ty` type checking, and `pytest`.
+- Individual commands: `uv run ruff format`, `uv run ruff check --fix`, `uv run ty check`, `uv run pytest -v --tb=short`.
+- See [CONTRIBUTING.md](CONTRIBUTING.md) for the full workflow.
 
 ## Project Links
 
-- [Report bugs or request features](https://github.com/Alishahryar1/free-claude-code/issues)
+- [Report bugs or request features](https://github.com/FiredMosquito831/free-claude-code/issues)
 - [Architecture and extension guide](ARCHITECTURE.md)
 - [Contributing guide](CONTRIBUTING.md)
 
