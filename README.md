@@ -367,6 +367,50 @@ You can instead select **Off**, **Low**, **Medium**, **High**, **X-High**, or **
 
 <a id="connect-your-client"></a>
 
+## Connect Claude Code (CLI & Desktop)
+
+Two ways to point Claude Code at your local FCC server (`http://127.0.0.1:8082`, auth token `freecc` — match these to the Admin UI if you changed them). No custom model overrides are needed in either case: FCC exposes native **Fable / Opus / Sonnet / Haiku** tier models, so Claude Code's built-in model picker works as-is.
+
+### Claude Code CLI
+
+Edit `~/.claude/settings.json` (`%USERPROFILE%\.claude\settings.json` on Windows) and **add the `env` block — or replace these two values if they already exist**:
+
+```json
+{
+  "env": {
+    "ANTHROPIC_AUTH_TOKEN": "freecc",
+    "ANTHROPIC_BASE_URL": "http://127.0.0.1:8082"
+  }
+}
+```
+
+Notes:
+
+- Keep any other keys you already have in the file — just merge the `env` entries.
+- `ANTHROPIC_AUTH_TOKEN` sends the key as a bearer token (what FCC expects). The settings file wins over shell exports.
+- Restart Claude Code after editing, then verify with `/status` — it should show `Anthropic base URL: http://127.0.0.1:8082` and your auth token.
+- Official reference: [Claude Code LLM gateway docs](https://code.claude.com/docs/en/llm-gateway-connect) · [settings.json reference](https://code.claude.com/docs/en/settings).
+
+### Claude Code Desktop
+
+The desktop app routes its **Code tab** through the same `~/.claude/settings.json` above, but it also has a native gateway setting (no file editing). Menu labels vary slightly by app version — the current documented path is:
+
+1. **Enable Developer Mode**: open **Help → Troubleshooting → Enable Developer Mode**. The app restarts with a new **Developer** menu/tab. (On older builds: **Settings → enable Developer mode**, which exposes **Settings → Developer** instead.)
+2. Open **Developer → Configure Third-Party Inference** and set:
+   - **Inference provider**: `Gateway`
+   - **Gateway base URL**: `http://127.0.0.1:8082`
+   - **Auth scheme**: `bearer`
+   - **Gateway API key**: `freecc`
+3. Press **OK** / save, then **restart the app**.
+
+After connecting, the app auto-discovers models from FCC's `/v1/models` — the **initial warning dialog can be safely ignored**; the model picker fills in once discovery completes. One limitation: with a gateway active, the desktop app runs **local sessions only** (no Anthropic-hosted cloud environments).
+
+Visual walkthroughs from other gateway tutorials (same dialogs, different URLs):
+
+- [Bifrost docs — Claude Desktop](https://docs.getbifrost.ai/cli-agents/claude-desktop): [Developer tab → Inference provider = Gateway](https://kimi-web-img.moonshot.cn/prod-data/online-image/search-upload/4befc03b3922a39e8d1f6b486e4164ce.png) · [Gateway fields (base URL / auth scheme / key)](https://kimi-web-img.moonshot.cn/prod-data/online-image/search-upload/127dede83b3b9a57e8cdcd2eeb0c7ec9.png)
+- [Merge docs — Claude Code via Gateway](https://docs.merge.dev/merge-gateway/features/use-in-your-ide/claude-code) (Developer mode → add endpoint → add API key)
+- [CodeGateway — Claude Desktop Developer Mode custom endpoint](https://www.codegateway.dev/en/blog/claude-desktop-developer-mode-api-proxy) (older-build flow via `claude_desktop_config.json`)
+
 ## Connect Your Client
 
 For terminal use, start `fcc-server`, then run `fcc-claude`, `fcc-codex`, or `fcc-pi`. Use the guides below for editor integrations.
