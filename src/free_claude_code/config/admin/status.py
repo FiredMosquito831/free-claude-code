@@ -4,6 +4,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from free_claude_code.config.provider_catalog import PROVIDER_CATALOG
+from free_claude_code.config.provider_registry import get_provider_registry
 
 from .manifest import FIELDS
 
@@ -40,6 +41,24 @@ def provider_config_status(
                 "status": "configured" if configured else "missing_key",
                 "label": "Configured" if configured else "Missing key",
                 "credential_env": descriptor.credential_env,
+            }
+        )
+    for entry in get_provider_registry().list_custom():
+        if not entry.enabled:
+            status, label = "disabled", "Disabled"
+        elif entry.api_keys:
+            status, label = "configured", "Configured"
+        else:
+            status, label = "missing_key", "Missing key"
+        statuses.append(
+            {
+                "provider_id": entry.provider_id,
+                "display_name": entry.display_name,
+                "kind": "remote",
+                "status": status,
+                "label": label,
+                "custom": True,
+                "base_url": entry.base_url,
             }
         )
     return statuses

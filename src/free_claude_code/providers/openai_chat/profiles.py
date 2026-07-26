@@ -297,6 +297,10 @@ OPENAI_CHAT_PROFILES: dict[str, OpenAIChatProfile] = {
             budget_field="reasoning_effort",
         ),
     ),
+    "novita": OpenAIChatProfile(
+        _policy("NOVITA", ReasoningReplayMode.THINK_TAGS),
+        NO_REASONING,
+    ),
     "zai": OpenAIChatProfile(
         _policy(
             "ZAI",
@@ -348,3 +352,10 @@ OPENAI_CHAT_PROFILES: dict[str, OpenAIChatProfile] = {
         reasoning_delta_field="reasoning",
     ),
 }
+
+# Fallback profile for dynamic custom providers: plain OpenAI-compatible Chat
+# Completions with no provider-specific quirks.
+GENERIC_OPENAI_PROFILE = OpenAIChatProfile(
+    _policy("CUSTOM", ReasoningReplayMode.THINK_TAGS),
+    NO_REASONING,
+)

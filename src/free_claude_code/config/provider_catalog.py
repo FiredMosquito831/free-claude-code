@@ -41,6 +41,8 @@ ZAI_DEFAULT_BASE = "https://api.z.ai/api/coding/paas/v4"
 # Google AI Studio Gemini API OpenAI-compat layer (not Vertex AI).
 GEMINI_DEFAULT_BASE = "https://generativelanguage.googleapis.com/v1beta/openai/"
 GROQ_DEFAULT_BASE = "https://api.groq.com/openai/v1"
+# Novita AI OpenAI-compatible Chat Completions API.
+NOVITA_DEFAULT_BASE = "https://api.novita.ai/openai"
 CEREBRAS_DEFAULT_BASE = "https://api.cerebras.ai/v1"
 SAMBANOVA_DEFAULT_BASE = "https://api.sambanova.ai/v1"
 
@@ -59,6 +61,7 @@ class ProviderDescriptor:
     default_base_url: str | None = None
     base_url_attr: str | None = None
     proxy_attr: str | None = None
+    dynamic: bool = False
 
 
 PROVIDER_CATALOG: dict[str, ProviderDescriptor] = {
@@ -249,6 +252,15 @@ PROVIDER_CATALOG: dict[str, ProviderDescriptor] = {
         credential_attr="fireworks_api_key",
         default_base_url=FIREWORKS_DEFAULT_BASE,
         proxy_attr="fireworks_proxy",
+    ),
+    "novita": ProviderDescriptor(
+        provider_id="novita",
+        display_name="Novita AI",
+        credential_env="NOVITA_API_KEY",
+        credential_url="https://novita.ai/settings",
+        credential_attr="novita_api_key",
+        default_base_url=NOVITA_DEFAULT_BASE,
+        proxy_attr="novita_proxy",
     ),
     "cloudflare": ProviderDescriptor(
         provider_id="cloudflare",

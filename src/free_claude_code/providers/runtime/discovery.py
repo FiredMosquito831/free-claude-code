@@ -10,15 +10,18 @@ from free_claude_code.application.model_metadata import (
     ProviderModelRefreshResult,
 )
 from free_claude_code.config.model_refs import configured_chat_model_refs
-from free_claude_code.config.provider_catalog import PROVIDER_CATALOG
+from free_claude_code.config.provider_registry import get_provider_registry
 from free_claude_code.config.settings import Settings
 from free_claude_code.providers.base import BaseProvider
 
+from . import models_dev
 from .config import provider_credential
 from .model_cache import ProviderModelCache
 from .validation import provider_query_failure_reason
 
 ProviderResolver = Callable[[str], BaseProvider]
+
+_MODELS_DEV_ENRICHED_STATIC_PROVIDERS = frozenset({"novita"})
 
 
 def referenced_provider_ids(settings: Settings) -> frozenset[str]:
@@ -30,23 +33,32 @@ def model_cache_provider_ids_for_settings(settings: Settings) -> tuple[str, ...]
     """Return providers whose model metadata is valid for these settings."""
     return tuple(
         provider_id
-        for provider_id, descriptor in PROVIDER_CATALOG.items()
+        for provider_id, descriptor in get_provider_registry().all_descriptors().items()
         if descriptor.local
         or (
             descriptor.credential_env is not None
             and provider_credential(descriptor, settings).strip()
         )
+        or (descriptor.dynamic and descriptor.static_credential)
     )
 
 
 def model_list_provider_ids_for_settings(settings: Settings) -> tuple[str, ...]:
     """Return providers worth discovering for this process configuration."""
+    descriptors = get_provider_registry().all_descriptors()
     referenced_ids = referenced_provider_ids(settings)
     return tuple(
         provider_id
         for provider_id in model_cache_provider_ids_for_settings(settings)
-        if not PROVIDER_CATALOG[provider_id].local or provider_id in referenced_ids
+        if not descriptors[provider_id].local or provider_id in referenced_ids
     )
+
+
+def _models_dev_enrichable(provider_id: str) -> bool:
+    if provider_id in _MODELS_DEV_ENRICHED_STATIC_PROVIDERS:
+        return True
+    descriptor = get_provider_registry().all_descriptors().get(provider_id)
+    return descriptor is not None and descriptor.dynamic
 
 
 class ProviderModelDiscovery:
@@ -101,7 +113,12 @@ class ProviderModelDiscovery:
                     self._log_discovery_failure(provider_id, result)
                     failed_provider_ids.append(provider_id)
                     continue
-                self._model_cache.cache_model_infos(provider_id, result)
+                model_infos = result
+                if _models_dev_enrichable(provider_id):
+                    model_infos = await models_dev.enrich_provider_model_infos(
+                        model_infos
+                    )
+                self._model_cache.cache_model_infos(provider_id, model_infos)
                 refreshed_provider_ids.append(provider_id)
                 logger.info(
                     "Provider model discovery cached: provider={} models={}",

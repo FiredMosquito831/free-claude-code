@@ -6,6 +6,7 @@ from free_claude_code.application.errors import ApplicationUnavailableError
 from free_claude_code.config.credentials import parse_credential_keys
 from free_claude_code.config.env_files import env_file_override
 from free_claude_code.config.provider_catalog import ProviderDescriptor
+from free_claude_code.config.provider_registry import get_provider_registry
 from free_claude_code.config.settings import Settings
 from free_claude_code.providers.base import ProviderConfig
 
@@ -71,6 +72,8 @@ def build_provider_config(
     descriptor: ProviderDescriptor, settings: Settings
 ) -> ProviderConfig:
     """Build shared provider configuration for one provider descriptor."""
+    if descriptor.dynamic:
+        return _build_dynamic_provider_config(descriptor, settings)
     credential = provider_credential(descriptor, settings)
     require_provider_credential(descriptor, credential)
     api_keys = parse_credential_keys(credential)
@@ -98,5 +101,35 @@ def build_provider_config(
         log_raw_sse_events=settings.log_raw_sse_events,
         log_api_error_tracebacks=settings.log_api_error_tracebacks,
         api_keys=api_keys,
+        credential_rotation=rotation,
+    )
+
+
+def _build_dynamic_provider_config(
+    descriptor: ProviderDescriptor, settings: Settings
+) -> ProviderConfig:
+    """Build provider configuration for a registry-backed custom provider."""
+    entry = get_provider_registry().get(descriptor.provider_id)
+    if entry is None:
+        raise ApplicationUnavailableError(
+            f"Custom provider {descriptor.provider_id!r} is not registered. "
+            "Add it again from the admin dashboard."
+        )
+    rotation = entry.credential_rotation
+    if rotation not in CREDENTIAL_ROTATION_POLICIES:
+        rotation = DEFAULT_CREDENTIAL_ROTATION
+    return ProviderConfig(
+        api_key=entry.api_keys[0] if entry.api_keys else "",
+        base_url=entry.base_url,
+        rate_limit=settings.provider_rate_limit,
+        rate_window=settings.provider_rate_window,
+        max_concurrency=settings.provider_max_concurrency,
+        http_read_timeout=settings.http_read_timeout,
+        http_write_timeout=settings.http_write_timeout,
+        http_connect_timeout=settings.http_connect_timeout,
+        proxy=entry.proxy or "",
+        log_raw_sse_events=settings.log_raw_sse_events,
+        log_api_error_tracebacks=settings.log_api_error_tracebacks,
+        api_keys=entry.api_keys,
         credential_rotation=rotation,
     )
