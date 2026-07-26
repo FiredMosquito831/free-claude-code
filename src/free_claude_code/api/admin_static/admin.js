@@ -7,6 +7,8 @@ const state = {
   activeView: "providers",
   webSearchStatsPeriod: "weekly",
   webSearchAnalyticsLoaded: false,
+  customProviders: [],
+  editingCustomProviderId: null,
 };
 
 const MASKED_SECRET = "********";
@@ -114,6 +116,7 @@ async function load() {
   renderProviders(config.provider_status);
   renderSections(config.sections, config.fields);
   renderWebSearchProviders();
+  await loadCustomProviders();
   byId("configPath").textContent = config.paths.managed;
   await hydrateModelOptions();
   await validate(false);
@@ -1656,6 +1659,327 @@ function showMessage(message, kind = "") {
   area.textContent = message;
   area.className = `message-area ${kind}`.trim();
 }
+
+/* --------------------------------------------------------------------- */
+/* Custom providers                                                        */
+/* --------------------------------------------------------------------- */
+
+const CUSTOM_PROVIDER_STATUS_LABELS = {
+  configured: "Configured",
+  missing_key: "Missing key",
+  disabled: "Disabled",
+};
+
+async function loadCustomProviders() {
+  const grid = byId("customProviderGrid");
+  if (!grid) return;
+  let result;
+  try {
+    result = await api("/admin/api/custom-providers");
+  } catch (error) {
+    grid.innerHTML = "";
+    const note = document.createElement("div");
+    note.className = "cp-note";
+    note.textContent = `Custom providers unavailable: ${error.message}`;
+    grid.appendChild(note);
+    return;
+  }
+  state.customProviders = result.providers || [];
+  renderCustomProviders();
+}
+
+function renderCustomProviders() {
+  const grid = byId("customProviderGrid");
+  grid.innerHTML = "";
+  if (state.customProviders.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "cp-note";
+    empty.textContent = "No custom providers yet.";
+    grid.appendChild(empty);
+    return;
+  }
+  state.customProviders.forEach((provider) => {
+    grid.appendChild(customProviderCard(provider));
+  });
+}
+
+function customProviderCard(provider) {
+  const card = document.createElement("article");
+  card.className = "provider-card";
+  card.dataset.customProvider = provider.provider_id;
+
+  const title = document.createElement("div");
+  title.className = "provider-title";
+  title.innerHTML = `<strong>${provider.display_name || provider.provider_id}</strong>`;
+  const pill = document.createElement("span");
+  pill.className = `status-pill ${statusClass(provider.status)}`;
+  pill.textContent =
+    CUSTOM_PROVIDER_STATUS_LABELS[provider.status] || provider.status;
+  title.appendChild(pill);
+
+  const meta = document.createElement("div");
+  meta.className = "provider-meta";
+  meta.textContent = provider.base_url;
+
+  const details = document.createElement("div");
+  details.className = "cp-details";
+  details.textContent =
+    `${provider.key_count} key${provider.key_count === 1 ? "" : "s"} · ` +
+    `${provider.credential_rotation} · ${provider.model_count} models` +
+    (provider.proxy ? ` · proxy ${provider.proxy}` : "");
+
+  const keyList = document.createElement("div");
+  keyList.className = "cp-key-list";
+  provider.masked_keys.forEach((masked, index) => {
+    const row = document.createElement("div");
+    row.className = "cp-key-row";
+    const label = document.createElement("code");
+    label.className = "cp-key-label";
+    label.textContent = masked;
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "ghost-button";
+    remove.textContent = "Remove";
+    remove.addEventListener("click", () =>
+      removeCustomProviderKey(provider, index, remove),
+    );
+    row.append(label, remove);
+    keyList.appendChild(row);
+  });
+
+  const addRow = document.createElement("div");
+  addRow.className = "cp-key-add";
+  const keyInput = document.createElement("input");
+  keyInput.type = "password";
+  keyInput.autocomplete = "off";
+  keyInput.placeholder = "Paste a new key";
+  const addButton = document.createElement("button");
+  addButton.type = "button";
+  addButton.className = "secondary-button";
+  addButton.textContent = "Add key";
+  const submitKey = () => addCustomProviderKey(provider, keyInput, addButton);
+  addButton.addEventListener("click", submitKey);
+  keyInput.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") submitKey();
+  });
+  addRow.append(keyInput, addButton);
+  keyList.appendChild(addRow);
+
+  const actions = document.createElement("div");
+  actions.className = "card-actions";
+
+  const testButton = document.createElement("button");
+  testButton.type = "button";
+  testButton.className = "test-button";
+  testButton.textContent = "Test";
+  testButton.addEventListener("click", () =>
+    testCustomProvider(provider, testButton),
+  );
+
+  const editButton = document.createElement("button");
+  editButton.type = "button";
+  editButton.className = "secondary-button";
+  editButton.textContent = "Edit";
+  editButton.addEventListener("click", () => openCustomProviderForm(provider));
+
+  const deleteButton = document.createElement("button");
+  deleteButton.type = "button";
+  deleteButton.className = "secondary-button danger";
+  deleteButton.textContent = "Delete";
+  deleteButton.addEventListener("click", () =>
+    deleteCustomProvider(provider, deleteButton),
+  );
+
+  actions.append(testButton, editButton, deleteButton);
+  card.append(title, meta, details, keyList, actions);
+  return card;
+}
+
+function updateCustomProviderCard(providerId, status, label, metaText) {
+  const card = document.querySelector(`[data-custom-provider="${providerId}"]`);
+  if (!card) return;
+  const pill = card.querySelector(".status-pill");
+  pill.className = `status-pill ${statusClass(status)}`;
+  pill.textContent = label;
+  if (metaText) {
+    card.querySelector(".provider-meta").textContent = metaText;
+  }
+}
+
+async function testCustomProvider(provider, button) {
+  const original = button.textContent;
+  button.disabled = true;
+  button.textContent = "Testing";
+  try {
+    const result = await api(
+      `/admin/api/providers/${provider.provider_id}/test`,
+      { method: "POST", body: "{}" },
+    );
+    if (result.ok) {
+      updateCustomProviderCard(
+        provider.provider_id,
+        "reachable",
+        `${result.models.length} models`,
+        result.models.slice(0, 3).join(", ") || "No models returned",
+      );
+      setModelOptions([
+        ...state.modelOptions,
+        ...result.models.map((model) => `${provider.provider_id}/${model}`),
+      ]);
+    } else {
+      updateCustomProviderCard(
+        provider.provider_id,
+        "offline",
+        result.error_type,
+        result.error_type,
+      );
+    }
+  } catch (error) {
+    updateCustomProviderCard(
+      provider.provider_id,
+      "offline",
+      "error",
+      error.message,
+    );
+  } finally {
+    button.disabled = false;
+    button.textContent = original;
+  }
+}
+
+async function addCustomProviderKey(provider, input, button) {
+  const key = input.value.trim();
+  if (!key) {
+    showMessage("Enter a key first", "warn");
+    return;
+  }
+  button.disabled = true;
+  try {
+    const result = await api(
+      `/admin/api/custom-providers/${provider.provider_id}/keys`,
+      { method: "POST", body: JSON.stringify({ api_key: key }) },
+    );
+    showMessage(`Added key ${result.added} (${result.key_count} configured).`, "ok");
+    await loadCustomProviders();
+  } catch (error) {
+    showMessage(`Could not add key: ${error.message}`, "error");
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function removeCustomProviderKey(provider, index, button) {
+  button.disabled = true;
+  try {
+    const result = await api(
+      `/admin/api/custom-providers/${provider.provider_id}/keys/${index}`,
+      { method: "DELETE" },
+    );
+    showMessage(`Removed key ${result.removed} (${result.key_count} remaining).`, "ok");
+    await loadCustomProviders();
+  } catch (error) {
+    showMessage(`Could not remove key: ${error.message}`, "error");
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function deleteCustomProvider(provider, button) {
+  const confirmed = window.confirm(
+    `Delete custom provider "${provider.display_name}" (${provider.provider_id})?`,
+  );
+  if (!confirmed) return;
+  button.disabled = true;
+  try {
+    await api(`/admin/api/custom-providers/${provider.provider_id}`, {
+      method: "DELETE",
+    });
+    showMessage(`Deleted ${provider.display_name}.`, "ok");
+    await loadCustomProviders();
+  } catch (error) {
+    showMessage(`Could not delete provider: ${error.message}`, "error");
+    button.disabled = false;
+  }
+}
+
+function openCustomProviderForm(provider) {
+  state.editingCustomProviderId = provider ? provider.provider_id : null;
+  byId("cpDisplayName").value = provider ? provider.display_name : "";
+  byId("cpBaseUrl").value = provider ? provider.base_url : "";
+  byId("cpApiKey").value = "";
+  byId("cpApiKeyField").hidden = Boolean(provider);
+  byId("cpRotation").value = provider ? provider.credential_rotation : "failover";
+  byId("cpProxy").value = provider && provider.proxy ? provider.proxy : "";
+  byId("cpSubmitButton").textContent = provider ? "Save changes" : "Add provider";
+  byId("customProviderForm").hidden = false;
+  byId("cpDisplayName").focus();
+}
+
+function closeCustomProviderForm() {
+  byId("customProviderForm").hidden = true;
+  state.editingCustomProviderId = null;
+}
+
+async function submitCustomProviderForm(event) {
+  event.preventDefault();
+  const editingId = state.editingCustomProviderId;
+  const button = byId("cpSubmitButton");
+  button.disabled = true;
+  try {
+    if (editingId) {
+      await api(`/admin/api/custom-providers/${editingId}`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          display_name: byId("cpDisplayName").value,
+          base_url: byId("cpBaseUrl").value,
+          credential_rotation: byId("cpRotation").value,
+          proxy: byId("cpProxy").value,
+        }),
+      });
+      showMessage(`Updated ${editingId}.`, "ok");
+    } else {
+      const result = await api("/admin/api/custom-providers", {
+        method: "POST",
+        body: JSON.stringify({
+          display_name: byId("cpDisplayName").value,
+          base_url: byId("cpBaseUrl").value,
+          api_key: byId("cpApiKey").value,
+          credential_rotation: byId("cpRotation").value,
+          proxy: byId("cpProxy").value,
+        }),
+      });
+      if (result.test_error) {
+        showMessage(
+          `Added ${result.display_name}, but the live test failed: ${result.test_error}`,
+          "warn",
+        );
+      } else {
+        const preview = result.models.slice(0, 3).join(", ");
+        showMessage(
+          `Added ${result.display_name} — ${result.model_count} models detected` +
+            (preview ? `: ${preview}` : ""),
+          "ok",
+        );
+      }
+      setModelOptions([
+        ...state.modelOptions,
+        ...result.models.map((model) => `${result.provider_id}/${model}`),
+      ]);
+    }
+    closeCustomProviderForm();
+    await loadCustomProviders();
+  } catch (error) {
+    showMessage(`Could not save custom provider: ${error.message}`, "error");
+  } finally {
+    button.disabled = false;
+  }
+}
+
+byId("addCustomProviderButton").addEventListener("click", () =>
+  openCustomProviderForm(null),
+);
+byId("cpCancelButton").addEventListener("click", closeCustomProviderForm);
+byId("customProviderForm").addEventListener("submit", submitCustomProviderForm);
 
 byId("validateButton").addEventListener("click", () => validate(true));
 byId("applyButton").addEventListener("click", apply);
