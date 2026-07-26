@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from free_claude_code.config.provider_catalog import SUPPORTED_PROVIDER_IDS
+from free_claude_code.config.provider_registry import get_provider_registry
 from free_claude_code.core.gateway_model_ids import (
     GATEWAY_MODEL_ID_PREFIX,
     NO_THINKING_GATEWAY_MODEL_ID_PREFIX,
@@ -129,7 +129,7 @@ def _candidate_from_model_id(
             force_no_thinking=True,
         )
 
-    if prefix in SUPPORTED_PROVIDER_IDS and remainder:
+    if prefix in get_provider_registry().supported_ids() and remainder:
         return _CatalogCandidate(
             slug=model_id,
             provider_model_ref=model_id,
@@ -177,7 +177,11 @@ def _codex_catalog_entry(
 
 def _is_provider_model_ref(value: str) -> bool:
     provider_id, separator, provider_model = value.partition("/")
-    return bool(separator and provider_model and provider_id in SUPPORTED_PROVIDER_IDS)
+    return bool(
+        separator
+        and provider_model
+        and provider_id in get_provider_registry().supported_ids()
+    )
 
 
 def _string_value(value: Any) -> str | None:

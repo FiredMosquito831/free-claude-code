@@ -8,10 +8,12 @@ from free_claude_code.config.provider_catalog import (
     PROVIDER_CATALOG,
     ProviderDescriptor,
 )
+from free_claude_code.config.provider_registry import get_provider_registry
 from free_claude_code.config.settings import Settings
 from free_claude_code.providers.base import BaseProvider, ProviderConfig
 from free_claude_code.providers.credential_rotation import CredentialRotationState
 from free_claude_code.providers.openai_chat import (
+    GENERIC_OPENAI_PROFILE,
     OPENAI_CHAT_PROFILES,
     create_openai_chat_provider,
 )
@@ -165,6 +167,13 @@ def _create_single_provider(
     factory = _SPECIAL_PROVIDER_FACTORIES.get(descriptor.provider_id)
     if factory is not None:
         return factory(config, settings, rate_limiter)
+    if descriptor.dynamic:
+        profile = OPENAI_CHAT_PROFILES.get(
+            descriptor.provider_id, GENERIC_OPENAI_PROFILE
+        )
+        return create_openai_chat_provider(
+            descriptor.provider_id, config, rate_limiter, profile=profile
+        )
     return create_openai_chat_provider(descriptor.provider_id, config, rate_limiter)
 
 
@@ -175,9 +184,10 @@ def create_provider(provider_id: str, settings: Settings) -> BaseProvider:
     key env var), one sub-provider is built per key and wrapped in a
     :class:`RotatingProvider` that applies the configured rotation policy.
     """
-    descriptor = PROVIDER_CATALOG.get(provider_id)
+    descriptors = get_provider_registry().all_descriptors()
+    descriptor = descriptors.get(provider_id)
     if descriptor is None:
-        raise UnknownProviderError.for_provider(provider_id, PROVIDER_CATALOG)
+        raise UnknownProviderError.for_provider(provider_id, descriptors)
 
     config = build_provider_config(descriptor, settings)
     keys = config.api_keys or ((config.api_key,) if config.api_key else ())

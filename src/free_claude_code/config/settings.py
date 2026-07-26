@@ -15,7 +15,7 @@ from .env_files import (
     settings_env_files,
 )
 from .nim import NimSettings
-from .provider_catalog import SUPPORTED_PROVIDER_IDS
+from .provider_registry import get_provider_registry
 from .reasoning import ReasoningPreference
 from .websearch_catalog import SUPPORTED_WEBSEARCH_PROVIDER_IDS
 
@@ -84,6 +84,9 @@ class Settings(BaseSettings):
 
     # ==================== Fireworks AI Config ====================
     fireworks_api_key: str = Field(default="", validation_alias="FIREWORKS_API_KEY")
+
+    # ==================== Novita AI Config ====================
+    novita_api_key: str = Field(default="", validation_alias="NOVITA_API_KEY")
 
     # ==================== Cloudflare Workers AI Config ====================
     cloudflare_api_token: str = Field(
@@ -173,6 +176,7 @@ class Settings(BaseSettings):
     sambanova_proxy: str = Field(default="", validation_alias="SAMBANOVA_PROXY")
     zai_proxy: str = Field(default="", validation_alias="ZAI_PROXY")
     fireworks_proxy: str = Field(default="", validation_alias="FIREWORKS_PROXY")
+    novita_proxy: str = Field(default="", validation_alias="NOVITA_PROXY")
     cloudflare_proxy: str = Field(default="", validation_alias="CLOUDFLARE_PROXY")
     gemini_proxy: str = Field(default="", validation_alias="GEMINI_PROXY")
     groq_proxy: str = Field(default="", validation_alias="GROQ_PROXY")
@@ -505,15 +509,16 @@ class Settings(BaseSettings):
     def validate_model_format(cls, v: str | None) -> str | None:
         if v is None:
             return None
+        supported_ids = get_provider_registry().supported_ids()
         if "/" not in v:
             raise ValueError(
                 f"Model must be prefixed with provider type. "
-                f"Valid providers: {', '.join(SUPPORTED_PROVIDER_IDS)}. "
+                f"Valid providers: {', '.join(supported_ids)}. "
                 f"Format: provider_type/model/name"
             )
         provider = v.split("/", 1)[0]
-        if provider not in SUPPORTED_PROVIDER_IDS:
-            supported = ", ".join(f"'{p}'" for p in SUPPORTED_PROVIDER_IDS)
+        if provider not in supported_ids:
+            supported = ", ".join(f"'{p}'" for p in supported_ids)
             raise ValueError(f"Invalid provider: '{provider}'. Supported: {supported}")
         return v
 

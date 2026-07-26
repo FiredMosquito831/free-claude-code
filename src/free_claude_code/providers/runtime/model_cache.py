@@ -3,7 +3,7 @@
 from collections.abc import Iterable
 
 from free_claude_code.application.model_metadata import ProviderModelInfo
-from free_claude_code.config.provider_catalog import SUPPORTED_PROVIDER_IDS
+from free_claude_code.config.provider_registry import get_provider_registry
 from free_claude_code.providers.model_listing import model_infos_from_ids
 
 
@@ -12,8 +12,10 @@ class ProviderModelCache:
 
     def __init__(
         self,
-        available_provider_ids: Iterable[str] = SUPPORTED_PROVIDER_IDS,
+        available_provider_ids: Iterable[str] | None = None,
     ) -> None:
+        if available_provider_ids is None:
+            available_provider_ids = get_provider_registry().supported_ids()
         self._available_provider_ids = frozenset(available_provider_ids)
         self._model_infos_by_provider: dict[str, dict[str, ProviderModelInfo]] = {}
 
@@ -68,12 +70,26 @@ class ProviderModelCache:
     def cached_prefixed_model_infos(self) -> tuple[ProviderModelInfo, ...]:
         """Return cached provider models with user-selectable prefixed ids."""
         infos: list[ProviderModelInfo] = []
-        for provider_id in SUPPORTED_PROVIDER_IDS:
+        supported_ids = get_provider_registry().supported_ids()
+        ordered_ids = [
+            provider_id
+            for provider_id in supported_ids
+            if provider_id in self._available_provider_ids
+        ]
+        ordered_ids.extend(
+            provider_id
+            for provider_id in self._model_infos_by_provider
+            if provider_id not in supported_ids
+        )
+        for provider_id in ordered_ids:
             provider_infos = self._model_infos_by_provider.get(provider_id, {})
             infos.extend(
                 ProviderModelInfo(
                     model_id=f"{provider_id}/{info.model_id}",
                     supports_thinking=info.supports_thinking,
+                    context_length=info.context_length,
+                    input_price=info.input_price,
+                    output_price=info.output_price,
                 )
                 for info in sorted(
                     provider_infos.values(), key=lambda item: item.model_id

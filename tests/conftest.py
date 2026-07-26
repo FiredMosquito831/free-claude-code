@@ -43,6 +43,20 @@ def _isolate_request_log(monkeypatch, tmp_path):
     request_log.reset_request_log_stores()
 
 
+@pytest.fixture(autouse=True)
+def _isolate_provider_registry(monkeypatch, tmp_path):
+    """Keep custom provider registry state out of the real ~/.fcc directory."""
+    from free_claude_code.config import provider_registry
+    from free_claude_code.providers.runtime import models_dev
+
+    config_dir = tmp_path / "fcc-config"
+    monkeypatch.setattr(provider_registry, "config_dir_path", lambda: config_dir)
+    monkeypatch.setattr(models_dev, "config_dir_path", lambda: config_dir)
+    provider_registry.reset_provider_registry()
+    yield
+    provider_registry.reset_provider_registry()
+
+
 @pytest.fixture
 def provider_config():
     from free_claude_code.providers.base import ProviderConfig

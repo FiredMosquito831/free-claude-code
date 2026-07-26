@@ -5,7 +5,7 @@ from free_claude_code.providers.rate_limit import ProviderRateLimiter
 
 from .base_url import openai_v1_base_url
 from .extra_body import validate_extra_body_does_not_override_canonical_fields
-from .profiles import OPENAI_CHAT_PROFILES, OpenAIChatProfile
+from .profiles import GENERIC_OPENAI_PROFILE, OPENAI_CHAT_PROFILES, OpenAIChatProfile
 from .provider import OpenAIChatProvider
 from .reasoning import (
     NO_REASONING,
@@ -21,19 +21,21 @@ def create_openai_chat_provider(
     provider_id: str,
     config: ProviderConfig,
     rate_limiter: ProviderRateLimiter,
+    profile: OpenAIChatProfile | None = None,
 ) -> OpenAIChatProvider:
     """Construct one profile-driven provider."""
-    profile = OPENAI_CHAT_PROFILES.get(provider_id)
-    if profile is None:
+    resolved = profile if profile is not None else OPENAI_CHAT_PROFILES.get(provider_id)
+    if resolved is None:
         raise KeyError(f"No declarative OpenAI-chat profile for {provider_id!r}")
     return OpenAIChatProvider(
         config,
-        profile=profile,
+        profile=resolved,
         rate_limiter=rate_limiter,
     )
 
 
 __all__ = [
+    "GENERIC_OPENAI_PROFILE",
     "NO_REASONING",
     "OPENAI_CHAT_PROFILES",
     "ChatTemplateReasoning",

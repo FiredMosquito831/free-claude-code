@@ -88,6 +88,8 @@ def _make_settings(**overrides):
     mock.zai_proxy = ""
     mock.fireworks_proxy = ""
     mock.fireworks_api_key = "test_fireworks_key"
+    mock.novita_proxy = ""
+    mock.novita_api_key = "test_novita_key"
     mock.cloudflare_api_token = "test_cloudflare_token"
     mock.cloudflare_account_id = "test_cloudflare_account"
     mock.cloudflare_proxy = ""
@@ -400,6 +402,7 @@ def test_create_provider_instantiates_each_builtin():
         "groq": OpenAIChatProvider,
         "sambanova": OpenAIChatProvider,
         "cerebras": OpenAIChatProvider,
+        "novita": OpenAIChatProvider,
     }
     sentinel_limiter = MagicMock(spec=ProviderRateLimiter)
 

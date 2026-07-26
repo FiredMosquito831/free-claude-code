@@ -34,7 +34,7 @@ def test_every_readme_feature_has_inventory_entry() -> None:
 def test_readme_provider_table_covers_full_catalog() -> None:
     repo_root = Path(__file__).resolve().parents[2]
     readme = (repo_root / "README.md").read_text(encoding="utf-8")
-    provider_section = readme.split("## Choose A Provider", 1)[1].split("\n## ", 1)[0]
+    provider_section = readme.split("## Model Providers", 1)[1].split("\n## ", 1)[0]
     rows = [line for line in provider_section.splitlines() if line.startswith("| [")]
 
     prefixes: list[str] = []

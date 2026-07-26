@@ -6,10 +6,7 @@ from loguru import logger
 
 from free_claude_code.application.errors import UnknownProviderError
 from free_claude_code.config.model_refs import parse_model_name, parse_provider_type
-from free_claude_code.config.provider_catalog import (
-    PROVIDER_CATALOG,
-    SUPPORTED_PROVIDER_IDS,
-)
+from free_claude_code.config.provider_registry import get_provider_registry
 from free_claude_code.config.reasoning import ReasoningPreference
 from free_claude_code.config.settings import Settings
 from free_claude_code.core.anthropic import MessagesRequest, TokenCountRequest
@@ -100,15 +97,17 @@ class ModelRouter:
 
     @staticmethod
     def _validate_provider_id(provider_id: str) -> None:
-        if provider_id not in PROVIDER_CATALOG:
-            raise UnknownProviderError.for_provider(provider_id, PROVIDER_CATALOG)
+        descriptors = get_provider_registry().all_descriptors()
+        if provider_id not in descriptors:
+            raise UnknownProviderError.for_provider(provider_id, descriptors)
 
     def _direct_provider_model(
         self, model_name: str
     ) -> tuple[str | None, str | None, bool]:
+        supported_ids = get_provider_registry().supported_ids()
         decoded = decode_gateway_model_id(model_name)
         if decoded is not None:
-            if decoded.provider_id not in SUPPORTED_PROVIDER_IDS:
+            if decoded.provider_id not in supported_ids:
                 return None, None, False
             return (
                 decoded.provider_id,
@@ -119,7 +118,7 @@ class ModelRouter:
         provider_id, separator, provider_model = model_name.partition("/")
         if not separator:
             return None, None, False
-        if provider_id not in SUPPORTED_PROVIDER_IDS:
+        if provider_id not in supported_ids:
             return None, None, False
         if not provider_model:
             return None, None, False

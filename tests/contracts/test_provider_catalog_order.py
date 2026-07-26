@@ -27,6 +27,7 @@ _EXPECTED_PROVIDER_ORDER: tuple[str, ...] = (
     "groq",
     "sambanova",
     "fireworks",
+    "novita",
     "cloudflare",
     "zai",
     "ollama_cloud",
