@@ -22,6 +22,7 @@ from free_claude_code.core.trace import (
 from free_claude_code.core.version import package_version
 
 from .admin_cache import AdminNoStoreMiddleware, attach_admin_no_store
+from .admin_custom_routes import router as admin_custom_router
 from .admin_routes import router as admin_router
 from .admin_websearch_routes import router as admin_websearch_router
 from .ports import ApiServices
@@ -43,6 +44,7 @@ def create_app(services: ApiServices) -> FastAPI:
     app.add_middleware(AdminNoStoreMiddleware)
 
     app.include_router(admin_router)
+    app.include_router(admin_custom_router)
     app.include_router(admin_websearch_router)
     app.include_router(router)
 

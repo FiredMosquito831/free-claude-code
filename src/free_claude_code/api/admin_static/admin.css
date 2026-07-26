@@ -1275,3 +1275,61 @@ textarea:focus-visible,
   word-break: break-word;
   font-size: 12px;
 }
+
+/* Custom providers */
+.cp-note {
+  color: var(--muted);
+  font-size: 13px;
+  padding: 8px 0;
+}
+
+.cp-details {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.cp-key-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.cp-key-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.cp-key-label {
+  font-size: 12px;
+  color: var(--text-strong);
+}
+
+.cp-key-add {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.cp-key-add input {
+  flex: 1;
+  min-width: 0;
+}
+
+.cp-form {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 16px;
+  margin-top: 20px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  padding: 16px;
+  background: var(--card);
+}
+
+.cp-form-actions {
+  display: flex;
+  gap: 12px;
+  align-items: flex-end;
+}

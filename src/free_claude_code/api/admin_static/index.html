@@ -35,6 +35,50 @@
               </div>
               <div id="providerGrid" class="provider-grid"></div>
             </section>
+            <section class="provider-strip" aria-label="Custom providers">
+              <div class="strip-header">
+                <h3>Custom providers</h3>
+                <button
+                  id="addCustomProviderButton"
+                  class="secondary-button"
+                  type="button"
+                >
+                  Add custom provider
+                </button>
+              </div>
+              <div id="customProviderGrid" class="provider-grid"></div>
+              <form id="customProviderForm" class="cp-form" hidden>
+                <div class="field">
+                  <label for="cpDisplayName"><span>Display name</span></label>
+                  <input id="cpDisplayName" type="text" autocomplete="off" placeholder="My Provider" />
+                </div>
+                <div class="field">
+                  <label for="cpBaseUrl"><span>Base URL</span></label>
+                  <input id="cpBaseUrl" type="text" autocomplete="off" placeholder="https://api.example.com/v1" />
+                </div>
+                <div class="field" id="cpApiKeyField">
+                  <label for="cpApiKey"><span>API key</span></label>
+                  <input id="cpApiKey" type="password" autocomplete="off" placeholder="Paste an API key" />
+                </div>
+                <div class="field">
+                  <label for="cpRotation"><span>Key rotation</span></label>
+                  <select id="cpRotation">
+                    <option value="failover">failover</option>
+                    <option value="single">single</option>
+                    <option value="round_robin">round_robin</option>
+                    <option value="least_used">least_used</option>
+                  </select>
+                </div>
+                <div class="field">
+                  <label for="cpProxy"><span>Proxy (optional)</span></label>
+                  <input id="cpProxy" type="text" autocomplete="off" placeholder="http://127.0.0.1:7890" />
+                </div>
+                <div class="cp-form-actions">
+                  <button id="cpSubmitButton" class="primary-button" type="submit">Add provider</button>
+                  <button id="cpCancelButton" class="secondary-button" type="button">Cancel</button>
+                </div>
+              </form>
+            </section>
             <div
               id="providersSections"
               class="form-sections"

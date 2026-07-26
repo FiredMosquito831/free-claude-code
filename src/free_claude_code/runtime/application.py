@@ -210,6 +210,24 @@ class ApplicationRuntime:
             result["restart"] = self._restart_metadata((), prepared.settings)
             return result
 
+    def cached_model_ids(self) -> dict[str, frozenset[str]]:
+        """Return cached discovered model ids per provider for admin display."""
+        return self.provider_manager.cached_model_ids()
+
+    async def reload_providers(self, reason: str) -> None:
+        """Republish the provider generation after a non-Settings mutation.
+
+        Custom provider registry entries live outside Settings; the mutation is
+        already persisted by the caller, so the commit boundary is a no-op and
+        only the provider runtime needs a fresh generation.
+        """
+        async with self._config_lock:
+            await self.provider_manager.replace(
+                self.settings,
+                commit=lambda: None,
+                reason=reason,
+            )
+
     def admin_status(self) -> dict[str, Any]:
         settings = self.settings
         return {
