@@ -2,8 +2,12 @@
 
 import asyncio
 import socket
+import time
 from collections.abc import AsyncIterator
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from urllib.parse import urljoin, urlparse
+from uuid import uuid4
 
 import aiohttp
 import httpx
@@ -13,9 +17,14 @@ from loguru import logger
 
 from free_claude_code.config.settings import Settings
 from free_claude_code.core.websearch.models import WebSearchResponse
-from free_claude_code.websearch.errors import WebSearchError
+from free_claude_code.websearch.errors import WebSearchConfigError, WebSearchError
 from free_claude_code.websearch.registry import (
-    resolve_provider_id,
+    SearchOutcome,
+    SearchRouteOutcome,
+    WebSearchRoute,
+    emit_route_outcome,
+    emit_search_outcome,
+    resolve_search_route,
     search_with_logging,
 )
 
@@ -35,6 +44,75 @@ from .egress import (
 )
 from .parsers import HTMLTextParser, SearchResultParser
 from .search_providers import runtime_provider
+
+_LEGACY_PROVIDER_ID = "legacy"
+
+
+@dataclass(slots=True)
+class _SearchRouteTrace:
+    route_id: str
+    ts_epoch: float
+    query: str
+    started: float
+    primary_provider: str = "unresolved"
+    terminal_provider: str = "unresolved"
+    providers: list[str] = field(default_factory=list)
+    attempt_count: int = 0
+    status: str = "error"
+    results_count: int = 0
+    cost_usd: float | None = None
+    error_kind: str | None = "internal"
+    error_message: str | None = "web search route did not complete"
+
+    def begin_attempt(self, provider: str) -> int:
+        if not self.providers:
+            self.primary_provider = provider
+        self.providers.append(provider)
+        self.terminal_provider = provider
+        self.attempt_count += 1
+        return self.attempt_count
+
+    def succeed(
+        self,
+        provider: str,
+        *,
+        results_count: int,
+        cost_usd: float | None,
+    ) -> None:
+        self.terminal_provider = provider
+        self.status = "success"
+        self.results_count = results_count
+        self.cost_usd = cost_usd
+        self.error_kind = None
+        self.error_message = None
+
+    def fail(self, provider: str, error: BaseException) -> None:
+        self.terminal_provider = provider
+        self.status = "error"
+        self.results_count = 0
+        self.cost_usd = None
+        self.error_kind = _search_error_kind(error)
+        self.error_message = str(error)
+
+    def outcome(self) -> SearchRouteOutcome:
+        providers = tuple(self.providers) or (self.primary_provider,)
+        return SearchRouteOutcome(
+            route_id=self.route_id,
+            ts_epoch=self.ts_epoch,
+            ts_iso=datetime.fromtimestamp(self.ts_epoch, tz=UTC).isoformat(),
+            query=self.query,
+            primary_provider=self.primary_provider,
+            terminal_provider=self.terminal_provider,
+            provider_path=providers,
+            attempt_count=self.attempt_count,
+            fallback_used=len(providers) > 1,
+            duration_ms=_elapsed_ms(self.started),
+            status=self.status,
+            results_count=self.results_count,
+            cost_usd=self.cost_usd,
+            error_kind=self.error_kind,
+            error_message=self.error_message,
+        )
 
 
 def _safe_public_host_for_logs(url: str) -> str:
@@ -75,6 +153,8 @@ def _web_tool_client_error_summary(
     *,
     verbose: bool,
 ) -> str:
+    if tool_name == "web_search" and isinstance(error, WebSearchConfigError):
+        return f"web_search unavailable: {error.message}"
     if verbose:
         return f"{tool_name} failed: {type(error).__name__}"
     return "Web tool request failed."
@@ -194,44 +274,208 @@ async def _drain_aiohttp_body_capped(
 async def _run_web_search(
     query: str, settings: Settings | None = None
 ) -> list[dict[str, str]]:
-    """Run web_search: configured provider -> ddgs -> legacy DuckDuckGo scrape."""
+    """Run web_search using the configured, explicit fallback route."""
 
     settings = settings if settings is not None else Settings()
-    if settings.web_search_provider != "off":
-        results = await _provider_web_search(query, settings)
-        if results is not None:
-            return results
-    return await _legacy_web_search_scrape(query)
+    trace = _SearchRouteTrace(
+        route_id=uuid4().hex,
+        ts_epoch=time.time(),
+        query=query,
+        started=time.perf_counter(),
+    )
+    try:
+        route = resolve_search_route(settings)
+        if route.provider_ids:
+            trace.primary_provider = route.provider_ids[0]
+            trace.terminal_provider = route.provider_ids[0]
+        elif route.use_legacy_scrape:
+            trace.primary_provider = _LEGACY_PROVIDER_ID
+            trace.terminal_provider = _LEGACY_PROVIDER_ID
+        else:
+            trace.primary_provider = settings.web_search_provider
+            trace.terminal_provider = settings.web_search_provider
+        if route.disabled:
+            error = WebSearchConfigError(
+                "disabled",
+                "web search is disabled by WEB_SEARCH_PROVIDER=disabled",
+            )
+            trace.fail(trace.terminal_provider, error)
+            raise error
+        if route.provider_ids:
+            results = await _provider_web_search(query, settings, route, trace)
+            if results is not None:
+                return results
+        if route.use_legacy_scrape:
+            return await _legacy_route_search(query, trace)
+        error = WebSearchConfigError(
+            settings.web_search_provider,
+            "web search has no configured route",
+        )
+        trace.fail(trace.terminal_provider, error)
+        raise error
+    except asyncio.CancelledError as error:
+        trace.fail(trace.terminal_provider, error)
+        raise
+    except Exception as error:
+        trace.fail(trace.terminal_provider, error)
+        raise
+    finally:
+        emit_route_outcome(trace.outcome())
 
 
 async def _provider_web_search(
-    query: str, settings: Settings
+    query: str,
+    settings: Settings,
+    route: WebSearchRoute,
+    trace: _SearchRouteTrace,
 ) -> list[dict[str, str]] | None:
-    """Search via the websearch registry; None means fall back to the legacy scrape."""
+    """Try the provider route; None means its terminal legacy fallback may run."""
 
-    provider_id = resolve_provider_id(settings)
-    if provider_id is None:
+    last_error: WebSearchError | None = None
+    for attempt, provider_id in enumerate(route.provider_ids, start=1):
+        attempt_number = trace.begin_attempt(provider_id)
+        attempt_ts = time.time()
+        attempt_started = time.perf_counter()
+        try:
+            provider = await runtime_provider(settings, provider_id)
+        except Exception as error:
+            trace.fail(provider_id, error)
+            _emit_manual_attempt(
+                trace=trace,
+                provider=provider_id,
+                attempt_number=attempt_number,
+                ts_epoch=attempt_ts,
+                started=attempt_started,
+                status="error",
+                error=error,
+            )
+            raise
+        try:
+            response = await search_with_logging(
+                provider,
+                query,
+                max_results=_MAX_SEARCH_RESULTS,
+                route_id=trace.route_id,
+                attempt_number=attempt_number,
+            )
+        except WebSearchConfigError as error:
+            # A selected provider missing credentials/base URL is an operator
+            # error, not an upstream outage. Never hide it behind another search.
+            trace.fail(provider_id, error)
+            raise
+        except WebSearchError as error:
+            last_error = error
+            trace.fail(provider_id, error)
+            logger.warning(
+                "web_search provider attempt failed provider={} attempt={}/{} error={}",
+                provider_id,
+                attempt,
+                len(route.provider_ids),
+                error,
+            )
+        except Exception as error:
+            trace.fail(provider_id, error)
+            raise
+        else:
+            results = _web_search_response_items(response)
+            trace.succeed(
+                provider_id,
+                results_count=len(results),
+                cost_usd=response.cost_usd,
+            )
+            return results
+
+    if route.use_legacy_scrape:
         return None
+    if last_error is not None:
+        raise last_error
+    raise WebSearchConfigError(
+        settings.web_search_provider,
+        "web search provider route is empty",
+    )
+
+
+async def _legacy_route_search(
+    query: str, trace: _SearchRouteTrace
+) -> list[dict[str, str]]:
+    attempt_number = trace.begin_attempt(_LEGACY_PROVIDER_ID)
+    ts_epoch = time.time()
+    started = time.perf_counter()
     try:
-        provider = await runtime_provider(settings, provider_id)
-        response = await search_with_logging(
-            provider, query, max_results=_MAX_SEARCH_RESULTS
+        raw_results = await _legacy_web_search_scrape(query)
+    except Exception as error:
+        trace.fail(_LEGACY_PROVIDER_ID, error)
+        _emit_manual_attempt(
+            trace=trace,
+            provider=_LEGACY_PROVIDER_ID,
+            attempt_number=attempt_number,
+            ts_epoch=ts_epoch,
+            started=started,
+            status="error",
+            error=error,
         )
-    except WebSearchError as error:
-        logger.warning("web_search provider {} failed: {}", provider_id, error)
-    else:
-        return _web_search_response_items(response)
-    if provider_id == "ddgs":
-        return None
-    try:
-        ddgs_provider = await runtime_provider(settings, "ddgs")
-        response = await search_with_logging(
-            ddgs_provider, query, max_results=_MAX_SEARCH_RESULTS
+        raise
+    results = [{**item, "provider": _LEGACY_PROVIDER_ID} for item in raw_results]
+    _emit_manual_attempt(
+        trace=trace,
+        provider=_LEGACY_PROVIDER_ID,
+        attempt_number=attempt_number,
+        ts_epoch=ts_epoch,
+        started=started,
+        status="success",
+        results_count=len(results),
+    )
+    trace.succeed(
+        _LEGACY_PROVIDER_ID,
+        results_count=len(results),
+        cost_usd=None,
+    )
+    return results
+
+
+def _emit_manual_attempt(
+    *,
+    trace: _SearchRouteTrace,
+    provider: str,
+    attempt_number: int,
+    ts_epoch: float,
+    started: float,
+    status: str,
+    results_count: int = 0,
+    error: BaseException | None = None,
+) -> None:
+    emit_search_outcome(
+        SearchOutcome(
+            ts_epoch=ts_epoch,
+            ts_iso=datetime.fromtimestamp(ts_epoch, tz=UTC).isoformat(),
+            provider=provider,
+            key_index=0,
+            key_label="",
+            query=trace.query,
+            results_count=results_count,
+            duration_ms=_elapsed_ms(started),
+            status=status,
+            error_kind=_search_error_kind(error) if error is not None else None,
+            error_message=str(error) if error is not None else None,
+            cost_usd=None,
+            route_id=trace.route_id,
+            attempt_number=attempt_number,
         )
-    except WebSearchError as error:
-        logger.warning("web_search ddgs fallback failed: {}", error)
-        return None
-    return _web_search_response_items(response)
+    )
+
+
+def _search_error_kind(error: BaseException) -> str:
+    if isinstance(error, WebSearchError):
+        return error.kind
+    if isinstance(error, httpx.HTTPError):
+        return "upstream"
+    if isinstance(error, asyncio.CancelledError):
+        return "cancelled"
+    return "internal"
+
+
+def _elapsed_ms(started: float) -> float:
+    return round((time.perf_counter() - started) * 1000.0, 3)
 
 
 def _web_search_response_items(response: WebSearchResponse) -> list[dict[str, str]]:

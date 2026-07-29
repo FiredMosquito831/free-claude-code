@@ -14,6 +14,7 @@ from free_claude_code.websearch.registry import (
     build_provider,
     build_providers,
     resolve_provider_id,
+    resolve_search_route,
     search,
     search_with_logging,
 )
@@ -124,6 +125,11 @@ class TestResolve:
         assert resolve_provider_id(settings) is None
         assert active_provider(settings) is None
 
+    def test_disabled_resolves_to_none(self, monkeypatch) -> None:
+        settings = _settings(monkeypatch, WEB_SEARCH_PROVIDER="disabled")
+        assert resolve_provider_id(settings) is None
+        assert active_provider(settings) is None
+
     def test_explicit_provider_builds(self, monkeypatch) -> None:
         settings = _settings(
             monkeypatch, WEB_SEARCH_PROVIDER="exa", EXA_API_KEY="k1-aaaa1111bbbb"
@@ -137,13 +143,63 @@ class TestResolve:
         with pytest.raises(WebSearchConfigError, match="EXA_API_KEY"):
             active_provider(settings)
 
+    @pytest.mark.parametrize(
+        ("selection", "policy", "expected_ids", "expected_legacy", "disabled"),
+        [
+            ("auto", "auto", ("exa", "ddgs"), True, False),
+            ("auto", "none", ("exa",), False, False),
+            ("auto", "ddgs", ("exa", "ddgs"), False, False),
+            ("auto", "legacy", ("exa", "ddgs"), True, False),
+            ("exa", "auto", ("exa",), False, False),
+            ("exa", "none", ("exa",), False, False),
+            ("exa", "ddgs", ("exa", "ddgs"), False, False),
+            ("exa", "legacy", ("exa", "ddgs"), True, False),
+            ("ddgs", "ddgs", ("ddgs",), False, False),
+            ("ddgs", "legacy", ("ddgs",), True, False),
+            ("off", "none", (), True, False),
+            ("disabled", "legacy", (), False, True),
+        ],
+    )
+    def test_search_route_semantics(
+        self,
+        monkeypatch,
+        selection: str,
+        policy: str,
+        expected_ids: tuple[str, ...],
+        expected_legacy: bool,
+        disabled: bool,
+    ) -> None:
+        settings = _settings(
+            monkeypatch,
+            WEB_SEARCH_PROVIDER=selection,
+            WEB_SEARCH_FALLBACK_POLICY=policy,
+            EXA_API_KEY="k1",
+        )
+
+        route = resolve_search_route(settings)
+
+        assert route.provider_ids == expected_ids
+        assert route.use_legacy_scrape is expected_legacy
+        assert route.disabled is disabled
+
+    def test_auto_route_without_credentials_starts_with_ddgs(self, monkeypatch) -> None:
+        route = resolve_search_route(_settings(monkeypatch))
+        assert route.provider_ids == ("ddgs",)
+        assert route.use_legacy_scrape is True
+
 
 class TestRecorderSeam:
     @pytest.mark.asyncio
     async def test_success_outcome_recorded(self) -> None:
         outcomes: list[SearchOutcome] = []
         provider = StubWebSearchProvider(build_config(api_keys=("sk-live-0001wxyz",)))
-        response = await search(provider, "hello", recorder=outcomes.append)
+        response = await search(
+            provider,
+            "hello",
+            recorder=outcomes.append,
+            route_id="route-123",
+            attempt_number=2,
+        )
         assert response.results
         (outcome,) = outcomes
         assert outcome.provider == "stub"
@@ -155,6 +211,8 @@ class TestRecorderSeam:
         assert outcome.error_kind is None
         assert outcome.cost_usd is None
         assert outcome.ts_iso
+        assert outcome.route_id == "route-123"
+        assert outcome.attempt_number == 2
 
     @pytest.mark.asyncio
     async def test_error_outcome_recorded_with_kind_and_key(self) -> None:
@@ -218,6 +276,7 @@ class TestRecorderSeam:
         from free_claude_code.websearch.analytics import (
             default_websearch_db_path,
             record_search,
+            record_search_route,
             reset_analytics_state,
         )
 
@@ -227,6 +286,7 @@ class TestRecorderSeam:
         reset_analytics_state()
         try:
             assert registry._default_recorder() is record_search
+            assert registry._default_route_recorder() is record_search_route
             provider = StubWebSearchProvider(build_config())
             assert (await search_with_logging(provider, "q")).results
             assert not default_websearch_db_path().exists()

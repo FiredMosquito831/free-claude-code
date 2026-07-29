@@ -1,8 +1,9 @@
 """Web search provider registry: build from settings, resolve the active one, search.
 
-Analytics seam: :func:`search` accepts an optional ``recorder`` callable invoked
-with a :class:`SearchOutcome`; :func:`search_with_logging` defaults it to
-``websearch.analytics.record_search`` when that module exists (Worker B).
+Analytics seam: :func:`search` accepts an optional attempt recorder;
+:func:`search_with_logging` defaults it to ``websearch.analytics.record_search``.
+Route owners may emit one correlated :class:`SearchRouteOutcome` through
+:func:`emit_route_outcome`.
 """
 
 import importlib
@@ -37,6 +38,15 @@ ROTATION_ENV_SUFFIX = "_ROTATION"
 WEBSEARCH_PROXY_ENV = "WEBSEARCH_PROXY"
 _QUERY_LOG_CHARS = 256
 _ERROR_MESSAGE_LOG_CHARS = 500
+
+
+@dataclass(frozen=True, slots=True)
+class WebSearchRoute:
+    """Resolved provider attempts and terminal behavior for one search."""
+
+    provider_ids: tuple[str, ...]
+    use_legacy_scrape: bool
+    disabled: bool = False
 
 
 def build_providers(settings: Settings) -> dict[str, BaseWebSearchProvider]:
@@ -84,11 +94,10 @@ def build_provider(settings: Settings, provider_id: str) -> BaseWebSearchProvide
 
 
 def resolve_provider_id(settings: Settings) -> str | None:
-    """Resolve ``web_search_provider``: explicit id, ``off`` -> None, ``auto`` ->
-    first catalog provider with a configured key, else keyless ``ddgs``."""
+    """Resolve the primary provider; ``off`` and ``disabled`` have no provider."""
 
     selection = settings.web_search_provider
-    if selection == "off":
+    if selection in {"off", "disabled"}:
         return None
     if selection != "auto":
         if selection not in WEBSEARCH_CATALOG:
@@ -106,8 +115,44 @@ def resolve_provider_id(settings: Settings) -> str | None:
     return "ddgs"
 
 
+def resolve_search_route(settings: Settings) -> WebSearchRoute:
+    """Resolve the ordered attempts implied by provider selection and policy.
+
+    ``auto`` fallback policy is deliberately context-aware: automatic provider
+    selection retains the historical provider -> DDGS -> legacy resilience,
+    while a named provider is strict. Explicit policies override that default.
+    Missing configuration is still owned by :func:`build_provider` and must not
+    be converted into fallback by callers.
+    """
+
+    selection = settings.web_search_provider
+    if selection == "disabled":
+        return WebSearchRoute((), use_legacy_scrape=False, disabled=True)
+    if selection == "off":
+        return WebSearchRoute((), use_legacy_scrape=True)
+
+    provider_id = resolve_provider_id(settings)
+    if provider_id is None:  # Defensive: handled by the branches above.
+        raise WebSearchConfigError(
+            selection,
+            f"web search provider {selection!r} did not resolve",
+        )
+
+    policy = settings.web_search_fallback_policy
+    if policy == "auto":
+        policy = "legacy" if selection == "auto" else "none"
+
+    provider_ids = [provider_id]
+    if policy in {"ddgs", "legacy"} and provider_id != "ddgs":
+        provider_ids.append("ddgs")
+    return WebSearchRoute(
+        tuple(provider_ids),
+        use_legacy_scrape=policy == "legacy",
+    )
+
+
 def active_provider(settings: Settings) -> BaseWebSearchProvider | None:
-    """Build the selected provider; None when web search is ``off``."""
+    """Build the selected provider; None when web search is off or disabled."""
 
     provider_id = resolve_provider_id(settings)
     if provider_id is None:
@@ -117,7 +162,7 @@ def active_provider(settings: Settings) -> BaseWebSearchProvider | None:
 
 @dataclass(frozen=True, slots=True)
 class SearchOutcome:
-    """Analytics record fields for one web search call (contract with Worker B)."""
+    """Analytics fields for one provider attempt."""
 
     ts_epoch: float
     ts_iso: str
@@ -131,9 +176,35 @@ class SearchOutcome:
     error_kind: str | None
     error_message: str | None
     cost_usd: float | None
+    route_id: str | None = None
+    attempt_number: int = 1
 
 
 SearchRecorder = Callable[[SearchOutcome], None]
+
+
+@dataclass(frozen=True, slots=True)
+class SearchRouteOutcome:
+    """Terminal analytics fields for one logical outbound web-search route."""
+
+    route_id: str
+    ts_epoch: float
+    ts_iso: str
+    query: str
+    primary_provider: str
+    terminal_provider: str
+    provider_path: tuple[str, ...]
+    attempt_count: int
+    fallback_used: bool
+    duration_ms: float
+    status: str  # "success" | "error"
+    results_count: int
+    cost_usd: float | None
+    error_kind: str | None
+    error_message: str | None
+
+
+SearchRouteRecorder = Callable[[SearchRouteOutcome], None]
 
 
 async def search(
@@ -144,6 +215,8 @@ async def search(
     allowed_domains: tuple[str, ...] = (),
     blocked_domains: tuple[str, ...] = (),
     recorder: SearchRecorder | None = None,
+    route_id: str | None = None,
+    attempt_number: int = 1,
 ) -> WebSearchResponse:
     """Run ``provider.search`` and optionally record the outcome via ``recorder``."""
 
@@ -179,6 +252,8 @@ async def search(
                 ),
                 error_message=str(error)[:_ERROR_MESSAGE_LOG_CHARS],
                 cost_usd=None,
+                route_id=route_id,
+                attempt_number=attempt_number,
             ),
         )
         raise
@@ -197,6 +272,8 @@ async def search(
             error_kind=None,
             error_message=None,
             cost_usd=response.cost_usd,
+            route_id=route_id,
+            attempt_number=attempt_number,
         ),
     )
     return response
@@ -210,8 +287,10 @@ async def search_with_logging(
     allowed_domains: tuple[str, ...] = (),
     blocked_domains: tuple[str, ...] = (),
     recorder: SearchRecorder | None = None,
+    route_id: str | None = None,
+    attempt_number: int = 1,
 ) -> WebSearchResponse:
-    """Search with analytics recording; defaults to the Worker B analytics store."""
+    """Search with analytics recording; defaults to the shared attempt recorder."""
 
     return await search(
         provider,
@@ -220,15 +299,38 @@ async def search_with_logging(
         allowed_domains=allowed_domains,
         blocked_domains=blocked_domains,
         recorder=recorder if recorder is not None else _default_recorder(),
+        route_id=route_id,
+        attempt_number=attempt_number,
     )
 
 
-def _default_recorder() -> SearchRecorder | None:
-    """Analytics seam: Worker B provides ``websearch.analytics.record_search``.
+def emit_search_outcome(
+    outcome: SearchOutcome, recorder: SearchRecorder | None = None
+) -> None:
+    """Emit an attempt outcome without coupling a caller to analytics storage."""
 
-    Dynamic import on purpose: the module does not exist until the analytics
-    worker lands, and a static import would break every caller.
-    """
+    _emit(recorder if recorder is not None else _default_recorder(), outcome)
+
+
+def emit_route_outcome(
+    outcome: SearchRouteOutcome,
+    recorder: SearchRouteRecorder | None = None,
+) -> None:
+    """Emit one logical route outcome without impacting the search result."""
+
+    selected = recorder if recorder is not None else _default_route_recorder()
+    if selected is None:
+        return
+    try:
+        selected(outcome)
+    except Exception:
+        logger.exception(
+            "websearch route recorder failed for route {}", outcome.route_id
+        )
+
+
+def _default_recorder() -> SearchRecorder | None:
+    """Resolve ``websearch.analytics.record_search`` without a static cycle."""
 
     try:
         module = importlib.import_module(f"{__package__}.analytics")
@@ -236,6 +338,15 @@ def _default_recorder() -> SearchRecorder | None:
         return None
     record_search = getattr(module, "record_search", None)
     return record_search if callable(record_search) else None
+
+
+def _default_route_recorder() -> SearchRouteRecorder | None:
+    try:
+        module = importlib.import_module(f"{__package__}.analytics")
+    except ImportError:
+        return None
+    record_route = getattr(module, "record_search_route", None)
+    return record_route if callable(record_route) else None
 
 
 def _emit(recorder: SearchRecorder | None, outcome: SearchOutcome) -> None:

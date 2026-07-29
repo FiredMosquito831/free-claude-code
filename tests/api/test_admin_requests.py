@@ -108,6 +108,72 @@ def test_stats_endpoint(client, seeded_store) -> None:
     assert windowed["total"] == 0
 
 
+@pytest.mark.parametrize(
+    ("params", "expected_total"),
+    [
+        ({"provider": "p2"}, 2),
+        ({"model": "m1"}, 5),
+        ({"status": "error"}, 1),
+        ({"endpoint": "/v1/responses"}, 2),
+        ({"q": "inin"}, 5),
+    ],
+)
+def test_stats_endpoint_applies_request_filters(
+    client, seeded_store, params, expected_total
+) -> None:
+    stats = client.get("/admin/api/requests/stats", params=params).json()
+
+    assert stats["total"] == expected_total
+    assert sum(entry["requests"] for entry in stats["by_provider"]) == expected_total
+    assert sum(entry["requests"] for entry in stats["by_model"]) == expected_total
+    assert sum(point["requests"] for point in stats["series"]) == expected_total
+
+
+def test_stats_endpoint_filter_changes_cards_breakdowns_series_and_errors(
+    client, seeded_store
+) -> None:
+    stats = client.get(
+        "/admin/api/requests/stats",
+        params={
+            "provider": "p1",
+            "model": "m1",
+            "status": "error",
+            "endpoint": "/v1/messages",
+            "q": "inin",
+        },
+    ).json()
+
+    assert stats["total"] == 1
+    assert stats["success"] == 0
+    assert stats["error"] == 1
+    assert stats["tokens_in"] == 40
+    assert stats["tokens_out"] == 4
+    assert stats["p50_duration_ms"] == 500.0
+    assert stats["by_provider"] == [
+        {
+            "key": "p1",
+            "requests": 1,
+            "tokens_in": 40,
+            "tokens_out": 4,
+            "errors": 1,
+            "avg_duration_ms": 500.0,
+        }
+    ]
+    assert stats["by_model"][0]["requests"] == 1
+    assert stats["top_errors"] == [{"message": "boom", "count": 1}]
+    assert sum(point["requests"] for point in stats["series"]) == 1
+    assert sum(point["errors"] for point in stats["series"]) == 1
+
+
+def test_stats_endpoint_rejects_invalid_status(client, seeded_store) -> None:
+    response = client.get(
+        "/admin/api/requests/stats", params={"status": "not-a-status"}
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == "Invalid status filter"
+
+
 def test_clear_requests(client, seeded_store) -> None:
     response = client.request("DELETE", "/admin/api/requests")
     assert response.status_code == 200

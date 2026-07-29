@@ -104,14 +104,46 @@
 
           <section id="view-requests" class="admin-view" data-view="requests" hidden>
             <div id="requestsSections" hidden></div>
+            <div class="observability-heading">
+              <div>
+                <p class="eyebrow">Local observability</p>
+                <h3>Model request analytics</h3>
+                <p>
+                  Inspect routing, reliability, latency, token usage, and captured
+                  request details.
+                </p>
+              </div>
+              <div class="observability-actions">
+                <label class="toggle-control">
+                  <input id="reqAutoRefresh" type="checkbox" />
+                  Auto-refresh
+                </label>
+                <button id="reqRefreshButton" class="secondary-button" type="button">
+                  Refresh
+                </button>
+                <span id="reqLastUpdated" class="last-updated">Not loaded</span>
+              </div>
+            </div>
             <div class="requests-toolbar">
               <label>
                 Provider
-                <input id="reqFilterProvider" type="text" placeholder="any" />
+                <input
+                  id="reqFilterProvider"
+                  type="text"
+                  list="reqProviderOptions"
+                  placeholder="any"
+                />
+                <datalist id="reqProviderOptions"></datalist>
               </label>
               <label>
                 Model
-                <input id="reqFilterModel" type="text" placeholder="any" />
+                <input
+                  id="reqFilterModel"
+                  type="text"
+                  list="reqModelOptions"
+                  placeholder="any"
+                />
+                <datalist id="reqModelOptions"></datalist>
               </label>
               <label>
                 Search text
@@ -127,49 +159,107 @@
                 </select>
               </label>
               <label>
+                Endpoint
+                <input id="reqFilterEndpoint" type="text" placeholder="any" />
+              </label>
+              <label>
                 Window
                 <select id="reqFilterWindow">
                   <option value="">all time</option>
                   <option value="3600">last hour</option>
                   <option value="86400">last 24h</option>
                   <option value="604800">last 7d</option>
+                  <option value="2592000">last 30d</option>
+                </select>
+              </label>
+              <label>
+                Rows
+                <select id="reqPageSize">
+                  <option value="25">25</option>
+                  <option value="50">50</option>
+                  <option value="100">100</option>
                 </select>
               </label>
               <button id="reqApplyFilters" class="secondary-button" type="button">Apply</button>
+              <button id="reqExportButton" class="secondary-button" type="button">
+                Export JSON
+              </button>
               <span id="reqBodiesIndicator" class="requests-indicator"></span>
               <button id="reqClearButton" class="secondary-button danger" type="button">Clear log</button>
             </div>
             <div id="reqStatsCards" class="requests-cards"></div>
             <div class="requests-charts">
               <div class="requests-chart">
-                <h4>Requests over time</h4>
-                <canvas id="reqSeriesChart" width="640" height="180"></canvas>
+                <div class="chart-heading">
+                  <h4>Requests over time</h4>
+                  <div class="chart-legend">
+                    <span><i class="legend-swatch requests"></i>Requests</span>
+                    <span><i class="legend-swatch errors"></i>Errors</span>
+                  </div>
+                </div>
+                <canvas
+                  id="reqSeriesChart"
+                  width="640"
+                  height="180"
+                  role="img"
+                  aria-label="Requests and errors over time"
+                ></canvas>
               </div>
               <div class="requests-chart">
                 <h4>Tokens by model</h4>
-                <canvas id="reqModelChart" width="640" height="180"></canvas>
+                <canvas
+                  id="reqModelChart"
+                  width="640"
+                  height="180"
+                  role="img"
+                  aria-label="Token usage by model"
+                ></canvas>
               </div>
             </div>
-            <table class="requests-table" aria-label="Request log">
-              <thead>
-                <tr>
-                  <th>Time</th>
-                  <th>Endpoint</th>
-                  <th>Provider</th>
-                  <th>Model</th>
-                  <th>Status</th>
-                  <th>Tokens</th>
-                  <th>Duration</th>
-                </tr>
-              </thead>
-              <tbody id="reqTableBody"></tbody>
-            </table>
+            <p class="analytics-footnote">
+              Table timestamps use your browser locale; chart bucket boundaries use UTC.
+            </p>
+            <div class="requests-breakdowns">
+              <section class="analytics-panel">
+                <h4>Provider performance</h4>
+                <div id="reqProviderBreakdown"></div>
+              </section>
+              <section class="analytics-panel">
+                <h4>Top errors</h4>
+                <div id="reqTopErrors"></div>
+              </section>
+            </div>
+            <div class="table-scroll">
+              <table class="requests-table" aria-label="Request log">
+                <thead>
+                  <tr>
+                    <th>Time</th>
+                    <th>Endpoint</th>
+                    <th>Provider</th>
+                    <th>Model</th>
+                    <th>Status</th>
+                    <th>Tokens</th>
+                    <th>TTFT</th>
+                    <th>Duration</th>
+                    <th>Details</th>
+                  </tr>
+                </thead>
+                <tbody id="reqTableBody"></tbody>
+              </table>
+            </div>
             <div class="requests-pager">
               <button id="reqPrevPage" class="secondary-button" type="button">Prev</button>
               <span id="reqPageInfo"></span>
               <button id="reqNextPage" class="secondary-button" type="button">Next</button>
             </div>
-            <div id="reqDetailModal" class="requests-modal" hidden>
+            <div
+              id="reqDetailModal"
+              class="requests-modal"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="reqDetailTitle"
+              hidden
+            >
               <div class="requests-modal-card">
                 <div class="requests-modal-header">
                   <h3 id="reqDetailTitle">Request detail</h3>
@@ -185,6 +275,9 @@
           </section>
 
           <section id="view-web_search" class="admin-view" data-view="web_search" hidden>
+            <section id="webSearchRouteSummary" class="route-summary" aria-live="polite">
+              Resolving the effective web-search route…
+            </section>
             <section class="provider-strip" aria-label="Web search providers">
               <div class="strip-header">
                 <h3>Web Search Providers</h3>
@@ -200,24 +293,85 @@
               <div class="section-heading">
                 <div>
                   <h3>Analytics</h3>
-                  <p>Web search usage per provider and per key from the local log.</p>
+                  <p>
+                    Provider reliability, latency, key health, result yield, and known
+                    spend from the local log.
+                  </p>
                 </div>
-                <div class="period-toggle" role="group" aria-label="Analytics period">
+                <div class="observability-actions">
                   <button
-                    id="webSearchStatsWeekly"
-                    class="secondary-button period-button active"
+                    id="webSearchStatsRefresh"
+                    class="secondary-button"
                     type="button"
                   >
-                    Weekly
+                    Refresh
                   </button>
-                  <button
-                    id="webSearchStatsMonthly"
-                    class="secondary-button period-button"
-                    type="button"
-                  >
-                    Monthly
-                  </button>
+                  <span id="webSearchLastUpdated" class="last-updated">Not loaded</span>
                 </div>
+              </div>
+              <div class="requests-toolbar websearch-analytics-toolbar">
+                <label>
+                  Provider
+                  <select id="webSearchFilterProvider">
+                    <option value="">all providers</option>
+                  </select>
+                </label>
+                <label>
+                  Status
+                  <select id="webSearchFilterStatus">
+                    <option value="">any</option>
+                    <option value="success">success</option>
+                    <option value="error">error</option>
+                  </select>
+                </label>
+                <label>
+                  Search query
+                  <input
+                    id="webSearchFilterQuery"
+                    type="text"
+                    placeholder="query contains…"
+                  />
+                </label>
+                <label>
+                  Window
+                  <select id="webSearchFilterWindow">
+                    <option value="">all time</option>
+                    <option value="3600">last hour</option>
+                    <option value="86400">last 24h</option>
+                    <option value="604800" selected>last 7d</option>
+                    <option value="2592000">last 30d</option>
+                  </select>
+                </label>
+                <label>
+                  Bucket
+                  <select id="webSearchStatsPeriod">
+                    <option value="hourly">hour</option>
+                    <option value="daily" selected>day</option>
+                    <option value="weekly">week</option>
+                    <option value="monthly">month</option>
+                  </select>
+                </label>
+                <button
+                  id="webSearchStatsApply"
+                  class="secondary-button"
+                  type="button"
+                >
+                  Apply
+                </button>
+                <button
+                  id="webSearchExportButton"
+                  class="secondary-button"
+                  type="button"
+                >
+                  Export JSON
+                </button>
+                <button
+                  id="webSearchClearButton"
+                  class="secondary-button danger"
+                  type="button"
+                >
+                  Clear log
+                </button>
               </div>
               <div id="webSearchAnalytics" class="analytics-body"></div>
             </section>

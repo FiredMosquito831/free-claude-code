@@ -369,9 +369,25 @@ class RequestLogStore:
     # ------------------------------------------------------------------ stats
 
     def stats(
-        self, *, since: float | None = None, until: float | None = None
+        self,
+        *,
+        provider: str | None = None,
+        model: str | None = None,
+        status: str | None = None,
+        endpoint: str | None = None,
+        since: float | None = None,
+        until: float | None = None,
+        q: str | None = None,
     ) -> dict[str, Any]:
-        where, args = self._where(since=since, until=until)
+        where, args = self._where(
+            provider=provider,
+            model=model,
+            status=status,
+            endpoint=endpoint,
+            since=since,
+            until=until,
+            q=q,
+        )
         with self._connect() as conn:
             totals = conn.execute(
                 f"""
@@ -516,10 +532,15 @@ class RequestLogStore:
 
 
 def _percentile(values: list[float], fraction: float) -> float | None:
+    """Return a linearly interpolated percentile from an ordered sample."""
+
     if not values:
         return None
-    index = min(len(values) - 1, max(0, round(fraction * (len(values) - 1))))
-    return values[index]
+    position = min(len(values) - 1, max(0.0, fraction * (len(values) - 1)))
+    lower_index = int(position)
+    upper_index = min(len(values) - 1, lower_index + 1)
+    weight = position - lower_index
+    return values[lower_index] + (values[upper_index] - values[lower_index]) * weight
 
 
 def _rounded(value: float | None) -> float | None:

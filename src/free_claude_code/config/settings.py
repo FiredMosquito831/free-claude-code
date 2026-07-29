@@ -252,9 +252,14 @@ class Settings(BaseSettings):
     # ==================== Web Search Providers ====================
     # Backend for the proxy-fulfilled web_search server tool:
     # "auto" (first configured catalog provider, else ddgs), "off" (legacy scrape),
-    # or a provider id from config.websearch_catalog.
+    # "disabled" (reject searches), or a provider id from config.websearch_catalog.
     web_search_provider: str = Field(
         default="auto", validation_alias="WEB_SEARCH_PROVIDER"
+    )
+    # "auto" keeps auto-selection resilient but treats an explicit provider as strict.
+    # Other values explicitly choose no fallback, DDGS only, or DDGS then legacy.
+    web_search_fallback_policy: str = Field(
+        default="auto", validation_alias="WEB_SEARCH_FALLBACK_POLICY"
     )
     # One optional credential per provider; comma-separate multiple keys for rotation.
     ollama_search_api_key: str | None = Field(
@@ -483,11 +488,23 @@ class Settings(BaseSettings):
     @classmethod
     def validate_web_search_provider(cls, v: str) -> str:
         value = v.strip().lower()
-        allowed = {"auto", "off", *SUPPORTED_WEBSEARCH_PROVIDER_IDS}
+        allowed = {"auto", "off", "disabled", *SUPPORTED_WEBSEARCH_PROVIDER_IDS}
         if value not in allowed:
             raise ValueError(
-                f"web_search_provider must be 'auto', 'off', or one of "
+                f"web_search_provider must be 'auto', 'off', 'disabled', or one of "
                 f"{SUPPORTED_WEBSEARCH_PROVIDER_IDS}, got {v!r}"
+            )
+        return value
+
+    @field_validator("web_search_fallback_policy")
+    @classmethod
+    def validate_web_search_fallback_policy(cls, v: str) -> str:
+        value = v.strip().lower()
+        allowed = ("auto", "none", "ddgs", "legacy")
+        if value not in allowed:
+            raise ValueError(
+                "web_search_fallback_policy must be 'auto', 'none', 'ddgs', "
+                f"or 'legacy', got {v!r}"
             )
         return value
 

@@ -34,6 +34,7 @@ def websearch_field_specs() -> tuple[dict[str, Any], ...]:
 
     return (
         _provider_select_spec(),
+        _fallback_policy_spec(),
         _searxng_base_url_spec(),
         *_credential_field_specs(),
         *_advanced_option_field_specs(),
@@ -49,17 +50,44 @@ def _provider_select_spec() -> dict[str, Any]:
         "settings_attr": "web_search_provider",
         "default": "auto",
         "options": (
-            ConfigOptionSpec("auto", "Auto (first configured provider)"),
-            ConfigOptionSpec("off", "Off (legacy DuckDuckGo scrape)"),
+            ConfigOptionSpec("auto", "Auto-select (resilient by default)"),
+            ConfigOptionSpec("off", "Legacy DuckDuckGo scrape only"),
+            ConfigOptionSpec("disabled", "Disabled (reject web searches)"),
             *(
                 ConfigOptionSpec(descriptor.provider_id, descriptor.display_name)
                 for descriptor in WEBSEARCH_CATALOG.values()
             ),
         ),
         "description": (
-            "Backend for Claude Code's web_search server tool. Auto uses the first "
-            "configured provider below (else DuckDuckGo); Off keeps the legacy "
-            "DuckDuckGo HTML scrape."
+            "Backend for Claude Code's web_search server tool. Auto selects the "
+            "first configured provider (or keyless DDGS). A named provider is "
+            "strict unless the fallback policy below explicitly allows fallback. "
+            "Legacy uses only the old HTML scrape; Disabled performs no search."
+        ),
+    }
+
+
+def _fallback_policy_spec() -> dict[str, Any]:
+    return {
+        "key": "WEB_SEARCH_FALLBACK_POLICY",
+        "label": "Fallback Policy",
+        "section_id": "websearch",
+        "field_type": "select",
+        "settings_attr": "web_search_fallback_policy",
+        "default": "auto",
+        "options": (
+            ConfigOptionSpec(
+                "auto",
+                "Context-aware (auto-select resilient, named provider strict)",
+            ),
+            ConfigOptionSpec("none", "Strict (no fallback)"),
+            ConfigOptionSpec("ddgs", "Fallback to DDGS only"),
+            ConfigOptionSpec("legacy", "Fallback to DDGS, then legacy scrape"),
+        ),
+        "description": (
+            "Controls failures after the selected provider. Auto preserves the "
+            "resilient DDGS-to-legacy chain only for auto-selection; a named "
+            "provider fails visibly. Missing credentials always fail visibly."
         ),
     }
 

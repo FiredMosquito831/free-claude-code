@@ -5,8 +5,13 @@ const state = {
   modelOptions: [],
   modelComboboxes: new Set(),
   activeView: "providers",
-  webSearchStatsPeriod: "weekly",
-  webSearchAnalyticsLoaded: false,
+  webSearchStatsPeriod: "daily",
+  webSearchAnalyticsStats: null,
+  webSearchAnalyticsStatsKey: "",
+  webSearchAnalyticsPage: null,
+  webSearchAnalyticsPageKey: "",
+  webSearchAnalyticsLoadId: 0,
+  webSearchLastRoute: null,
   customProviders: [],
   editingCustomProviderId: null,
 };
@@ -36,8 +41,8 @@ const VIEW_GROUPS = [
   },
   {
     id: "requests",
-    label: "Requests",
-    title: "Requests",
+    label: "Analytics",
+    title: "Observability",
     sections: [],
     containerId: "requestsSections",
   },
@@ -167,9 +172,8 @@ function setActiveView(viewId, { scroll = false } = {}) {
     view.hidden = !selected;
   });
 
-  if (activeView.id === "web_search" && !state.webSearchAnalyticsLoaded) {
-    state.webSearchAnalyticsLoaded = true;
-    loadWebSearchAnalytics(state.webSearchStatsPeriod);
+  if (activeView.id === "web_search") {
+    loadWebSearchAnalytics().catch((error) => showMessage(error.message, "error"));
   }
 
   if (scroll) {
@@ -1197,7 +1201,7 @@ function webSearchProviders() {
     (field) => field.section === "websearch" && field.secret,
   );
   return providerField.options
-    .filter((item) => !["auto", "off"].includes(item.value))
+    .filter((item) => !["auto", "off", "disabled"].includes(item.value))
     .map((item) => {
       const credential = credentialFields.find(
         (field) => field.label === `${item.label} API Key`,
@@ -1219,18 +1223,147 @@ function webSearchProviders() {
     });
 }
 
-function webSearchProviderMeta(provider, activeSelection) {
+function effectiveWebSearchProvider(providers, activeSelection) {
+  if (activeSelection === "disabled") return null;
+  if (activeSelection === "off") return "legacy";
+  if (activeSelection !== "auto") return activeSelection;
+  return (
+    providers.find((provider) => provider.id !== "ddgs" && provider.configured)?.id ||
+    "ddgs"
+  );
+}
+
+function webSearchProviderMeta(provider, activeSelection, effectiveProvider) {
   const parts = [];
-  if (activeSelection === provider.id) {
-    parts.push("Active provider");
+  if (effectiveProvider === provider.id) {
+    parts.push(activeSelection === "auto" ? "Effective via auto" : "Selected");
   } else if (activeSelection === "auto" && provider.configured) {
-    parts.push("Auto-eligible");
+    parts.push("Available");
   }
   parts.push(
     provider.envKey ||
       (provider.id === "searxng" ? "SEARXNG_BASE_URL" : "No key required"),
   );
   return parts.join(" · ");
+}
+
+function renderWebSearchRouteSummary(providers, activeSelection, effectiveProvider) {
+  const summary = byId("webSearchRouteSummary");
+  if (!summary) return;
+  const fallbackPolicy =
+    state.fields.get("WEB_SEARCH_FALLBACK_POLICY")?.value || "auto";
+  const effectiveDescriptor = providers.find(
+    (provider) => provider.id === effectiveProvider,
+  );
+  const providerLabel = (providerId) =>
+    providerId === "legacy"
+      ? "Legacy DuckDuckGo scraper"
+      : providers.find((provider) => provider.id === providerId)?.label || providerId;
+  const selectionLabel =
+    activeSelection === "auto"
+      ? "Auto"
+      : activeSelection === "off"
+        ? "Legacy compatibility"
+        : activeSelection === "disabled"
+          ? "Disabled"
+          : providers.find((provider) => provider.id === activeSelection)?.label ||
+            activeSelection;
+  const resolvedPolicy =
+    fallbackPolicy === "auto"
+      ? activeSelection === "auto"
+        ? "legacy"
+        : "none"
+      : fallbackPolicy;
+  const routeIds = [];
+  if (activeSelection === "disabled") {
+    routeIds.push("disabled");
+  } else if (activeSelection === "off") {
+    routeIds.push("legacy");
+  } else if (effectiveProvider) {
+    routeIds.push(effectiveProvider);
+    if (
+      (resolvedPolicy === "ddgs" || resolvedPolicy === "legacy") &&
+      effectiveProvider !== "ddgs"
+    ) {
+      routeIds.push("ddgs");
+    }
+    if (resolvedPolicy === "legacy") routeIds.push("legacy");
+  }
+  const routeLabel =
+    routeIds[0] === "disabled"
+      ? "Disabled"
+      : routeIds.map(providerLabel).join(" → ");
+  summary.innerHTML = "";
+  const route = document.createElement("div");
+  route.className = "route-summary-main";
+  const title = document.createElement("strong");
+  title.textContent = `Configured route: ${routeLabel}`;
+  const detail = document.createElement("span");
+  detail.textContent =
+    `Selection: ${selectionLabel} · Fallback: ${fallbackPolicy}` +
+    (fallbackPolicy === "auto" ? ` (resolves to ${resolvedPolicy})` : "") +
+    " · Configuration errors stop the route";
+  route.append(title, detail);
+  const note = document.createElement("span");
+  const ready =
+    effectiveProvider === "legacy" ||
+    Boolean(effectiveDescriptor && effectiveDescriptor.configured);
+  note.className = `status-pill ${
+    ready ? "ok" : effectiveProvider ? "warn" : "neutral"
+  }`;
+  note.textContent = ready
+    ? "Ready"
+    : effectiveProvider
+      ? "Needs configuration"
+      : "Search disabled";
+  summary.append(route, note);
+  renderWebSearchObservedRoute(state.webSearchLastRoute);
+}
+
+function renderWebSearchObservedRoute(lastRoute) {
+  const route = byId("webSearchRouteSummary")?.querySelector(".route-summary-main");
+  if (!route) return;
+  route.querySelector(".route-summary-observed")?.remove();
+  if (!lastRoute) return;
+  const observed = document.createElement("span");
+  observed.className = "route-summary-observed";
+  const providers = Array.isArray(lastRoute.providers)
+    ? lastRoute.providers
+    : [];
+  const path =
+    providers.length > 0
+      ? providers.join(" → ")
+      : lastRoute.terminal_provider || lastRoute.primary_provider || "unknown";
+  const duration =
+    lastRoute.duration_ms == null ? "unknown latency" : `${lastRoute.duration_ms} ms`;
+  observed.textContent =
+    `Last observed: ${path} · ${lastRoute.status || "unknown"} · ${duration}`;
+  route.appendChild(observed);
+}
+
+function populateWebSearchAnalyticsProviders(providers) {
+  const select = byId("webSearchFilterProvider");
+  if (!select) return;
+  const selected = select.value;
+  select.replaceChildren(new Option("all providers", ""));
+  providers.forEach((provider) => {
+    select.add(new Option(provider.label, provider.id));
+  });
+  if (providers.some((provider) => provider.id === selected)) {
+    select.value = selected;
+  }
+}
+
+function selectWebSearchProvider(providerId) {
+  const input = document.querySelector(
+    'select[data-key="WEB_SEARCH_PROVIDER"]',
+  );
+  const field = state.fields.get("WEB_SEARCH_PROVIDER");
+  if (!input || !field) return;
+  input.value = providerId;
+  field.value = providerId;
+  input.dispatchEvent(new Event("change", { bubbles: true }));
+  updateWebSearchCardsFromState();
 }
 
 // Advanced option fields are dotenv-only catalog entries whose env names are
@@ -1263,9 +1396,15 @@ function renderWebSearchProviders() {
   if (!grid) return;
   grid.innerHTML = "";
   const active = state.fields.get("WEB_SEARCH_PROVIDER")?.value || "auto";
-  webSearchProviders().forEach((provider) => {
+  const providers = webSearchProviders();
+  const effectiveProvider = effectiveWebSearchProvider(providers, active);
+  populateWebSearchAnalyticsProviders(providers);
+  renderWebSearchRouteSummary(providers, active, effectiveProvider);
+  providers.forEach((provider) => {
     const card = document.createElement("article");
-    card.className = "provider-card";
+    card.className = `provider-card${
+      effectiveProvider === provider.id ? " effective-provider" : ""
+    }`;
     card.dataset.websearchProvider = provider.id;
 
     const title = document.createElement("div");
@@ -1278,15 +1417,26 @@ function renderWebSearchProviders() {
 
     const meta = document.createElement("div");
     meta.className = "provider-meta";
-    meta.textContent = webSearchProviderMeta(provider, active);
+    meta.textContent = webSearchProviderMeta(provider, active, effectiveProvider);
 
     const actions = document.createElement("div");
     actions.className = "card-actions";
 
+    const selectButton = document.createElement("button");
+    selectButton.type = "button";
+    selectButton.className = "ghost-button";
+    selectButton.textContent =
+      active === provider.id ? "Selected" : "Use provider";
+    selectButton.disabled = active === provider.id || !provider.configured;
+    selectButton.addEventListener("click", () =>
+      selectWebSearchProvider(provider.id),
+    );
+    actions.appendChild(selectButton);
+
     const testButton = document.createElement("button");
     testButton.type = "button";
     testButton.className = "test-button";
-    testButton.textContent = "Test";
+    testButton.textContent = "Test provider";
     testButton.addEventListener("click", () =>
       testWebSearchProvider(provider, testButton),
     );
@@ -1313,6 +1463,16 @@ function renderWebSearchProviders() {
     }
     grid.appendChild(card);
   });
+  ["WEB_SEARCH_PROVIDER", "WEB_SEARCH_FALLBACK_POLICY"].forEach((key) => {
+    const input = document.querySelector(`select[data-key="${key}"]`);
+    if (!input || input.dataset.routeSummaryWired === "true") return;
+    input.dataset.routeSummaryWired = "true";
+    input.addEventListener("change", () => {
+      const field = state.fields.get(key);
+      if (field) field.value = input.value;
+      updateWebSearchCardsFromState();
+    });
+  });
 }
 
 function updateWebSearchCard(providerId, status, label, metaText) {
@@ -1328,18 +1488,31 @@ function updateWebSearchCard(providerId, status, label, metaText) {
 
 function updateWebSearchCardsFromState() {
   const active = state.fields.get("WEB_SEARCH_PROVIDER")?.value || "auto";
-  webSearchProviders().forEach((provider) => {
+  const providers = webSearchProviders();
+  const effectiveProvider = effectiveWebSearchProvider(providers, active);
+  renderWebSearchRouteSummary(providers, active, effectiveProvider);
+  providers.forEach((provider) => {
     const card = document.querySelector(
       `[data-websearch-provider="${provider.id}"]`,
     );
     if (!card) return;
+    card.classList.toggle("effective-provider", effectiveProvider === provider.id);
     const pill = card.querySelector(".status-pill");
     pill.className = `status-pill ${provider.configured ? "ok" : "warn"}`;
     pill.textContent = provider.configured ? "Configured" : "Missing key";
     card.querySelector(".provider-meta").textContent = webSearchProviderMeta(
       provider,
       active,
+      effectiveProvider,
     );
+    const selectButton = Array.from(card.querySelectorAll("button")).find(
+      (button) =>
+        button.textContent === "Selected" || button.textContent === "Use provider",
+    );
+    if (selectButton) {
+      selectButton.textContent = active === provider.id ? "Selected" : "Use provider";
+      selectButton.disabled = active === provider.id || !provider.configured;
+    }
   });
 }
 
@@ -1576,7 +1749,10 @@ function analyticsBlock(title, table) {
   block.className = "analytics-block";
   const heading = document.createElement("h4");
   heading.textContent = title;
-  block.append(heading, table);
+  const scroll = document.createElement("div");
+  scroll.className = "table-scroll";
+  scroll.appendChild(table);
+  block.append(heading, scroll);
   return block;
 }
 
@@ -1587,51 +1763,309 @@ function formatRequestTime(entry) {
   return new Date(parsed).toLocaleString();
 }
 
-function renderWebSearchAnalytics(container, stats, requests, period) {
-  container.innerHTML = "";
-  const totals = (stats && stats.totals) || {};
-  const summary = document.createElement("div");
-  summary.className = "analytics-summary";
-  summary.textContent = stats
-    ? `${period === "monthly" ? "Monthly" : "Weekly"}: ` +
-      `${totals.requests ?? 0} requests · ${totals.errors ?? 0} errors · ` +
-      `${totals.results ?? 0} results`
-    : "Summary unavailable.";
-  container.appendChild(summary);
+function formatAnalyticsNumber(value, maximumFractionDigits = 0) {
+  if (value == null || Number.isNaN(Number(value))) return "—";
+  return Number(value).toLocaleString(undefined, { maximumFractionDigits });
+}
 
-  const providerRows = asAnalyticsRows(stats && stats.by_provider, "provider").map(
-    (row) => [
-      row.provider || "—",
-      row.requests ?? 0,
-      row.errors ?? 0,
-      row.avg_duration_ms != null ? Math.round(row.avg_duration_ms) : "—",
-      row.results ?? 0,
-    ],
+function formatAnalyticsCost(value) {
+  if (value == null || Number.isNaN(Number(value))) return "Unknown";
+  return `$${Number(value).toFixed(Number(value) < 0.01 ? 4 : 2)}`;
+}
+
+function analyticsMetricCards(metrics) {
+  const container = document.createElement("div");
+  container.className = "requests-cards";
+  metrics.forEach(([label, value, detail = ""]) => {
+    const card = document.createElement("div");
+    card.className = "requests-card";
+    const valueElement = document.createElement("strong");
+    valueElement.textContent = value;
+    const labelElement = document.createElement("span");
+    labelElement.textContent = label;
+    card.append(valueElement, labelElement);
+    if (detail) {
+      const detailElement = document.createElement("small");
+      detailElement.textContent = detail;
+      card.appendChild(detailElement);
+    }
+    container.appendChild(card);
+  });
+  return container;
+}
+
+function aggregateWebSearchSeries(series) {
+  const buckets = new Map();
+  (series || []).forEach((entry) => {
+    const bucket = entry.bucket || "unknown";
+    const aggregate = buckets.get(bucket) || {
+      bucket,
+      requests: 0,
+      errors: 0,
+      results: 0,
+    };
+    aggregate.requests += Number(entry.searches ?? entry.requests ?? 0);
+    aggregate.errors += Number(entry.errors || 0);
+    aggregate.results += Number(entry.results || 0);
+    buckets.set(bucket, aggregate);
+  });
+  return Array.from(buckets.values()).sort((left, right) =>
+    left.bucket.localeCompare(right.bucket),
   );
+}
+
+function webSearchSeriesChart(series) {
+  const wrapper = document.createElement("section");
+  wrapper.className = "requests-chart analytics-panel";
+  const heading = document.createElement("div");
+  heading.className = "chart-heading";
+  const title = document.createElement("h4");
+  title.textContent = "Search volume and errors";
+  const legend = document.createElement("div");
+  legend.className = "chart-legend";
+  legend.innerHTML =
+    '<span><i class="legend-swatch requests"></i>Logical searches</span>' +
+    '<span><i class="legend-swatch errors"></i>Errors</span>';
+  heading.append(title, legend);
+  const canvas = document.createElement("canvas");
+  canvas.width = 960;
+  canvas.height = 220;
+  canvas.setAttribute("role", "img");
+  canvas.setAttribute("aria-label", "Logical web searches and errors over time");
+  wrapper.append(heading, canvas);
+  const aggregate = aggregateWebSearchSeries(series);
+  requestAnimationFrame(() => {
+    drawBarChart(
+      canvas,
+      aggregate.map((entry) => entry.bucket),
+      [
+        { values: aggregate.map((entry) => entry.requests) },
+        { values: aggregate.map((entry) => entry.errors) },
+      ],
+    );
+  });
+  return wrapper;
+}
+
+function renderWebSearchAnalytics(
+  container,
+  stats,
+  requests,
+  period,
+  partialErrors = [],
+  stale = {},
+) {
+  container.innerHTML = "";
+  const routeTotals = stats?.routes?.totals || stats?.route_totals || null;
+  const attemptStats = stats?.attempts || stats || {};
+  const totals = routeTotals || attemptStats.totals || {};
+  const totalRequests = Number(totals.searches ?? totals.requests ?? 0);
+  const totalErrors = Number(totals.errors || 0);
+  const successRate =
+    totalRequests > 0 ? ((totalRequests - totalErrors) / totalRequests) * 100 : 0;
+  const resultsPerSearch =
+    totalRequests > 0 ? Number(totals.results || 0) / totalRequests : 0;
+
+  if (partialErrors.length) {
+    const warning = document.createElement("div");
+    warning.className = "analytics-warning";
+    const staleParts = [];
+    if (stale.stats) staleParts.push("summary");
+    if (stale.requests) staleParts.push("recent requests");
+    warning.textContent =
+      `Some analytics could not be loaded: ${partialErrors.join("; ")}` +
+      (staleParts.length
+        ? `. Showing the last successful ${staleParts.join(" and ")} data.`
+        : ".");
+    container.appendChild(warning);
+  }
+  if (
+    stats &&
+    routeTotals &&
+    totalRequests === 0 &&
+    Number(attemptStats.totals?.requests || 0) > 0
+  ) {
+    const migrationNote = document.createElement("div");
+    migrationNote.className = "analytics-warning";
+    migrationNote.textContent =
+      "Logical-route telemetry starts with FCC 4.12.0. Historical provider-attempt rows remain available below.";
+    container.appendChild(migrationNote);
+  }
+
+  const metricValue = (value, formatter = formatAnalyticsNumber) =>
+    stats ? formatter(value) : "Unavailable";
+  container.appendChild(
+    analyticsMetricCards([
+      [
+        "Logical searches",
+        metricValue(totals.searches ?? totals.requests ?? 0),
+      ],
+      ["Route success rate", stats ? `${successRate.toFixed(1)}%` : "Unavailable"],
+      [
+        "Fallback rate",
+        stats
+          ? `${(Number(totals.fallback_rate || 0) * 100).toFixed(1)}%`
+          : "Unavailable",
+      ],
+      [
+        "Average attempts",
+        stats ? formatAnalyticsNumber(totals.avg_attempts, 2) : "Unavailable",
+      ],
+      ["Failed searches", metricValue(totals.errors ?? 0)],
+      [
+        "End-to-end latency",
+        !stats
+          ? "Unavailable"
+          : totals.avg_duration_ms == null
+          ? "—"
+          : `${formatAnalyticsNumber(totals.avg_duration_ms)} ms`,
+      ],
+      ["Results", metricValue(totals.results ?? 0)],
+      [
+        "Results / search",
+        stats ? formatAnalyticsNumber(resultsPerSearch, 2) : "Unavailable",
+      ],
+      [
+        "Known spend",
+        stats ? formatAnalyticsCost(totals.cost_usd) : "Unavailable",
+        "Best-effort provider-reported cost; unavailable costs are excluded",
+      ],
+      [
+        "Dropped records",
+        metricValue(stats?.dropped_records ?? 0),
+        "Writer queue overflow",
+      ],
+    ]),
+  );
+
+  const routeSeries = stats?.routes?.series || stats?.route_series || stats?.series;
+  if (stats && Array.isArray(routeSeries)) {
+    container.appendChild(webSearchSeriesChart(routeSeries));
+  }
+
+  const terminalRows = asAnalyticsRows(
+    stats?.routes?.by_terminal_provider,
+    "provider",
+  ).map((row) => {
+    const searches = Number(row.searches ?? row.requests ?? 0);
+    const errors = Number(row.errors || 0);
+    return [
+      row.provider || row.terminal_provider || "—",
+      formatAnalyticsNumber(searches),
+      searches ? `${(((searches - errors) / searches) * 100).toFixed(1)}%` : "0%",
+      formatAnalyticsNumber(row.fallbacks ?? 0),
+      row.avg_duration_ms != null
+        ? `${formatAnalyticsNumber(row.avg_duration_ms)} ms`
+        : "—",
+      formatAnalyticsNumber(row.results ?? 0),
+      formatAnalyticsCost(row.cost_usd),
+    ];
+  });
   container.appendChild(
     analyticsBlock(
-      "Per provider",
+      "Terminal route outcomes",
       analyticsTable(
-        ["Provider", "Requests", "Errors", "Avg ms", "Results"],
-        providerRows,
-        "No web searches recorded yet.",
+        [
+          "Terminal provider",
+          "Searches",
+          "Success rate",
+          "Fallbacks",
+          "End-to-end latency",
+          "Results",
+          "Cost",
+        ],
+        terminalRows,
+        stats ? "No completed search routes yet." : "Route metrics unavailable.",
       ),
     ),
   );
 
-  const keyRows = asAnalyticsRows(stats && stats.by_key, "key_label").map((row) => [
+  const providerRows = asAnalyticsRows(
+    attemptStats.by_provider,
+    "provider",
+  ).map(
+    (row) => {
+      const requestsCount = Number(row.requests || 0);
+      const errorsCount = Number(row.errors || 0);
+      return [
+        row.provider || "—",
+        formatAnalyticsNumber(requestsCount),
+        requestsCount ? `${((errorsCount / requestsCount) * 100).toFixed(1)}%` : "0%",
+        row.avg_duration_ms != null
+          ? `${formatAnalyticsNumber(row.avg_duration_ms)} ms`
+          : "—",
+        formatAnalyticsNumber(row.results ?? 0),
+        formatAnalyticsCost(row.cost_usd),
+      ];
+    },
+  );
+  container.appendChild(
+    analyticsBlock(
+      "Provider attempt performance",
+      analyticsTable(
+        ["Provider", "Attempts", "Error rate", "Avg latency", "Results", "Cost"],
+        providerRows,
+        stats ? "No provider attempts recorded yet." : "Provider metrics unavailable.",
+      ),
+    ),
+  );
+
+  const keyRows = asAnalyticsRows(attemptStats.by_key, "key_label").map((row) => [
     row.provider || "—",
     row.key_label || row.key || "—",
-    row.requests ?? 0,
-    row.errors ?? 0,
+    formatAnalyticsNumber(row.requests ?? 0),
+    formatAnalyticsNumber(row.errors ?? 0),
+    row.avg_duration_ms != null
+      ? `${formatAnalyticsNumber(row.avg_duration_ms)} ms`
+      : "—",
+    formatAnalyticsNumber(row.results ?? 0),
   ]);
   container.appendChild(
     analyticsBlock(
-      "Per key",
+      "Credential health",
       analyticsTable(
-        ["Provider", "Key", "Requests", "Errors"],
+        ["Provider", "Key", "Requests", "Errors", "Avg latency", "Results"],
         keyRows,
-        "No key usage recorded yet.",
+        stats ? "No key usage recorded yet." : "Credential metrics unavailable.",
+      ),
+    ),
+  );
+
+  const routeErrorRows = asAnalyticsRows(
+    stats?.routes?.top_errors,
+    "error_kind",
+  ).map((row) => [
+    row.error_kind || "unknown",
+    row.error_message || "No message",
+    formatAnalyticsNumber(row.count ?? 0),
+  ]);
+  container.appendChild(
+    analyticsBlock(
+      "Top terminal route errors",
+      analyticsTable(
+        ["Kind", "Message", "Count"],
+        routeErrorRows,
+        stats ? "No terminal route errors in this range." : "Error metrics unavailable.",
+      ),
+    ),
+  );
+
+  const errorRows = asAnalyticsRows(attemptStats.top_errors, "error_kind").map(
+    (row) => [
+      row.error_kind || "unknown",
+      row.error_message || "No message",
+      formatAnalyticsNumber(row.count ?? 0),
+    ],
+  );
+  container.appendChild(
+    analyticsBlock(
+      "Top provider-attempt errors",
+      analyticsTable(
+        ["Kind", "Message", "Count"],
+        errorRows,
+        stats
+          ? "No provider-attempt errors in this range."
+          : "Error metrics unavailable.",
       ),
     ),
   );
@@ -1641,51 +2075,135 @@ function renderWebSearchAnalytics(container, stats, requests, period) {
     : [];
   const requestRows = requestItems.map((entry) => [
     formatRequestTime(entry),
+    entry.route_id ? String(entry.route_id).slice(0, 8) : "—",
+    entry.attempt_number ?? "—",
     entry.provider || "—",
     entry.key_label || "—",
     entry.query || "—",
     entry.results_count ?? 0,
-    entry.duration_ms != null ? Math.round(entry.duration_ms) : "—",
+    entry.duration_ms != null ? `${Math.round(entry.duration_ms)} ms` : "—",
     entry.status || "—",
+    entry.error_kind || "—",
+    formatAnalyticsCost(entry.cost_usd),
   ]);
   container.appendChild(
     analyticsBlock(
       "Recent requests",
       analyticsTable(
-        ["Time", "Provider", "Key", "Query", "Results", "ms", "Status"],
+        [
+          "Time",
+          "Route",
+          "Attempt",
+          "Provider",
+          "Key",
+          "Query",
+          "Results",
+          "Latency",
+          "Status",
+          "Error",
+          "Cost",
+        ],
         requestRows,
-        "No recent web search requests.",
+        requests ? "No recent provider attempts." : "Recent attempts unavailable.",
       ),
     ),
   );
+
+  const periodLabel = {
+    hourly: "hour",
+    daily: "day",
+    weekly: "ISO week",
+    monthly: "month",
+  }[period];
+  const footer = document.createElement("p");
+  footer.className = "analytics-footnote";
+  footer.textContent =
+    `Series bucket: ${periodLabel || period}; bucket boundaries use UTC. ` +
+    "Route metrics count one user search; provider tables and recent rows count attempts. " +
+    "Queries are stored locally and truncated to 256 characters.";
+  container.appendChild(footer);
 }
 
-async function loadWebSearchAnalytics(period) {
+function webSearchAnalyticsParams({ includePeriod = false, limit = null } = {}) {
+  const params = new URLSearchParams();
+  const provider = byId("webSearchFilterProvider")?.value || "";
+  const status = byId("webSearchFilterStatus")?.value || "";
+  const query = byId("webSearchFilterQuery")?.value.trim() || "";
+  const windowSeconds = byId("webSearchFilterWindow")?.value || "";
+  if (includePeriod) {
+    params.set("period", state.webSearchStatsPeriod);
+  }
+  if (provider) params.set("provider", provider);
+  if (status) params.set("status", status);
+  if (query) params.set("q", query);
+  if (windowSeconds) {
+    params.set(
+      "since",
+      new Date(Date.now() - Number(windowSeconds) * 1000).toISOString(),
+    );
+  }
+  if (limit != null) params.set("limit", String(limit));
+  return params;
+}
+
+async function loadWebSearchAnalytics() {
+  const loadId = ++state.webSearchAnalyticsLoadId;
+  const period = byId("webSearchStatsPeriod")?.value || state.webSearchStatsPeriod;
   state.webSearchStatsPeriod = period;
-  document.querySelectorAll(".period-button").forEach((button) => {
-    const buttonPeriod = button.id === "webSearchStatsMonthly" ? "monthly" : "weekly";
-    button.classList.toggle("active", buttonPeriod === period);
-  });
   const container = byId("webSearchAnalytics");
   container.textContent = "Loading analytics…";
+  const statsParams = webSearchAnalyticsParams({ includePeriod: true });
+  const statsKey = statsParams.toString();
+  const requestParams = webSearchAnalyticsParams({ limit: 50 });
+  const requestKey = requestParams.toString();
+  const [statsResult, requestsResult] = await Promise.allSettled([
+    api(`/admin/api/websearch/stats?${statsParams}`),
+    api(`/admin/api/websearch/requests?${requestParams}`),
+  ]);
+  if (loadId !== state.webSearchAnalyticsLoadId) return;
+
   let stats = null;
   let requests = null;
-  try {
-    stats = await api(`/admin/api/websearch/stats?period=${period}`);
-  } catch {
-    stats = null;
+  const partialErrors = [];
+  const stale = { stats: false, requests: false };
+  if (statsResult.status === "fulfilled") {
+    stats = statsResult.value;
+    state.webSearchAnalyticsStats = stats;
+    state.webSearchAnalyticsStatsKey = statsKey;
+    state.webSearchLastRoute =
+      stats?.last_route || stats?.routes?.last_route || null;
+    renderWebSearchObservedRoute(state.webSearchLastRoute);
+  } else {
+    partialErrors.push(
+      `summary: ${statsResult.reason?.message || String(statsResult.reason)}`,
+    );
+    stats =
+      state.webSearchAnalyticsStatsKey === statsKey
+        ? state.webSearchAnalyticsStats
+        : null;
+    stale.stats = Boolean(stats);
+    if (!stats) {
+      state.webSearchLastRoute = null;
+      renderWebSearchObservedRoute(null);
+    }
   }
-  try {
-    requests = await api("/admin/api/websearch/requests?limit=25");
-  } catch {
-    requests = null;
+  if (requestsResult.status === "fulfilled") {
+    requests = requestsResult.value;
+    state.webSearchAnalyticsPage = requests;
+    state.webSearchAnalyticsPageKey = requestKey;
+  } else {
+    partialErrors.push(
+      `requests: ${requestsResult.reason?.message || String(requestsResult.reason)}`,
+    );
+    requests =
+      state.webSearchAnalyticsPageKey === requestKey
+        ? state.webSearchAnalyticsPage
+        : null;
+    stale.requests = Boolean(requests);
   }
-  if (!stats && !requests) {
-    container.textContent =
-      "Web search analytics are unavailable (log API not reachable).";
-    return;
-  }
-  renderWebSearchAnalytics(container, stats, requests, period);
+  renderWebSearchAnalytics(container, stats, requests, period, partialErrors, stale);
+  byId("webSearchLastUpdated").textContent =
+    `${partialErrors.length ? "Refresh incomplete" : "Updated"} ${new Date().toLocaleTimeString()}`;
 }
 
 function showMessage(message, kind = "") {
@@ -2015,13 +2533,63 @@ byId("addCustomProviderButton").addEventListener("click", () =>
 byId("cpCancelButton").addEventListener("click", closeCustomProviderForm);
 byId("customProviderForm").addEventListener("submit", submitCustomProviderForm);
 
+function downloadJson(filename, value) {
+  const blob = new Blob([`${JSON.stringify(value, null, 2)}\n`], {
+    type: "application/json",
+  });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
+}
+
+async function exportWebSearchAnalytics() {
+  const params = webSearchAnalyticsParams({ limit: 500 });
+  const page = await api(`/admin/api/websearch/requests?${params}`);
+  downloadJson(
+    `fcc-websearch-${new Date().toISOString().replace(/[:.]/g, "-")}.json`,
+    {
+      exported_at: new Date().toISOString(),
+      filters: Object.fromEntries(params),
+      ...page,
+    },
+  );
+}
+
+async function clearWebSearchAnalytics() {
+  const total = Number(state.webSearchAnalyticsPage?.total || 0);
+  if (
+    !window.confirm(
+      `Delete the entire web-search log${total ? ` (${total} matching rows shown)` : ""}?`,
+    )
+  ) {
+    return;
+  }
+  await api("/admin/api/websearch/requests", { method: "DELETE" });
+  await loadWebSearchAnalytics();
+}
+
 byId("validateButton").addEventListener("click", () => validate(true));
 byId("applyButton").addEventListener("click", apply);
-byId("webSearchStatsWeekly").addEventListener("click", () =>
-  loadWebSearchAnalytics("weekly"),
+byId("webSearchStatsApply").addEventListener("click", () =>
+  loadWebSearchAnalytics().catch((error) => showMessage(error.message, "error")),
 );
-byId("webSearchStatsMonthly").addEventListener("click", () =>
-  loadWebSearchAnalytics("monthly"),
+byId("webSearchStatsRefresh").addEventListener("click", () =>
+  loadWebSearchAnalytics().catch((error) => showMessage(error.message, "error")),
+);
+byId("webSearchFilterQuery").addEventListener("keydown", (event) => {
+  if (event.key !== "Enter") return;
+  loadWebSearchAnalytics().catch((error) => showMessage(error.message, "error"));
+});
+byId("webSearchExportButton").addEventListener("click", () =>
+  exportWebSearchAnalytics().catch((error) => showMessage(error.message, "error")),
+);
+byId("webSearchClearButton").addEventListener("click", () =>
+  clearWebSearchAnalytics().catch((error) => showMessage(error.message, "error")),
 );
 document.addEventListener("pointerdown", (event) => {
   state.modelComboboxes.forEach((combobox) => {
@@ -2042,6 +2610,11 @@ const reqState = {
   offset: 0,
   limit: 25,
   total: 0,
+  loadId: 0,
+  autoRefreshTimer: null,
+  detailReturnFocus: null,
+  providerOptions: new Set(),
+  modelOptions: new Set(),
 };
 
 function reqFilters() {
@@ -2050,11 +2623,13 @@ function reqFilters() {
   const model = byId("reqFilterModel").value.trim();
   const status = byId("reqFilterStatus").value;
   const search = byId("reqFilterSearch").value.trim();
+  const endpoint = byId("reqFilterEndpoint").value.trim();
   const windowSeconds = byId("reqFilterWindow").value;
   if (provider) params.set("provider", provider);
   if (model) params.set("model", model);
   if (status) params.set("status", status);
   if (search) params.set("q", search);
+  if (endpoint) params.set("endpoint", endpoint);
   if (windowSeconds) {
     params.set("since", (Date.now() / 1000 - Number(windowSeconds)).toFixed(0));
   }
@@ -2062,16 +2637,33 @@ function reqFilters() {
 }
 
 async function loadRequestsView() {
+  const loadId = ++reqState.loadId;
   const params = reqFilters();
-  const [stats, list] = await Promise.all([
-    api(`/admin/api/requests/stats?${params}`),
-    api(`/admin/api/requests?limit=${reqState.limit}&offset=${reqState.offset}&${params}`),
-  ]);
+  let stats;
+  let list;
+  try {
+    [stats, list] = await Promise.all([
+      api(`/admin/api/requests/stats?${params}`),
+      api(
+        `/admin/api/requests?limit=${reqState.limit}&offset=${reqState.offset}&${params}`,
+      ),
+    ]);
+  } catch (error) {
+    if (loadId !== reqState.loadId) return;
+    throw error;
+  }
+  if (loadId !== reqState.loadId) return;
   if (stats.enabled === false) {
     byId("reqStatsCards").innerHTML = "";
     byId("reqTableBody").innerHTML = "";
+    byId("reqProviderBreakdown").innerHTML = "";
+    byId("reqTopErrors").innerHTML = "";
+    clearChart(byId("reqSeriesChart"));
+    clearChart(byId("reqModelChart"));
+    reqState.total = 0;
     byId("reqBodiesIndicator").textContent = "Request log disabled (REQUEST_LOG_ENABLED=false)";
-    byId("reqPageInfo").textContent = "";
+    renderReqPager();
+    byId("reqLastUpdated").textContent = "Logging disabled";
     return;
   }
   byId("reqBodiesIndicator").textContent = stats.capture_bodies
@@ -2080,19 +2672,46 @@ async function loadRequestsView() {
   renderRequestStatsCards(stats);
   renderReqSeriesChart(stats.series || []);
   renderReqModelChart(stats.by_model || []);
+  populateRequestFilterOptions(stats);
+  renderRequestProviderBreakdown(stats.by_provider || []);
+  renderRequestTopErrors(stats.top_errors || []);
   reqState.total = list.total || 0;
   renderRequestsTable(list.rows || []);
   renderReqPager();
+  byId("reqLastUpdated").textContent = `Updated ${new Date().toLocaleTimeString()}`;
+}
+
+function populateRequestFilterOptions(stats) {
+  const populate = (id, rows, known) => {
+    rows.forEach((row) => known.add(row.key));
+    const datalist = byId(id);
+    datalist.replaceChildren(
+      ...Array.from(known)
+        .sort((left, right) => left.localeCompare(right))
+        .map((value) => {
+          const option = document.createElement("option");
+          option.value = value;
+          return option;
+        }),
+    );
+  };
+  populate("reqProviderOptions", stats.by_provider || [], reqState.providerOptions);
+  populate("reqModelOptions", stats.by_model || [], reqState.modelOptions);
 }
 
 function renderRequestStatsCards(stats) {
+  const successRate = stats.total
+    ? ((Number(stats.success || 0) / Number(stats.total)) * 100).toFixed(1)
+    : "0.0";
   const cards = [
     ["Total requests", stats.total],
+    ["Success rate", `${successRate}%`],
     ["Error rate", `${((stats.error_rate || 0) * 100).toFixed(1)}%`],
     ["Cancelled", stats.cancelled],
     ["Tokens in", stats.tokens_in],
     ["Tokens out", stats.tokens_out],
     ["Avg duration", stats.avg_duration_ms != null ? `${stats.avg_duration_ms} ms` : "—"],
+    ["p50 duration", stats.p50_duration_ms != null ? `${stats.p50_duration_ms} ms` : "—"],
     ["p95 duration", stats.p95_duration_ms != null ? `${stats.p95_duration_ms} ms` : "—"],
     ["Avg TTFT", stats.avg_ttft_ms != null ? `${stats.avg_ttft_ms} ms` : "—"],
   ];
@@ -2110,19 +2729,69 @@ function renderRequestStatsCards(stats) {
   });
 }
 
+function renderRequestProviderBreakdown(rows) {
+  const container = byId("reqProviderBreakdown");
+  container.innerHTML = "";
+  container.appendChild(
+    analyticsTable(
+      ["Provider", "Requests", "Error rate", "Tokens", "Avg latency"],
+      rows.map((row) => {
+        const requests = Number(row.requests || 0);
+        const errors = Number(row.errors || 0);
+        return [
+          row.key || "unknown",
+          formatAnalyticsNumber(requests),
+          requests ? `${((errors / requests) * 100).toFixed(1)}%` : "0%",
+          formatAnalyticsNumber(
+            Number(row.tokens_in || 0) + Number(row.tokens_out || 0),
+          ),
+          row.avg_duration_ms != null ? `${row.avg_duration_ms} ms` : "—",
+        ];
+      }),
+      "No provider activity in this range.",
+    ),
+  );
+}
+
+function renderRequestTopErrors(rows) {
+  const container = byId("reqTopErrors");
+  container.innerHTML = "";
+  container.appendChild(
+    analyticsTable(
+      ["Message", "Count"],
+      rows.map((row) => [
+        row.message || "Unknown error",
+        formatAnalyticsNumber(row.count || 0),
+      ]),
+      "No errors in this range.",
+    ),
+  );
+}
+
 function renderRequestsTable(rows) {
   const body = byId("reqTableBody");
   body.innerHTML = "";
+  if (rows.length === 0) {
+    const tr = document.createElement("tr");
+    const td = document.createElement("td");
+    td.colSpan = 9;
+    td.className = "analytics-empty";
+    td.textContent = "No requests match the current filters.";
+    tr.appendChild(td);
+    body.appendChild(tr);
+    return;
+  }
   rows.forEach((row) => {
     const tr = document.createElement("tr");
     tr.className = `req-row req-status-${row.status}`;
     const cells = [
-      (row.ts_iso || "").replace("T", " ").slice(0, 19),
+      formatRequestTime(row),
       row.endpoint || "",
       row.provider || "",
       row.resolved_model || row.requested_model || "",
       row.status,
       `${row.tokens_in ?? "—"}/${row.tokens_out ?? "—"}`,
+      row.ttft_ms != null ? `${Math.round(row.ttft_ms)} ms` : "—",
       row.duration_ms != null ? `${Math.round(row.duration_ms)} ms` : "—",
     ];
     cells.forEach((text) => {
@@ -2130,7 +2799,15 @@ function renderRequestsTable(rows) {
       td.textContent = text;
       tr.appendChild(td);
     });
-    tr.addEventListener("click", () => openRequestDetail(row.id));
+    const actionCell = document.createElement("td");
+    const detailButton = document.createElement("button");
+    detailButton.type = "button";
+    detailButton.className = "secondary-button req-detail-button";
+    detailButton.textContent = "View";
+    detailButton.setAttribute("aria-label", `View request ${row.id}`);
+    detailButton.addEventListener("click", () => openRequestDetail(row.id));
+    actionCell.appendChild(detailButton);
+    tr.appendChild(actionCell);
     body.appendChild(tr);
   });
 }
@@ -2197,6 +2874,7 @@ function renderReqModelChart(byModel) {
 }
 
 async function openRequestDetail(requestId) {
+  reqState.detailReturnFocus = document.activeElement;
   const row = await api(`/admin/api/requests/${requestId}`);
   byId("reqDetailTitle").textContent = `Request ${row.id}`;
   const meta = byId("reqDetailMeta");
@@ -2229,10 +2907,86 @@ async function openRequestDetail(requestId) {
   byId("reqDetailInput").textContent = row.input_text || "(not captured)";
   byId("reqDetailOutput").textContent = row.output_text || "(not captured)";
   byId("reqDetailModal").hidden = false;
+  byId("reqDetailClose").focus();
 }
 
-byId("reqDetailClose").addEventListener("click", () => {
+function clearChart(canvas) {
+  const context = canvas.getContext("2d");
+  context.clearRect(0, 0, canvas.width, canvas.height);
+}
+
+function closeRequestDetail() {
   byId("reqDetailModal").hidden = true;
+  if (reqState.detailReturnFocus instanceof HTMLElement) {
+    reqState.detailReturnFocus.focus();
+  }
+  reqState.detailReturnFocus = null;
+}
+
+function trapRequestDetailFocus(event) {
+  const modal = byId("reqDetailModal");
+  if (event.key !== "Tab" || modal.hidden) return;
+  const focusable = Array.from(
+    modal.querySelectorAll(
+      'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+    ),
+  ).filter((element) => element instanceof HTMLElement && !element.hidden);
+  if (focusable.length === 0) {
+    event.preventDefault();
+    return;
+  }
+  const first = focusable[0];
+  const last = focusable[focusable.length - 1];
+  if (event.shiftKey && document.activeElement === first) {
+    event.preventDefault();
+    last.focus();
+  } else if (!event.shiftKey && document.activeElement === last) {
+    event.preventDefault();
+    first.focus();
+  }
+}
+
+async function exportRequestAnalytics() {
+  const params = reqFilters();
+  const exportParams = new URLSearchParams(params);
+  exportParams.set("limit", "500");
+  exportParams.set("offset", "0");
+  const [stats, page] = await Promise.all([
+    api(`/admin/api/requests/stats?${params}`),
+    api(`/admin/api/requests?${exportParams}`),
+  ]);
+  downloadJson(
+    `fcc-requests-${new Date().toISOString().replace(/[:.]/g, "-")}.json`,
+    {
+      exported_at: new Date().toISOString(),
+      filters: Object.fromEntries(params),
+      stats,
+      ...page,
+    },
+  );
+}
+
+function updateRequestAutoRefresh() {
+  if (reqState.autoRefreshTimer != null) {
+    window.clearInterval(reqState.autoRefreshTimer);
+    reqState.autoRefreshTimer = null;
+  }
+  if (!byId("reqAutoRefresh").checked) return;
+  reqState.autoRefreshTimer = window.setInterval(() => {
+    if (state.activeView !== "requests") return;
+    loadRequestsView().catch((error) => showMessage(error.message, "error"));
+  }, 15000);
+}
+
+byId("reqDetailClose").addEventListener("click", closeRequestDetail);
+byId("reqDetailModal").addEventListener("click", (event) => {
+  if (event.target === byId("reqDetailModal")) closeRequestDetail();
+});
+document.addEventListener("keydown", (event) => {
+  trapRequestDetailFocus(event);
+  if (event.key === "Escape" && !byId("reqDetailModal").hidden) {
+    closeRequestDetail();
+  }
 });
 byId("reqApplyFilters").addEventListener("click", () => {
   reqState.offset = 0;
@@ -2251,8 +3005,26 @@ byId("reqNextPage").addEventListener("click", () => {
   reqState.offset += reqState.limit;
   loadRequestsView().catch((error) => showMessage(error.message, "error"));
 });
+byId("reqPageSize").addEventListener("change", () => {
+  reqState.limit = Number(byId("reqPageSize").value);
+  reqState.offset = 0;
+  loadRequestsView().catch((error) => showMessage(error.message, "error"));
+});
+byId("reqRefreshButton").addEventListener("click", () =>
+  loadRequestsView().catch((error) => showMessage(error.message, "error")),
+);
+byId("reqAutoRefresh").addEventListener("change", updateRequestAutoRefresh);
+byId("reqExportButton").addEventListener("click", () =>
+  exportRequestAnalytics().catch((error) => showMessage(error.message, "error")),
+);
 byId("reqClearButton").addEventListener("click", () => {
-  if (!window.confirm("Delete the entire request log?")) return;
+  if (
+    !window.confirm(
+      `Delete the entire request log? The current filters match ${reqState.total} rows; all stored rows will be deleted.`,
+    )
+  ) {
+    return;
+  }
   api("/admin/api/requests", { method: "DELETE" })
     .then(() => {
       reqState.offset = 0;

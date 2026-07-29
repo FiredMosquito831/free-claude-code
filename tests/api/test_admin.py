@@ -176,6 +176,63 @@ def test_admin_static_exposes_explicit_chatgpt_oauth_login_methods():
     assert "startChatGPTOAuthBrowserLogin(browserButton, loginButtons)" in script
 
 
+def test_admin_static_exposes_professional_observability_controls():
+    html = Path("src/free_claude_code/api/admin_static/index.html").read_text(
+        encoding="utf-8"
+    )
+    script = Path("src/free_claude_code/api/admin_static/admin.js").read_text(
+        encoding="utf-8"
+    )
+    styles = Path("src/free_claude_code/api/admin_static/admin.css").read_text(
+        encoding="utf-8"
+    )
+
+    for control_id in (
+        "reqAutoRefresh",
+        "reqFilterEndpoint",
+        "reqPageSize",
+        "reqExportButton",
+        "reqProviderBreakdown",
+        "reqTopErrors",
+        "webSearchFilterProvider",
+        "webSearchFilterStatus",
+        "webSearchFilterWindow",
+        "webSearchStatsPeriod",
+        "webSearchExportButton",
+        "webSearchClearButton",
+        "webSearchRouteSummary",
+    ):
+        assert f'id="{control_id}"' in html
+    assert 'label: "Analytics"' in script
+    assert 'title: "Observability"' in script
+    assert 'params.set("endpoint", endpoint)' in script
+    assert "stats.p50_duration_ms" in script
+    assert "stats.top_errors" in script
+    assert "stats?.dropped_records" in script
+    assert "effectiveWebSearchProvider" in script
+    assert "WEB_SEARCH_FALLBACK_POLICY" in script
+    assert "Configured route:" in script
+    assert '"Logical searches"' in script
+    assert '"Fallback rate"' in script
+    assert '"Terminal route outcomes"' in script
+    assert "stats?.routes?.series" in script
+    assert "renderWebSearchObservedRoute" in script
+    assert "webSearchAnalyticsStatsKey" in script
+    assert "Showing the last successful" in script
+    assert "bucket boundaries use UTC" in script
+    assert "trapRequestDetailFocus" in script
+    assert "View request" in script
+    assert "all stored rows will be deleted" in script
+    assert 'clearChart(byId("reqSeriesChart"))' in script
+    assert 'tr.addEventListener("click"' not in script
+    assert "chart bucket boundaries use UTC" in html
+    assert "setInterval" in script
+    assert "downloadJson" in script
+    assert ".route-summary" in styles
+    assert ".requests-breakdowns" in styles
+    assert ".table-scroll" in styles
+
+
 def test_admin_page_no_longer_renders_generated_env_panel(monkeypatch, tmp_path):
     _set_home(monkeypatch, tmp_path)
     app = create_test_app()

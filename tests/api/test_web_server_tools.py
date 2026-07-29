@@ -20,6 +20,7 @@ from free_claude_code.api.web_tools.outbound import (
     _run_web_fetch,
     _run_web_search,
     _web_search_response_items,
+    _web_tool_client_error_summary,
 )
 from free_claude_code.api.web_tools.request import is_web_server_tool_request
 from free_claude_code.api.web_tools.streaming import (
@@ -49,13 +50,31 @@ from free_claude_code.core.websearch.models import (
     WebSearchResultItem,
 )
 from free_claude_code.messaging.event_parser import parse_cli_event
-from free_claude_code.websearch.errors import WebSearchUpstreamError
+from free_claude_code.websearch.errors import (
+    WebSearchConfigError,
+    WebSearchUpstreamError,
+)
+from free_claude_code.websearch.registry import SearchOutcome, SearchRouteOutcome
 
 _STRICT_EGRESS = WebFetchEgressPolicy(
     allow_private_network_targets=False,
     allowed_schemes=frozenset({"http", "https"}),
 )
 _PROVIDER_IDS = tuple(PROVIDER_CATALOG)
+
+
+@pytest.fixture(autouse=True)
+def _disable_default_websearch_analytics(monkeypatch):
+    """Keep routing tests hermetic; dedicated tests install capture recorders."""
+
+    monkeypatch.setattr(
+        "free_claude_code.api.web_tools.outbound.emit_search_outcome",
+        lambda _outcome: None,
+    )
+    monkeypatch.setattr(
+        "free_claude_code.api.web_tools.outbound.emit_route_outcome",
+        lambda _outcome: None,
+    )
 
 
 def test_web_tool_user_agent_reports_installed_package_version() -> None:
@@ -421,6 +440,56 @@ async def test_streams_web_search_server_tool_result(monkeypatch):
     assert "example.com" in "".join(cli_text)
     deltas = [e for e in events if e.event == "message_delta"]
     assert deltas[-1].data["usage"]["server_tool_use"] == {"web_search_requests": 1}
+
+
+@pytest.mark.asyncio
+async def test_disabled_web_search_streams_clear_error_without_outbound(monkeypatch):
+    monkeypatch.setitem(Settings.model_config, "env_file", ())
+    monkeypatch.setenv("WEB_SEARCH_PROVIDER", "disabled")
+    runtime_provider = AsyncMock()
+    legacy = AsyncMock()
+    monkeypatch.setattr(
+        "free_claude_code.api.web_tools.outbound.runtime_provider", runtime_provider
+    )
+    monkeypatch.setattr(
+        "free_claude_code.api.web_tools.outbound._legacy_web_search_scrape", legacy
+    )
+    request = MessagesRequest(
+        model="claude-haiku-4-5-20251001",
+        max_tokens=100,
+        messages=[Message(role="user", content="Search for nothing")],
+        tools=[Tool(name="web_search", type="web_search_20250305")],
+        tool_choice={"type": "tool", "name": "web_search"},
+    )
+
+    raw = "".join(
+        [
+            event
+            async for event in stream_web_server_tool_response(
+                request,
+                input_tokens=1,
+                web_fetch_egress=_STRICT_EGRESS,
+            )
+        ]
+    )
+
+    events = parse_sse_text(raw)
+    assert_anthropic_stream_contract(events)
+    assert "web search is disabled by WEB_SEARCH_PROVIDER=disabled" in text_content(
+        events
+    )
+    result_blocks = [
+        event.data["content_block"]
+        for event in events
+        if event.event == "content_block_start"
+        and event.data["content_block"]["type"] == "web_search_tool_result"
+    ]
+    assert result_blocks[0]["content"] == {
+        "type": "web_search_tool_result_error",
+        "error_code": "unavailable",
+    }
+    runtime_provider.assert_not_called()
+    legacy.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -821,9 +890,13 @@ async def test_run_web_search_routes_through_configured_provider(monkeypatch):
         },
     ]
     runtime_provider.assert_awaited_once_with(settings, "exa")
-    search_with_logging.assert_awaited_once_with(
-        provider, "test query", max_results=web_tool_constants._MAX_SEARCH_RESULTS
-    )
+    assert search_with_logging.await_count == 1
+    awaited = search_with_logging.await_args
+    assert awaited is not None
+    assert awaited.args == (provider, "test query")
+    assert awaited.kwargs["max_results"] == web_tool_constants._MAX_SEARCH_RESULTS
+    assert awaited.kwargs["attempt_number"] == 1
+    assert isinstance(awaited.kwargs["route_id"], str)
 
 
 @pytest.mark.asyncio
@@ -866,6 +939,48 @@ async def test_run_web_search_falls_back_to_ddgs_after_provider_error(monkeypatc
 
 
 @pytest.mark.asyncio
+async def test_fallback_success_emits_one_correlated_route(monkeypatch):
+    settings = Settings.model_validate({"EXA_API_KEY": "k1-aaaa1111bbbb"})
+    search_with_logging = AsyncMock(
+        side_effect=[
+            WebSearchUpstreamError("exa", "boom"),
+            _web_search_response("Fallback"),
+        ]
+    )
+    routes: list[SearchRouteOutcome] = []
+    monkeypatch.setattr(
+        "free_claude_code.api.web_tools.outbound.runtime_provider",
+        AsyncMock(return_value=MagicMock()),
+    )
+    monkeypatch.setattr(
+        "free_claude_code.api.web_tools.outbound.search_with_logging",
+        search_with_logging,
+    )
+    monkeypatch.setattr(
+        "free_claude_code.api.web_tools.outbound.emit_route_outcome", routes.append
+    )
+
+    await _run_web_search("test query", settings)
+
+    assert [
+        call.kwargs["attempt_number"] for call in search_with_logging.await_args_list
+    ] == [1, 2]
+    route_ids = {
+        call.kwargs["route_id"] for call in search_with_logging.await_args_list
+    }
+    assert len(route_ids) == 1
+    (route,) = routes
+    assert route.route_id == route_ids.pop()
+    assert route.primary_provider == "exa"
+    assert route.terminal_provider == "ddgs"
+    assert route.provider_path == ("exa", "ddgs")
+    assert route.attempt_count == 2
+    assert route.fallback_used is True
+    assert route.status == "success"
+    assert route.results_count == 1
+
+
+@pytest.mark.asyncio
 async def test_run_web_search_falls_back_to_legacy_scrape_when_providers_fail(
     monkeypatch,
 ):
@@ -893,7 +1008,232 @@ async def test_run_web_search_falls_back_to_legacy_scrape_when_providers_fail(
     results = await _run_web_search("test query", settings)
 
     assert requested == ["exa", "ddgs"]
-    assert results == [{"title": "Legacy", "url": "https://legacy.test"}]
+    assert results == [
+        {
+            "title": "Legacy",
+            "url": "https://legacy.test",
+            "provider": "legacy",
+        }
+    ]
+    legacy.assert_awaited_once_with("test query")
+
+
+@pytest.mark.asyncio
+async def test_legacy_success_emits_terminal_attempt_and_route(monkeypatch):
+    settings = Settings.model_validate({"WEB_SEARCH_PROVIDER": "off"})
+    attempts: list[SearchOutcome] = []
+    routes: list[SearchRouteOutcome] = []
+    monkeypatch.setattr(
+        "free_claude_code.api.web_tools.outbound._legacy_web_search_scrape",
+        AsyncMock(return_value=[{"title": "Legacy", "url": "https://legacy.test"}]),
+    )
+    monkeypatch.setattr(
+        "free_claude_code.api.web_tools.outbound.emit_search_outcome", attempts.append
+    )
+    monkeypatch.setattr(
+        "free_claude_code.api.web_tools.outbound.emit_route_outcome", routes.append
+    )
+
+    results = await _run_web_search("test query", settings)
+
+    assert results[0]["provider"] == "legacy"
+    (attempt,) = attempts
+    (route,) = routes
+    assert attempt.provider == "legacy"
+    assert attempt.attempt_number == 1
+    assert attempt.status == "success"
+    assert attempt.route_id == route.route_id
+    assert route.provider_path == ("legacy",)
+    assert route.primary_provider == "legacy"
+    assert route.terminal_provider == "legacy"
+    assert route.fallback_used is False
+    assert route.status == "success"
+
+
+@pytest.mark.asyncio
+async def test_legacy_terminal_failure_emits_correlated_error_route(monkeypatch):
+    settings = Settings.model_validate(
+        {
+            "WEB_SEARCH_PROVIDER": "exa",
+            "WEB_SEARCH_FALLBACK_POLICY": "legacy",
+            "EXA_API_KEY": "k1-aaaa1111bbbb",
+        }
+    )
+    attempts: list[SearchOutcome] = []
+    routes: list[SearchRouteOutcome] = []
+    monkeypatch.setattr(
+        "free_claude_code.api.web_tools.outbound.runtime_provider",
+        AsyncMock(return_value=MagicMock()),
+    )
+    monkeypatch.setattr(
+        "free_claude_code.api.web_tools.outbound.search_with_logging",
+        AsyncMock(side_effect=WebSearchUpstreamError("provider", "failed")),
+    )
+    monkeypatch.setattr(
+        "free_claude_code.api.web_tools.outbound._legacy_web_search_scrape",
+        AsyncMock(side_effect=httpx.ConnectError("legacy unavailable")),
+    )
+    monkeypatch.setattr(
+        "free_claude_code.api.web_tools.outbound.emit_search_outcome", attempts.append
+    )
+    monkeypatch.setattr(
+        "free_claude_code.api.web_tools.outbound.emit_route_outcome", routes.append
+    )
+
+    with pytest.raises(httpx.ConnectError, match="legacy unavailable"):
+        await _run_web_search("test query", settings)
+
+    (legacy_attempt,) = attempts
+    (route,) = routes
+    assert legacy_attempt.provider == "legacy"
+    assert legacy_attempt.attempt_number == 3
+    assert legacy_attempt.status == "error"
+    assert legacy_attempt.error_kind == "upstream"
+    assert legacy_attempt.route_id == route.route_id
+    assert route.provider_path == ("exa", "ddgs", "legacy")
+    assert route.attempt_count == 3
+    assert route.fallback_used is True
+    assert route.status == "error"
+    assert route.error_kind == "upstream"
+    assert route.terminal_provider == "legacy"
+
+
+@pytest.mark.asyncio
+async def test_explicit_provider_is_strict_under_default_auto_policy(monkeypatch):
+    settings = Settings.model_validate(
+        {
+            "WEB_SEARCH_PROVIDER": "exa",
+            "EXA_API_KEY": "k1-aaaa1111bbbb",
+        }
+    )
+    requested: list[str] = []
+
+    async def fake_runtime_provider(_settings: Settings, provider_id: str):
+        requested.append(provider_id)
+        return MagicMock()
+
+    search_with_logging = AsyncMock(side_effect=WebSearchUpstreamError("exa", "boom"))
+    legacy = AsyncMock()
+    monkeypatch.setattr(
+        "free_claude_code.api.web_tools.outbound.runtime_provider",
+        fake_runtime_provider,
+    )
+    monkeypatch.setattr(
+        "free_claude_code.api.web_tools.outbound.search_with_logging",
+        search_with_logging,
+    )
+    monkeypatch.setattr(
+        "free_claude_code.api.web_tools.outbound._legacy_web_search_scrape", legacy
+    )
+
+    with pytest.raises(WebSearchUpstreamError, match="exa: boom"):
+        await _run_web_search("test query", settings)
+
+    assert requested == ["exa"]
+    legacy.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_explicit_missing_credentials_surfaces_config_error(monkeypatch):
+    settings = Settings.model_validate(
+        {
+            "WEB_SEARCH_PROVIDER": "exa",
+            "WEB_SEARCH_FALLBACK_POLICY": "legacy",
+        }
+    )
+    legacy = AsyncMock()
+    monkeypatch.setattr(
+        "free_claude_code.api.web_tools.outbound._legacy_web_search_scrape", legacy
+    )
+
+    with pytest.raises(WebSearchConfigError, match="EXA_API_KEY"):
+        await _run_web_search("test query", settings)
+
+    legacy.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_explicit_ddgs_policy_stops_after_ddgs_failure(monkeypatch):
+    settings = Settings.model_validate(
+        {
+            "WEB_SEARCH_PROVIDER": "exa",
+            "WEB_SEARCH_FALLBACK_POLICY": "ddgs",
+            "EXA_API_KEY": "k1-aaaa1111bbbb",
+        }
+    )
+    requested: list[str] = []
+
+    async def fake_runtime_provider(_settings: Settings, provider_id: str):
+        requested.append(provider_id)
+        return MagicMock()
+
+    search_with_logging = AsyncMock(
+        side_effect=[
+            WebSearchUpstreamError("exa", "primary failed"),
+            WebSearchUpstreamError("ddgs", "fallback failed"),
+        ]
+    )
+    legacy = AsyncMock()
+    monkeypatch.setattr(
+        "free_claude_code.api.web_tools.outbound.runtime_provider",
+        fake_runtime_provider,
+    )
+    monkeypatch.setattr(
+        "free_claude_code.api.web_tools.outbound.search_with_logging",
+        search_with_logging,
+    )
+    monkeypatch.setattr(
+        "free_claude_code.api.web_tools.outbound._legacy_web_search_scrape", legacy
+    )
+
+    with pytest.raises(WebSearchUpstreamError, match="ddgs: fallback failed"):
+        await _run_web_search("test query", settings)
+
+    assert requested == ["exa", "ddgs"]
+    legacy.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_explicit_legacy_policy_runs_complete_fallback_chain(monkeypatch):
+    settings = Settings.model_validate(
+        {
+            "WEB_SEARCH_PROVIDER": "exa",
+            "WEB_SEARCH_FALLBACK_POLICY": "legacy",
+            "EXA_API_KEY": "k1-aaaa1111bbbb",
+        }
+    )
+    requested: list[str] = []
+
+    async def fake_runtime_provider(_settings: Settings, provider_id: str):
+        requested.append(provider_id)
+        return MagicMock()
+
+    search_with_logging = AsyncMock(
+        side_effect=WebSearchUpstreamError("search", "boom")
+    )
+    legacy = AsyncMock(return_value=[{"title": "Legacy", "url": "https://legacy.test"}])
+    monkeypatch.setattr(
+        "free_claude_code.api.web_tools.outbound.runtime_provider",
+        fake_runtime_provider,
+    )
+    monkeypatch.setattr(
+        "free_claude_code.api.web_tools.outbound.search_with_logging",
+        search_with_logging,
+    )
+    monkeypatch.setattr(
+        "free_claude_code.api.web_tools.outbound._legacy_web_search_scrape", legacy
+    )
+
+    results = await _run_web_search("test query", settings)
+
+    assert requested == ["exa", "ddgs"]
+    assert results == [
+        {
+            "title": "Legacy",
+            "url": "https://legacy.test",
+            "provider": "legacy",
+        }
+    ]
     legacy.assert_awaited_once_with("test query")
 
 
@@ -928,8 +1268,49 @@ async def test_run_web_search_ddgs_failure_skips_second_ddgs_attempt(monkeypatch
 
 
 @pytest.mark.asyncio
+async def test_run_web_search_disabled_rejects_without_outbound_search(monkeypatch):
+    settings = Settings.model_validate({"WEB_SEARCH_PROVIDER": "disabled"})
+    runtime_provider = AsyncMock()
+    legacy = AsyncMock()
+    monkeypatch.setattr(
+        "free_claude_code.api.web_tools.outbound.runtime_provider", runtime_provider
+    )
+    monkeypatch.setattr(
+        "free_claude_code.api.web_tools.outbound._legacy_web_search_scrape", legacy
+    )
+
+    with pytest.raises(WebSearchConfigError, match="WEB_SEARCH_PROVIDER=disabled"):
+        await _run_web_search("test query", settings)
+
+    runtime_provider.assert_not_called()
+    legacy.assert_not_called()
+
+
+def test_web_search_config_error_summary_is_actionable_without_verbose_mode():
+    error = WebSearchConfigError(
+        "disabled",
+        "web search is disabled by WEB_SEARCH_PROVIDER=disabled",
+    )
+
+    summary = _web_tool_client_error_summary(
+        "web_search",
+        error,
+        verbose=False,
+    )
+
+    assert summary == (
+        "web_search unavailable: web search is disabled by WEB_SEARCH_PROVIDER=disabled"
+    )
+
+
+@pytest.mark.asyncio
 async def test_run_web_search_off_uses_legacy_scrape_only(monkeypatch):
-    settings = Settings.model_validate({"WEB_SEARCH_PROVIDER": "off"})
+    settings = Settings.model_validate(
+        {
+            "WEB_SEARCH_PROVIDER": "off",
+            "WEB_SEARCH_FALLBACK_POLICY": "none",
+        }
+    )
     runtime_provider = AsyncMock()
     legacy = AsyncMock(return_value=[{"title": "Legacy", "url": "https://legacy.test"}])
     monkeypatch.setattr(
@@ -941,7 +1322,13 @@ async def test_run_web_search_off_uses_legacy_scrape_only(monkeypatch):
 
     results = await _run_web_search("test query", settings)
 
-    assert results == [{"title": "Legacy", "url": "https://legacy.test"}]
+    assert results == [
+        {
+            "title": "Legacy",
+            "url": "https://legacy.test",
+            "provider": "legacy",
+        }
+    ]
     runtime_provider.assert_not_called()
     legacy.assert_awaited_once_with("test query")
 
@@ -1219,6 +1606,7 @@ async def test_stream_emits_page_age_and_rich_digest(monkeypatch):
         "url": "https://example.com/b",
     }
     text = text_content(events)
+    assert "Source provider: tavily" in text
     assert "Provider answer lead." in text
     assert "1. Alpha (January 2, 2026)\nhttps://example.com/a\nAlpha snippet" in text
     assert "2. Beta\nhttps://example.com/b" in text
