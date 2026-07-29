@@ -43,6 +43,9 @@ def _outcome(
     cost_usd: float | None = None,
     route_id: str | None = None,
     attempt_number: int = 1,
+    input_payload: dict[str, object] | None = None,
+    output_payload: dict[str, object] | None = None,
+    provider_config: dict[str, object] | None = None,
 ) -> SearchOutcome:
     return SearchOutcome(
         ts_epoch=ts_epoch,
@@ -59,6 +62,9 @@ def _outcome(
         cost_usd=cost_usd,
         route_id=route_id,
         attempt_number=attempt_number,
+        input_payload=input_payload,
+        output_payload=output_payload,
+        provider_config=provider_config,
     )
 
 
@@ -104,6 +110,8 @@ def _isolated_analytics_home(monkeypatch, tmp_path):
     monkeypatch.setenv("USERPROFILE", str(tmp_path))
     monkeypatch.delenv("WEBSEARCH_LOG_ENABLED", raising=False)
     monkeypatch.delenv("WEBSEARCH_LOG_MAX_ROWS", raising=False)
+    monkeypatch.delenv("WEBSEARCH_LOG_CAPTURE_CONTENT", raising=False)
+    monkeypatch.delenv("WEBSEARCH_LOG_CONTENT_MAX_CHARS", raising=False)
     reset_analytics_state()
     yield
     reset_analytics_state()
@@ -117,6 +125,110 @@ def store(tmp_path):
 
 
 class TestRoundTrip:
+    def test_full_io_and_redacted_config_are_detail_only(self, store) -> None:
+        store.record(
+            _outcome(
+                query="full query",
+                input_payload={
+                    "query": "full query",
+                    "max_results": 10,
+                    "api_key": "must-not-persist",
+                },
+                output_payload={
+                    "provider": "exa",
+                    "answer": "A synthesized answer",
+                    "results": [
+                        {
+                            "title": "Result",
+                            "url": "https://example.com",
+                            "snippet": "Short excerpt",
+                            "content": "Fuller provider content",
+                            "published": "2026-06-15",
+                        }
+                    ],
+                },
+                provider_config={
+                    "provider_id": "exa",
+                    "credential_count": 2,
+                    "access_token": "must-not-persist",
+                    "options": {"EXA_SEARCH_TYPE": "deep"},
+                },
+            )
+        )
+        store.flush()
+
+        (summary,) = store.requests()["items"]
+        assert "input" not in summary
+        assert "output" not in summary
+        assert "provider_config" not in summary
+        assert summary["content_captured"] is True
+        assert summary["input_chars"] > 0
+        assert summary["output_chars"] > 0
+        assert len(summary["input_sha256"]) == 64
+        assert len(summary["output_sha256"]) == 64
+
+        detail = store.request(summary["id"])
+        assert detail is not None
+        assert detail["input"]["query"] == "full query"
+        assert detail["input"]["api_key"] == "[REDACTED]"
+        assert detail["output"]["answer"] == "A synthesized answer"
+        assert detail["output"]["results"][0]["content"] == "Fuller provider content"
+        assert detail["provider_config"]["access_token"] == "[REDACTED]"
+        assert detail["provider_config"]["options"] == {"EXA_SEARCH_TYPE": "deep"}
+
+        (exported,) = store.requests(include_content=True)["items"]
+        assert exported == detail
+        assert "must-not-persist" not in str(detail)
+
+    def test_capture_disabled_keeps_lengths_and_hashes(self, tmp_path) -> None:
+        store = WebSearchLogStore(
+            tmp_path / "hashes.db",
+            capture_content=False,
+        )
+        store.record(
+            _outcome(
+                input_payload={"query": "private query"},
+                output_payload={"answer": "private answer", "results": []},
+                provider_config={"provider_id": "exa"},
+            )
+        )
+        store.flush()
+
+        (summary,) = store.requests()["items"]
+        detail = store.request(summary["id"])
+        assert detail is not None
+        assert detail["content_captured"] is False
+        assert detail["input"] is None
+        assert detail["output"] is None
+        assert detail["input_chars"] > 0
+        assert detail["output_chars"] > 0
+        assert len(detail["input_sha256"]) == 64
+        assert len(detail["output_sha256"]) == 64
+        assert detail["provider_config"] == {"provider_id": "exa"}
+        assert store.stats()["capture_content"] is False
+        store.close()
+
+    def test_oversized_output_uses_valid_truncation_envelope(self, tmp_path) -> None:
+        store = WebSearchLogStore(
+            tmp_path / "truncated.db",
+            max_content_chars=512,
+        )
+        store.record(
+            _outcome(
+                output_payload={"answer": "x" * 2000, "results": []},
+            )
+        )
+        store.flush()
+
+        (summary,) = store.requests()["items"]
+        detail = store.request(summary["id"])
+        assert detail is not None
+        assert detail["output"]["_truncated"] is True
+        assert detail["output"]["original_chars"] == summary["output_chars"]
+        assert detail["output"]["sha256"] == summary["output_sha256"]
+        assert isinstance(detail["output"]["preview"], str)
+        store.close()
+
     def test_recorded_outcomes_round_trip_all_fields(self, store) -> None:
         ts = _ts("2026-06-15T08:30:00+00:00")
         store.record(
@@ -709,6 +821,30 @@ class TestRouteStats:
         assert store.requests(q="case")["total"] == 1
         assert store.stats(q="mixed case")["attempts"]["totals"]["requests"] == 1
 
+    def test_filter_matches_captured_provider_output(self, store) -> None:
+        store.record(
+            _outcome(
+                query="unrelated query",
+                route_id="captured-route",
+                input_payload={"query": "unrelated query"},
+                output_payload={
+                    "answer": "Unique Provider Summary",
+                    "results": [],
+                },
+            )
+        )
+        store.record_route(
+            _route_outcome(
+                route_id="captured-route",
+                query="unrelated query",
+            )
+        )
+        store.flush()
+
+        assert store.requests(q="provider summary")["total"] == 1
+        assert store.stats(q="PROVIDER SUMMARY")["attempts"]["totals"]["requests"] == 1
+        assert store.stats(q="provider summary")["routes"]["totals"]["searches"] == 1
+
 
 class TestRecordSearch:
     def test_disabled_logging_skips_persistence(self, monkeypatch) -> None:
@@ -827,7 +963,18 @@ class TestSchemaMigration:
                 "SELECT name FROM sqlite_master"
                 " WHERE type = 'table' AND name = 'search_route_log'"
             ).fetchone()
-        assert {"route_id", "attempt_number"} <= columns
+        assert {
+            "route_id",
+            "attempt_number",
+            "input_json",
+            "output_json",
+            "provider_config_json",
+            "input_chars",
+            "output_chars",
+            "input_sha256",
+            "output_sha256",
+            "content_captured",
+        } <= columns
         assert route_table == ("search_route_log",)
         store.close()
 

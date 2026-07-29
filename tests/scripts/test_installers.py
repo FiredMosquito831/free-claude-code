@@ -6,13 +6,13 @@ from pathlib import Path
 
 import pytest
 
-FCC_VERSION = "4.12.0"
+FCC_VERSION = "4.13.0"
 FCC_WHEEL_NAME = f"free_claude_code-{FCC_VERSION}-py3-none-any.whl"
 FCC_WHEEL_URL = (
     "https://github.com/FiredMosquito831/free-claude-code/releases/download/"
     f"v{FCC_VERSION}/{FCC_WHEEL_NAME}"
 )
-FCC_WHEEL_SHA256 = "012b5e42e1f9bbef031845625d67568a79f7dcd0aba91fc5702151f5cebf7255"
+FCC_WHEEL_SHA256 = "679565810225215ae3c045cc5c8ef43e4fa53676179ddb1583a25412e811b770"
 
 
 def _repo_root() -> Path:
@@ -270,7 +270,7 @@ if [ "$FAIL_STEP" = "fcc-verify" ]; then
     exit 36
 fi
 if [ "$name" = "fcc-server" ] && [ "${1:-}" = "--version" ]; then
-    echo "free-claude-code 4.12.0"
+    echo "free-claude-code 4.13.0"
 fi
 """,
     )
@@ -646,7 +646,7 @@ def powershell_harness(
 for %%I in ("%~f0") do set "FCC_NAME=%%~nI"
 echo %FCC_NAME%:%*>>"%CALL_LOG%"
 if "%FAIL_STEP%"=="fcc-verify" exit /b 55
-if "%FCC_NAME%"=="fcc-server" if "%1"=="--version" echo free-claude-code 4.12.0
+if "%FCC_NAME%"=="fcc-server" if "%1"=="--version" echo free-claude-code 4.13.0
 exit /b 0
 """,
         encoding="utf-8",
@@ -736,7 +736,7 @@ function Get-FileHash {
         "0000000000000000000000000000000000000000000000000000000000000000"
     }
     else {
-        "012B5E42E1F9BBEF031845625D67568A79F7DCD0ABA91FC5702151F5CEBF7255"
+        "679565810225215AE3C045CC5C8EF43E4FA53676179DDB1583A25412E811B770"
     }
     return [pscustomobject]@{ Hash = $hash }
 }

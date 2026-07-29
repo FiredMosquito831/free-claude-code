@@ -46,6 +46,28 @@ def _outcome(
         error_kind=error_kind,
         error_message=error_message,
         cost_usd=cost_usd,
+        input_payload={"query": query, "max_results": 10},
+        output_payload={
+            "provider": provider,
+            "answer": f"Summary for {query}",
+            "results": [
+                {
+                    "title": query.title(),
+                    "url": f"https://example.test/{query.replace(' ', '-')}",
+                    "snippet": f"Snippet for {query}",
+                    "content": f"Full content for {query}",
+                    "published": "2026-06-01",
+                }
+            ]
+            if results_count
+            else [],
+            "result_count": results_count,
+        },
+        provider_config={
+            "provider_id": provider,
+            "credential_count": 1 if key_label else 0,
+            "options": {"TEST_MODE": "rich"},
+        },
     )
 
 
@@ -105,6 +127,7 @@ class TestLoopbackGuard:
         (
             ("get", "/admin/api/websearch/stats"),
             ("get", "/admin/api/websearch/requests"),
+            ("get", "/admin/api/websearch/requests/1"),
             ("delete", "/admin/api/websearch/requests"),
         ),
     )
@@ -323,6 +346,55 @@ class TestRequestsEndpoint:
         assert item["key_label"] == "tvly…zzzz"
         assert item["ts_iso"] == "2026-06-15T10:00:00+00:00"
         assert item["status"] == "success"
+        assert item["content_captured"] is True
+        assert "input" not in item
+        assert "output" not in item
+        assert "provider_config" not in item
+
+    def test_detail_returns_captured_io_and_provider_config(
+        self, client, log_store
+    ) -> None:
+        _seed(log_store)
+        summary = client.get(
+            "/admin/api/websearch/requests",
+            params={"provider": "tavily"},
+        ).json()["items"][0]
+
+        response = client.get(f"/admin/api/websearch/requests/{summary['id']}")
+
+        assert response.status_code == 200
+        detail = response.json()
+        assert detail["input"] == {"max_results": 10, "query": "apple"}
+        assert detail["output"]["answer"] == "Summary for apple"
+        assert detail["output"]["results"][0]["content"] == "Full content for apple"
+        assert detail["provider_config"] == {
+            "credential_count": 1,
+            "options": {"TEST_MODE": "rich"},
+            "provider_id": "tavily",
+        }
+        assert len(detail["input_sha256"]) == 64
+        assert len(detail["output_sha256"]) == 64
+
+    def test_include_content_supports_complete_json_export(
+        self, client, log_store
+    ) -> None:
+        _seed(log_store)
+
+        body = client.get(
+            "/admin/api/websearch/requests",
+            params={"provider": "exa", "include_content": "true"},
+        ).json()
+
+        assert body["total"] == 2
+        assert all("input" in item for item in body["items"])
+        assert all("output" in item for item in body["items"])
+        assert all("provider_config" in item for item in body["items"])
+
+    def test_detail_unknown_id_is_404(self, client) -> None:
+        response = client.get("/admin/api/websearch/requests/999999")
+
+        assert response.status_code == 404
+        assert response.json()["detail"] == "web search request not found"
 
     def test_provider_and_status_filters(self, client, log_store) -> None:
         _seed(log_store)
@@ -346,6 +418,17 @@ class TestRequestsEndpoint:
 
         assert body["total"] == 2
         assert [item["query"] for item in body["items"]] == ["apple", "apple pie"]
+
+    def test_q_filter_matches_captured_output(self, client, log_store) -> None:
+        _seed(log_store)
+
+        body = client.get(
+            "/admin/api/websearch/requests",
+            params={"q": "summary for banana"},
+        ).json()
+
+        assert body["total"] == 1
+        assert body["items"][0]["query"] == "banana bread"
 
     def test_since_until_filters_bound_the_window(self, client, log_store) -> None:
         _seed(log_store)

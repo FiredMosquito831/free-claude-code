@@ -192,13 +192,25 @@ class TestRecorderSeam:
     @pytest.mark.asyncio
     async def test_success_outcome_recorded(self) -> None:
         outcomes: list[SearchOutcome] = []
-        provider = StubWebSearchProvider(build_config(api_keys=("sk-live-0001wxyz",)))
+        provider = StubWebSearchProvider(
+            build_config(
+                api_keys=("sk-live-0001wxyz",),
+                base_url="https://user:password@example.test/search?token=secret",
+                proxy="http://proxy-user:proxy-pass@proxy.test:8080",
+                options={"MODE": "deep"},
+            )
+        )
         response = await search(
             provider,
             "hello",
+            max_results=7,
             recorder=outcomes.append,
             route_id="route-123",
             attempt_number=2,
+            route_context={
+                "selected_provider": "stub",
+                "fallback_policy": "none",
+            },
         )
         assert response.results
         (outcome,) = outcomes
@@ -213,6 +225,40 @@ class TestRecorderSeam:
         assert outcome.ts_iso
         assert outcome.route_id == "route-123"
         assert outcome.attempt_number == 2
+        assert outcome.input_payload == {
+            "query": "hello",
+            "max_results": 7,
+            "allowed_domains": [],
+            "blocked_domains": [],
+        }
+        assert outcome.output_payload is not None
+        assert outcome.output_payload["provider"] == "stub"
+        assert outcome.output_payload["result_count"] == 1
+        assert outcome.output_payload["results"] == [
+            {
+                "title": "t",
+                "url": "https://example.com",
+                "snippet": "s",
+                "content": None,
+                "published": None,
+            }
+        ]
+        assert outcome.provider_config == {
+            "provider_id": "stub",
+            "credential_rotation": "failover",
+            "credential_count": 1,
+            "base_url": "https://example.test/search",
+            "proxy": "http://proxy.test:8080",
+            "http_timeout_seconds": 20.0,
+            "supports_domain_filters": False,
+            "options": {"MODE": "deep"},
+            "route": {
+                "selected_provider": "stub",
+                "fallback_policy": "none",
+            },
+        }
+        assert "sk-live-0001wxyz" not in str(outcome.provider_config)
+        assert "password" not in str(outcome.provider_config)
 
     @pytest.mark.asyncio
     async def test_error_outcome_recorded_with_kind_and_key(self) -> None:
@@ -229,6 +275,19 @@ class TestRecorderSeam:
         assert outcome.key_index == 0
         assert len(outcome.error_message or "") <= 500
         assert outcome.results_count == 0
+        assert outcome.input_payload == {
+            "query": "q",
+            "max_results": 10,
+            "allowed_domains": [],
+            "blocked_domains": [],
+        }
+        assert outcome.output_payload is not None
+        error_payload = outcome.output_payload["error"]
+        assert isinstance(error_payload, dict)
+        assert error_payload.get("kind") == "upstream"
+        assert error_payload.get("type") == "WebSearchUpstreamError"
+        assert "kaput" in str(error_payload.get("message"))
+        assert len(str(error_payload.get("message"))) == 500
 
     @pytest.mark.asyncio
     async def test_non_websearch_error_recorded_as_internal(self) -> None:

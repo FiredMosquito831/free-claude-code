@@ -56,6 +56,7 @@ async def websearch_requests(
     q: str | None = None,
     since: str | None = None,
     until: str | None = None,
+    include_content: bool = False,
     store: WebSearchLogStore = Depends(get_websearch_log_store),
 ) -> dict[str, Any]:
     """Paged request log (newest first) with provider/status/text/date filters."""
@@ -69,7 +70,23 @@ async def websearch_requests(
         q=q,
         since_epoch=_parse_iso_bound(since, "since"),
         until_epoch=_parse_iso_bound(until, "until"),
+        include_content=include_content,
     )
+
+
+@router.get("/admin/api/websearch/requests/{request_id}")
+async def websearch_request_detail(
+    request: Request,
+    request_id: int,
+    store: WebSearchLogStore = Depends(get_websearch_log_store),
+) -> dict[str, Any]:
+    """One provider attempt with captured input/output and config snapshot."""
+
+    require_loopback_admin(request)
+    item = store.request(request_id)
+    if item is None:
+        raise HTTPException(status_code=404, detail="web search request not found")
+    return item
 
 
 @router.delete("/admin/api/websearch/requests")

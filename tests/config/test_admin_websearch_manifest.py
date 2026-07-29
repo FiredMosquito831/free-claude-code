@@ -162,6 +162,10 @@ def test_websearch_field_specs_cover_section_fields() -> None:
     expected = {
         "WEB_SEARCH_PROVIDER",
         "WEB_SEARCH_FALLBACK_POLICY",
+        "WEBSEARCH_LOG_ENABLED",
+        "WEBSEARCH_LOG_CAPTURE_CONTENT",
+        "WEBSEARCH_LOG_CONTENT_MAX_CHARS",
+        "WEBSEARCH_LOG_MAX_ROWS",
         "SEARXNG_BASE_URL",
         *(
             descriptor.credential_env
@@ -181,6 +185,20 @@ def test_websearch_field_specs_cover_section_fields() -> None:
     }
     assert keys == expected
     assert all(spec["section_id"] == "websearch" for spec in websearch_field_specs())
+
+
+def test_websearch_capture_fields_are_explicit_and_restart_aware() -> None:
+    capture = FIELD_BY_KEY["WEBSEARCH_LOG_CAPTURE_CONTENT"]
+    cap = FIELD_BY_KEY["WEBSEARCH_LOG_CONTENT_MAX_CHARS"]
+
+    assert capture.field_type == "boolean"
+    assert capture.settings_attr == "websearch_log_capture_content"
+    assert capture.default == "true"
+    assert capture.restart_required is True
+    assert cap.field_type == "number"
+    assert cap.settings_attr == "websearch_log_content_max_chars"
+    assert cap.default == "50000"
+    assert cap.restart_required is True
 
 
 def test_advanced_option_fields_generated_per_provider(monkeypatch) -> None:

@@ -12,8 +12,12 @@ Import direction: this module may import ``config``/``core`` and the sibling
 registry reaches the recorders through dynamic import seams.
 """
 
+import hashlib
+import json
 import sqlite3
 import threading
+from collections.abc import Mapping
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from queue import Empty, Full, Queue
@@ -39,6 +43,17 @@ _PRUNE_EVERY_INSERTS = 100
 _MAX_LIMIT = 500
 _TOP_ERRORS_LIMIT = 10
 _BUSY_TIMEOUT_MS = 5000
+_DEFAULT_MAX_CONTENT_CHARS = 50000
+_CONFIG_JSON_MAX_CHARS = 20000
+_REDACTED = "[REDACTED]"
+
+
+@dataclass(frozen=True, slots=True)
+class _PayloadCapture:
+    stored_json: str | None
+    original_chars: int
+    sha256: str | None
+
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS search_log (
@@ -56,7 +71,15 @@ CREATE TABLE IF NOT EXISTS search_log (
     error_message TEXT,
     cost_usd REAL,
     route_id TEXT,
-    attempt_number INTEGER NOT NULL DEFAULT 1
+    attempt_number INTEGER NOT NULL DEFAULT 1,
+    input_json TEXT,
+    output_json TEXT,
+    provider_config_json TEXT,
+    input_chars INTEGER,
+    output_chars INTEGER,
+    input_sha256 TEXT,
+    output_sha256 TEXT,
+    content_captured INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS search_route_log (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -92,8 +115,9 @@ _INSERT_SQL = """
 INSERT INTO search_log (
     ts_epoch, ts_iso, provider, key_index, key_label, query,
     results_count, duration_ms, status, error_kind, error_message, cost_usd,
-    route_id, attempt_number
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    route_id, attempt_number, input_json, output_json, provider_config_json,
+    input_chars, output_chars, input_sha256, output_sha256, content_captured
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 """
 
 _INSERT_ROUTE_SQL = """
@@ -117,7 +141,12 @@ WHERE id NOT IN (SELECT id FROM search_route_log ORDER BY id DESC LIMIT ?)
 _REQUEST_COLUMNS = (
     "id, ts_epoch, ts_iso, provider, key_index, key_label, query, results_count,"
     " duration_ms, status, error_kind, error_message, cost_usd, route_id,"
-    " attempt_number"
+    " attempt_number, input_chars, output_chars, input_sha256, output_sha256,"
+    " content_captured"
+)
+
+_REQUEST_DETAIL_COLUMNS = (
+    f"{_REQUEST_COLUMNS}, input_json, output_json, provider_config_json"
 )
 
 _ROUTE_COLUMNS = (
@@ -159,10 +188,14 @@ class WebSearchLogStore:
         max_rows: int = _DEFAULT_MAX_ROWS,
         queue_cap: int = _QUEUE_CAP,
         prune_every: int = _PRUNE_EVERY_INSERTS,
+        capture_content: bool = True,
+        max_content_chars: int = _DEFAULT_MAX_CONTENT_CHARS,
     ) -> None:
         self._db_path = db_path if db_path is not None else default_websearch_db_path()
         self._max_rows = max(0, max_rows)
         self._prune_every = max(1, prune_every)
+        self._capture_content = capture_content
+        self._max_content_chars = max(512, max_content_chars)
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
         self._queue: Queue[SearchOutcome | SearchRouteOutcome | _Control] = Queue(
             maxsize=max(1, queue_cap)
@@ -317,6 +350,8 @@ class WebSearchLogStore:
                 ),
             },
             "dropped_records": self.dropped,
+            "capture_content": self._capture_content,
+            "max_content_chars": self._max_content_chars,
             # Compatibility aliases: these remain provider-attempt metrics.
             "totals": attempts["totals"],
             "by_provider": attempts["by_provider"],
@@ -339,6 +374,7 @@ class WebSearchLogStore:
         q: str | None = None,
         since_epoch: float | None = None,
         until_epoch: float | None = None,
+        include_content: bool = False,
     ) -> dict[str, Any]:
         """Page recorded requests (newest first) with optional filters."""
 
@@ -356,10 +392,11 @@ class WebSearchLogStore:
             total = connection.execute(
                 f"SELECT COUNT(*) FROM search_log {where}", params
             ).fetchone()[0]
+            columns = _REQUEST_DETAIL_COLUMNS if include_content else _REQUEST_COLUMNS
             items = [
-                _row_dict(row)
+                _attempt_dict(row)
                 for row in connection.execute(
-                    f"SELECT {_REQUEST_COLUMNS} FROM search_log {where}"
+                    f"SELECT {columns} FROM search_log {where}"
                     " ORDER BY ts_epoch DESC, id DESC LIMIT ? OFFSET ?",
                     (*params, limit, offset),
                 ).fetchall()
@@ -367,6 +404,19 @@ class WebSearchLogStore:
         finally:
             connection.close()
         return {"total": int(total), "limit": limit, "offset": offset, "items": items}
+
+    def request(self, request_id: int) -> dict[str, Any] | None:
+        """Return one provider-attempt record with captured I/O and configuration."""
+
+        connection = self._connect_reader()
+        try:
+            row = connection.execute(
+                f"SELECT {_REQUEST_DETAIL_COLUMNS} FROM search_log WHERE id = ?",
+                (request_id,),
+            ).fetchone()
+        finally:
+            connection.close()
+        return _attempt_dict(row) if row is not None else None
 
     def _send_control(self, control: _Control, timeout: float) -> None:
         with self._state_lock:
@@ -430,7 +480,13 @@ class WebSearchLogStore:
             elif isinstance(item, SearchRouteOutcome):
                 route_rows.append(_route_row_tuple(item))
             else:
-                attempt_rows.append(_row_tuple(item))
+                attempt_rows.append(
+                    _row_tuple(
+                        item,
+                        capture_content=self._capture_content,
+                        max_content_chars=self._max_content_chars,
+                    )
+                )
         self._insert_rows(connection, attempt_rows, route_rows)
 
     def _insert_rows(
@@ -496,7 +552,12 @@ def get_shared_store() -> WebSearchLogStore:
     with _shared_lock:
         store = _shared_store
         if store is None or store.closed:
-            store = WebSearchLogStore(max_rows=_settings_max_rows())
+            settings = Settings()
+            store = WebSearchLogStore(
+                max_rows=settings.websearch_log_max_rows,
+                capture_content=settings.websearch_log_capture_content,
+                max_content_chars=settings.websearch_log_content_max_chars,
+            )
             _shared_store = store
         return store
 
@@ -548,15 +609,26 @@ def _log_enabled() -> bool:
         return _log_enabled_cache
 
 
-def _settings_max_rows() -> int:
-    try:
-        return Settings().websearch_log_max_rows
-    except Exception:
-        logger.exception("failed to read WEBSEARCH_LOG_MAX_ROWS; using default")
-        return _DEFAULT_MAX_ROWS
-
-
-def _row_tuple(outcome: SearchOutcome) -> tuple[object, ...]:
+def _row_tuple(
+    outcome: SearchOutcome,
+    *,
+    capture_content: bool,
+    max_content_chars: int,
+) -> tuple[object, ...]:
+    input_capture = _capture_payload(
+        outcome.input_payload,
+        capture=capture_content,
+        max_chars=max_content_chars,
+    )
+    output_capture = _capture_payload(
+        outcome.output_payload,
+        capture=capture_content,
+        max_chars=max_content_chars,
+    )
+    provider_config_json = _bounded_json(
+        outcome.provider_config,
+        max_chars=_CONFIG_JSON_MAX_CHARS,
+    )
     return (
         outcome.ts_epoch,
         outcome.ts_iso,
@@ -576,6 +648,14 @@ def _row_tuple(outcome: SearchOutcome) -> tuple[object, ...]:
         outcome.cost_usd,
         outcome.route_id,
         max(1, outcome.attempt_number),
+        input_capture.stored_json,
+        output_capture.stored_json,
+        provider_config_json,
+        input_capture.original_chars,
+        output_capture.original_chars,
+        input_capture.sha256,
+        output_capture.sha256,
+        int(capture_content),
     )
 
 
@@ -607,6 +687,128 @@ def _row_dict(row: sqlite3.Row) -> dict[str, Any]:
     return dict(zip(row.keys(), row, strict=True))
 
 
+def _attempt_dict(row: sqlite3.Row) -> dict[str, Any]:
+    shaped = _row_dict(row)
+    shaped["content_captured"] = bool(shaped["content_captured"])
+    if "input_json" in shaped:
+        shaped["input"] = _decode_json(shaped.pop("input_json"))
+        shaped["output"] = _decode_json(shaped.pop("output_json"))
+        shaped["provider_config"] = _decode_json(shaped.pop("provider_config_json"))
+    return shaped
+
+
+def _capture_payload(
+    payload: Mapping[str, object] | None,
+    *,
+    capture: bool,
+    max_chars: int,
+) -> _PayloadCapture:
+    if payload is None:
+        return _PayloadCapture(None, 0, None)
+    serialized = _json_dumps(_sanitize_payload(payload))
+    digest = hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+    stored = _bounded_serialized_json(serialized, max_chars) if capture else None
+    return _PayloadCapture(stored, len(serialized), digest)
+
+
+def _bounded_json(
+    payload: Mapping[str, object] | None,
+    *,
+    max_chars: int,
+) -> str | None:
+    if payload is None:
+        return None
+    return _bounded_serialized_json(
+        _json_dumps(_sanitize_payload(payload)),
+        max_chars,
+    )
+
+
+def _bounded_serialized_json(serialized: str, max_chars: int) -> str:
+    if len(serialized) <= max_chars:
+        return serialized
+    if max_chars <= 0:
+        return _json_dumps(
+            {
+                "_truncated": True,
+                "original_chars": len(serialized),
+                "sha256": hashlib.sha256(serialized.encode("utf-8")).hexdigest(),
+                "preview": "",
+            }
+        )
+    digest = hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+    preview_chars = max(0, max_chars - 180)
+    envelope = _json_dumps(
+        {
+            "_truncated": True,
+            "original_chars": len(serialized),
+            "sha256": digest,
+            "preview": serialized[:preview_chars],
+        }
+    )
+    while len(envelope) > max_chars and preview_chars > 0:
+        preview_chars = max(0, preview_chars - (len(envelope) - max_chars))
+        envelope = _json_dumps(
+            {
+                "_truncated": True,
+                "original_chars": len(serialized),
+                "sha256": digest,
+                "preview": serialized[:preview_chars],
+            }
+        )
+    return envelope
+
+
+def _sanitize_payload(value: object, key: str = "") -> object:
+    if _is_secret_key(key):
+        return _REDACTED
+    if isinstance(value, Mapping):
+        return {
+            str(nested_key): _sanitize_payload(nested_value, str(nested_key))
+            for nested_key, nested_value in value.items()
+        }
+    if isinstance(value, list | tuple):
+        return [_sanitize_payload(item) for item in value]
+    if value is None or isinstance(value, str | int | float | bool):
+        return value
+    return str(value)
+
+
+def _is_secret_key(key: str) -> bool:
+    normalized = key.strip().lower().replace("-", "_")
+    return normalized in {
+        "api_key",
+        "apikey",
+        "authorization",
+        "cookie",
+        "key",
+        "password",
+        "secret",
+        "token",
+        "access_token",
+        "refresh_token",
+        "client_secret",
+    } or normalized.endswith(("_api_key", "_password", "_secret", "_token"))
+
+
+def _json_dumps(value: object) -> str:
+    return json.dumps(
+        value,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+
+
+def _decode_json(value: object) -> object | None:
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        return json.loads(value)
+    except json.JSONDecodeError:
+        return {"_invalid_json": True, "raw": value}
+
+
 def _attempt_filter_where(
     *,
     provider: str | None,
@@ -624,8 +826,12 @@ def _attempt_filter_where(
         clauses.append("status = ?")
         params.append(status)
     if q:
-        clauses.append("instr(lower(query), lower(?)) > 0")
-        params.append(q)
+        clauses.append(
+            "(instr(lower(query), lower(?)) > 0"
+            " OR instr(lower(COALESCE(input_json, '')), lower(?)) > 0"
+            " OR instr(lower(COALESCE(output_json, '')), lower(?)) > 0)"
+        )
+        params.extend((q, q, q))
     if since_epoch is not None:
         clauses.append("ts_epoch >= ?")
         params.append(since_epoch)
@@ -653,8 +859,14 @@ def _route_filter_where(
         clauses.append("status = ?")
         params.append(status)
     if q:
-        clauses.append("instr(lower(query), lower(?)) > 0")
-        params.append(q)
+        clauses.append(
+            "(instr(lower(search_route_log.query), lower(?)) > 0"
+            " OR EXISTS (SELECT 1 FROM search_log AS attempt"
+            " WHERE attempt.route_id = search_route_log.route_id"
+            " AND (instr(lower(COALESCE(attempt.input_json, '')), lower(?)) > 0"
+            " OR instr(lower(COALESCE(attempt.output_json, '')), lower(?)) > 0)))"
+        )
+        params.extend((q, q, q))
     if since_epoch is not None:
         clauses.append("ts_epoch >= ?")
         params.append(since_epoch)
@@ -965,6 +1177,24 @@ def _initialize_schema(connection: sqlite3.Connection) -> None:
         "attempt_number",
         "ALTER TABLE search_log ADD COLUMN attempt_number INTEGER NOT NULL DEFAULT 1",
     )
+    for column, alter_sql in (
+        ("input_json", "ALTER TABLE search_log ADD COLUMN input_json TEXT"),
+        ("output_json", "ALTER TABLE search_log ADD COLUMN output_json TEXT"),
+        (
+            "provider_config_json",
+            "ALTER TABLE search_log ADD COLUMN provider_config_json TEXT",
+        ),
+        ("input_chars", "ALTER TABLE search_log ADD COLUMN input_chars INTEGER"),
+        ("output_chars", "ALTER TABLE search_log ADD COLUMN output_chars INTEGER"),
+        ("input_sha256", "ALTER TABLE search_log ADD COLUMN input_sha256 TEXT"),
+        ("output_sha256", "ALTER TABLE search_log ADD COLUMN output_sha256 TEXT"),
+        (
+            "content_captured",
+            "ALTER TABLE search_log ADD COLUMN content_captured"
+            " INTEGER NOT NULL DEFAULT 0",
+        ),
+    ):
+        _ensure_column(connection, "search_log", column, alter_sql)
     connection.executescript(_POST_MIGRATION_SCHEMA)
     connection.commit()
 

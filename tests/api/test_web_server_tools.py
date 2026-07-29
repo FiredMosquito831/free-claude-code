@@ -897,6 +897,16 @@ async def test_run_web_search_routes_through_configured_provider(monkeypatch):
     assert awaited.kwargs["max_results"] == web_tool_constants._MAX_SEARCH_RESULTS
     assert awaited.kwargs["attempt_number"] == 1
     assert isinstance(awaited.kwargs["route_id"], str)
+    assert awaited.kwargs["route_context"] == {
+        "selected_provider": "auto",
+        "fallback_policy": "auto",
+        "resolved_provider_path": ["exa", "ddgs", "legacy"],
+        "legacy_fallback": True,
+        "disabled": False,
+        "max_results": web_tool_constants._MAX_SEARCH_RESULTS,
+        "digest_chars": settings.websearch_digest_chars,
+        "digest_answer": settings.websearch_digest_answer,
+    }
 
 
 @pytest.mark.asyncio
@@ -1043,6 +1053,32 @@ async def test_legacy_success_emits_terminal_attempt_and_route(monkeypatch):
     assert attempt.attempt_number == 1
     assert attempt.status == "success"
     assert attempt.route_id == route.route_id
+    assert attempt.input_payload == {
+        "query": "test query",
+        "max_results": web_tool_constants._MAX_SEARCH_RESULTS,
+        "allowed_domains": [],
+        "blocked_domains": [],
+    }
+    assert attempt.output_payload == {
+        "provider": "legacy",
+        "query": "test query",
+        "answer": None,
+        "results": [
+            {
+                "title": "Legacy",
+                "url": "https://legacy.test",
+                "provider": "legacy",
+            }
+        ],
+        "result_count": 1,
+        "key_index": 0,
+        "cost_usd": None,
+    }
+    assert attempt.provider_config is not None
+    assert attempt.provider_config["provider_id"] == "legacy"
+    route_config = attempt.provider_config["route"]
+    assert isinstance(route_config, dict)
+    assert route_config.get("selected_provider") == "off"
     assert route.provider_path == ("legacy",)
     assert route.primary_provider == "legacy"
     assert route.terminal_provider == "legacy"
@@ -1071,7 +1107,7 @@ async def test_legacy_terminal_failure_emits_correlated_error_route(monkeypatch)
     )
     monkeypatch.setattr(
         "free_claude_code.api.web_tools.outbound._legacy_web_search_scrape",
-        AsyncMock(side_effect=httpx.ConnectError("legacy unavailable")),
+        AsyncMock(side_effect=httpx.ConnectError("legacy unavailable " * 100)),
     )
     monkeypatch.setattr(
         "free_claude_code.api.web_tools.outbound.emit_search_outcome", attempts.append
@@ -1090,6 +1126,20 @@ async def test_legacy_terminal_failure_emits_correlated_error_route(monkeypatch)
     assert legacy_attempt.status == "error"
     assert legacy_attempt.error_kind == "upstream"
     assert legacy_attempt.route_id == route.route_id
+    assert legacy_attempt.output_payload is not None
+    error_payload = legacy_attempt.output_payload["error"]
+    assert isinstance(error_payload, dict)
+    assert error_payload.get("type") == "ConnectError"
+    assert len(str(error_payload.get("message"))) == 500
+    assert len(legacy_attempt.error_message or "") == 500
+    assert legacy_attempt.provider_config is not None
+    route_config = legacy_attempt.provider_config["route"]
+    assert isinstance(route_config, dict)
+    assert route_config.get("resolved_provider_path") == [
+        "exa",
+        "ddgs",
+        "legacy",
+    ]
     assert route.provider_path == ("exa", "ddgs", "legacy")
     assert route.attempt_count == 3
     assert route.fallback_used is True

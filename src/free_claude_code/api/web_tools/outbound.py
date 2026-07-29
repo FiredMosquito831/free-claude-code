@@ -46,6 +46,7 @@ from .parsers import HTMLTextParser, SearchResultParser
 from .search_providers import runtime_provider
 
 _LEGACY_PROVIDER_ID = "legacy"
+_ERROR_MESSAGE_LOG_CHARS = 500
 
 
 @dataclass(slots=True)
@@ -285,6 +286,7 @@ async def _run_web_search(
     )
     try:
         route = resolve_search_route(settings)
+        route_context = _route_context_snapshot(settings, route)
         if route.provider_ids:
             trace.primary_provider = route.provider_ids[0]
             trace.terminal_provider = route.provider_ids[0]
@@ -302,11 +304,17 @@ async def _run_web_search(
             trace.fail(trace.terminal_provider, error)
             raise error
         if route.provider_ids:
-            results = await _provider_web_search(query, settings, route, trace)
+            results = await _provider_web_search(
+                query,
+                settings,
+                route,
+                trace,
+                route_context,
+            )
             if results is not None:
                 return results
         if route.use_legacy_scrape:
-            return await _legacy_route_search(query, trace)
+            return await _legacy_route_search(query, trace, route_context)
         error = WebSearchConfigError(
             settings.web_search_provider,
             "web search has no configured route",
@@ -328,6 +336,7 @@ async def _provider_web_search(
     settings: Settings,
     route: WebSearchRoute,
     trace: _SearchRouteTrace,
+    route_context: dict[str, object],
 ) -> list[dict[str, str]] | None:
     """Try the provider route; None means its terminal legacy fallback may run."""
 
@@ -348,6 +357,7 @@ async def _provider_web_search(
                 started=attempt_started,
                 status="error",
                 error=error,
+                route_context=route_context,
             )
             raise
         try:
@@ -357,6 +367,7 @@ async def _provider_web_search(
                 max_results=_MAX_SEARCH_RESULTS,
                 route_id=trace.route_id,
                 attempt_number=attempt_number,
+                route_context=route_context,
             )
         except WebSearchConfigError as error:
             # A selected provider missing credentials/base URL is an operator
@@ -396,7 +407,9 @@ async def _provider_web_search(
 
 
 async def _legacy_route_search(
-    query: str, trace: _SearchRouteTrace
+    query: str,
+    trace: _SearchRouteTrace,
+    route_context: dict[str, object],
 ) -> list[dict[str, str]]:
     attempt_number = trace.begin_attempt(_LEGACY_PROVIDER_ID)
     ts_epoch = time.time()
@@ -413,6 +426,7 @@ async def _legacy_route_search(
             started=started,
             status="error",
             error=error,
+            route_context=route_context,
         )
         raise
     results = [{**item, "provider": _LEGACY_PROVIDER_ID} for item in raw_results]
@@ -424,6 +438,8 @@ async def _legacy_route_search(
         started=started,
         status="success",
         results_count=len(results),
+        results=results,
+        route_context=route_context,
     )
     trace.succeed(
         _LEGACY_PROVIDER_ID,
@@ -442,8 +458,35 @@ def _emit_manual_attempt(
     started: float,
     status: str,
     results_count: int = 0,
+    results: list[dict[str, str]] | None = None,
     error: BaseException | None = None,
+    route_context: dict[str, object] | None = None,
 ) -> None:
+    input_payload: dict[str, object] = {
+        "query": trace.query,
+        "max_results": _MAX_SEARCH_RESULTS,
+        "allowed_domains": [],
+        "blocked_domains": [],
+    }
+    output_payload: dict[str, object]
+    if error is None:
+        output_payload = {
+            "provider": provider,
+            "query": trace.query,
+            "answer": None,
+            "results": results or [],
+            "result_count": results_count,
+            "key_index": 0,
+            "cost_usd": None,
+        }
+    else:
+        output_payload = {
+            "error": {
+                "kind": _search_error_kind(error),
+                "type": type(error).__name__,
+                "message": str(error)[:_ERROR_MESSAGE_LOG_CHARS],
+            }
+        }
     emit_search_outcome(
         SearchOutcome(
             ts_epoch=ts_epoch,
@@ -456,12 +499,46 @@ def _emit_manual_attempt(
             duration_ms=_elapsed_ms(started),
             status=status,
             error_kind=_search_error_kind(error) if error is not None else None,
-            error_message=str(error) if error is not None else None,
+            error_message=(
+                str(error)[:_ERROR_MESSAGE_LOG_CHARS] if error is not None else None
+            ),
             cost_usd=None,
             route_id=trace.route_id,
             attempt_number=attempt_number,
+            input_payload=input_payload,
+            output_payload=output_payload,
+            provider_config={
+                "provider_id": provider,
+                "credential_rotation": "none",
+                "credential_count": 0,
+                "base_url": None,
+                "proxy": None,
+                "http_timeout_seconds": _REQUEST_TIMEOUT_S,
+                "supports_domain_filters": False,
+                "options": {},
+                "route": route_context or {},
+            },
         )
     )
+
+
+def _route_context_snapshot(
+    settings: Settings,
+    route: WebSearchRoute,
+) -> dict[str, object]:
+    provider_path = list(route.provider_ids)
+    if route.use_legacy_scrape:
+        provider_path.append(_LEGACY_PROVIDER_ID)
+    return {
+        "selected_provider": settings.web_search_provider,
+        "fallback_policy": settings.web_search_fallback_policy,
+        "resolved_provider_path": provider_path,
+        "legacy_fallback": route.use_legacy_scrape,
+        "disabled": route.disabled,
+        "max_results": _MAX_SEARCH_RESULTS,
+        "digest_chars": settings.websearch_digest_chars,
+        "digest_answer": settings.websearch_digest_answer,
+    }
 
 
 def _search_error_kind(error: BaseException) -> str:
