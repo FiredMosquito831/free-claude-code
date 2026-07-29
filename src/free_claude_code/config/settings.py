@@ -1,20 +1,22 @@
 """Flat application settings schema loaded by Pydantic Settings."""
 
-import json
-import os
 from functools import lru_cache
 from typing import Any
 
 from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from .constants import HTTP_CONNECT_TIMEOUT_DEFAULT
+from .constants import (
+    CHATGPT_OAUTH_MANAGED_CREDENTIAL_REFERENCE,
+    HTTP_CONNECT_TIMEOUT_DEFAULT,
+)
 from .env_files import (
     ANTHROPIC_AUTH_TOKEN_ENV,
     env_file_override,
     settings_env_files,
 )
 from .nim import NimSettings
+from .paths import chatgpt_oauth_auth_path
 from .provider_registry import get_provider_registry
 from .reasoning import ReasoningPreference
 from .websearch_catalog import SUPPORTED_WEBSEARCH_PROVIDER_IDS
@@ -523,24 +525,12 @@ class Settings(BaseSettings):
         return v
 
     @model_validator(mode="after")
-    def load_chatgpt_oauth_token_from_codex_cli(self) -> Settings:
-        """Backfill CHATGPT_OAUTH_ACCESS_TOKEN from Codex CLI auth file."""
+    def reference_managed_chatgpt_oauth_credentials(self) -> Settings:
+        """Mark FCC-owned OAuth credentials without loading secrets into Settings."""
         if self.chatgpt_oauth_access_token.strip():
             return self
-        try:
-            from pathlib import Path
-
-            codex_home = Path(os.environ.get("CODEX_HOME", "")).expanduser()
-            if not str(codex_home).strip() or str(codex_home) == ".":
-                codex_home = Path.home() / ".codex"
-            auth_path = codex_home / "auth.json"
-            data = json.loads(auth_path.read_text(encoding="utf-8"))
-            tokens = data.get("tokens") or {}
-            access_token = tokens.get("access_token")
-            if isinstance(access_token, str) and access_token.strip():
-                self.chatgpt_oauth_access_token = access_token
-        except FileNotFoundError, json.JSONDecodeError, OSError:
-            pass
+        if chatgpt_oauth_auth_path().is_file():
+            self.chatgpt_oauth_access_token = CHATGPT_OAUTH_MANAGED_CREDENTIAL_REFERENCE
         return self
 
     @model_validator(mode="after")

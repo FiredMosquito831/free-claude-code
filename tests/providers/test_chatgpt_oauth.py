@@ -308,14 +308,7 @@ async def test_cleanup_closes_http_client(chatgpt_oauth_provider):
     chatgpt_oauth_provider._client.aclose.assert_awaited_once()
 
 
-def test_load_credentials_prefers_explicit_token(tmp_path, monkeypatch):
-    codex_home = tmp_path / ".codex"
-    codex_home.mkdir()
-    (codex_home / "auth.json").write_text(
-        '{"tokens": {"access_token": "file_token"}}', encoding="utf-8"
-    )
-    monkeypatch.setenv("CODEX_HOME", str(codex_home))
-
+def test_load_credentials_prefers_explicit_token():
     creds = load_chatgpt_oauth_credentials(
         access_token="explicit_token",
         account_id="explicit_account",
@@ -325,17 +318,24 @@ def test_load_credentials_prefers_explicit_token(tmp_path, monkeypatch):
     assert creds.account_id == "explicit_account"
 
 
-def test_load_credentials_reads_codex_auth_file(tmp_path, monkeypatch):
+def test_runtime_does_not_implicitly_read_codex_auth_file(tmp_path, monkeypatch):
+    from free_claude_code.providers.chatgpt_oauth import credentials as creds_module
+    from free_claude_code.providers.chatgpt_oauth.credentials import ChatGPTOAuthError
+
     codex_home = tmp_path / ".codex"
     codex_home.mkdir()
     (codex_home / "auth.json").write_text(
         '{"tokens": {"access_token": "file_token"}}', encoding="utf-8"
     )
     monkeypatch.setenv("CODEX_HOME", str(codex_home))
+    monkeypatch.setattr(
+        creds_module,
+        "chatgpt_oauth_auth_path",
+        lambda: tmp_path / ".fcc" / "auth" / "chatgpt-oauth.json",
+    )
 
-    creds = load_chatgpt_oauth_credentials()
-
-    assert creds.access_token == "file_token"
+    with pytest.raises(ChatGPTOAuthError, match="Sign in or import"):
+        load_chatgpt_oauth_credentials()
 
 
 def _jwt(payload_dict: dict) -> str:
@@ -348,16 +348,31 @@ def _jwt(payload_dict: dict) -> str:
     return f"{header}.{payload}."
 
 
+def _store_managed_credentials(tmp_path, monkeypatch, tokens):
+    from free_claude_code.providers.chatgpt_oauth import credentials as creds_module
+
+    auth_path = tmp_path / ".fcc" / "auth" / "chatgpt-oauth.json"
+    monkeypatch.setattr(
+        creds_module,
+        "chatgpt_oauth_auth_path",
+        lambda: auth_path,
+    )
+    creds_module.store_managed_chatgpt_oauth_tokens(tokens, auth_path=auth_path)
+    return auth_path
+
+
 def test_load_credentials_prefers_id_token_for_account_id(tmp_path, monkeypatch):
-    codex_home = tmp_path / ".codex"
-    codex_home.mkdir()
     access_token = _jwt({"exp": 9999999999})
     id_token = _jwt({"chatgpt_account_id": "acct_from_id_token"})
-    (codex_home / "auth.json").write_text(
-        json.dumps({"tokens": {"access_token": access_token, "id_token": id_token}}),
-        encoding="utf-8",
+    _store_managed_credentials(
+        tmp_path,
+        monkeypatch,
+        {
+            "access_token": access_token,
+            "refresh_token": "refresh_1",
+            "id_token": id_token,
+        },
     )
-    monkeypatch.setenv("CODEX_HOME", str(codex_home))
 
     creds = load_chatgpt_oauth_credentials()
 
@@ -365,36 +380,38 @@ def test_load_credentials_prefers_id_token_for_account_id(tmp_path, monkeypatch)
 
 
 def test_load_credentials_falls_back_to_organization_id(tmp_path, monkeypatch):
-    codex_home = tmp_path / ".codex"
-    codex_home.mkdir()
     access_token = _jwt({"organizations": [{"id": "org_123"}], "exp": 9999999999})
-    (codex_home / "auth.json").write_text(
-        json.dumps({"tokens": {"access_token": access_token}}),
-        encoding="utf-8",
+    _store_managed_credentials(
+        tmp_path,
+        monkeypatch,
+        {
+            "access_token": access_token,
+            "refresh_token": "refresh_1",
+            "id_token": "id_1",
+        },
     )
-    monkeypatch.setenv("CODEX_HOME", str(codex_home))
 
     creds = load_chatgpt_oauth_credentials()
 
     assert creds.account_id == "org_123"
 
 
-def test_refresh_persists_rotated_tokens_to_auth_file(tmp_path, monkeypatch):
+def test_refresh_persists_rotated_tokens_to_managed_auth_file(tmp_path, monkeypatch):
     import time
 
     from free_claude_code.providers.chatgpt_oauth import credentials as creds_module
 
-    codex_home = tmp_path / ".codex"
-    codex_home.mkdir()
-    auth_path = codex_home / "auth.json"
     expired_access = _jwt({"exp": int(time.time()) - 100})
-    auth_path.write_text(
-        json.dumps(
-            {"tokens": {"access_token": expired_access, "refresh_token": "refresh_old"}}
-        ),
-        encoding="utf-8",
+    auth_path = _store_managed_credentials(
+        tmp_path,
+        monkeypatch,
+        {
+            "access_token": expired_access,
+            "refresh_token": "refresh_old",
+            "id_token": "id_old",
+            "account_id": "acct_old",
+        },
     )
-    monkeypatch.setenv("CODEX_HOME", str(codex_home))
 
     new_access = _jwt({"exp": 9999999999, "chatgpt_account_id": "acct_new"})
     monkeypatch.setattr(
@@ -413,21 +430,156 @@ def test_refresh_persists_rotated_tokens_to_auth_file(tmp_path, monkeypatch):
     assert saved["tokens"]["expires_at"] == 9999999999
 
 
-def test_write_codex_auth_file_stores_id_token(tmp_path, monkeypatch):
+def test_refresh_uses_current_origin_request_shape(monkeypatch):
+    from free_claude_code.providers.chatgpt_oauth import credentials as creds_module
+
+    captured: dict = {}
+
+    def fake_post(url, **kwargs):
+        captured["url"] = url
+        captured.update(kwargs)
+        return httpx.Response(
+            200,
+            json={
+                "access_token": "access_new",
+                "refresh_token": "refresh_new",
+                "id_token": "id_new",
+                "expires_in": 3600,
+            },
+        )
+
+    monkeypatch.setattr(creds_module.httpx, "post", fake_post)
+
+    access, refresh, _, id_token = creds_module._refresh_access_token("refresh_old")
+
+    assert access == "access_new"
+    assert refresh == "refresh_new"
+    assert id_token == "id_new"
+    assert captured["json"] == {
+        "grant_type": "refresh_token",
+        "refresh_token": "refresh_old",
+        "client_id": "app_EMoamEEZ73f0CkXaXp7hrann",
+    }
+    assert captured["headers"]["originator"] == "codex_cli_rs"
+    assert "data" not in captured
+
+
+def test_import_codex_copies_renewable_bundle_without_modifying_source(
+    tmp_path, monkeypatch
+):
+    from free_claude_code.providers.chatgpt_oauth import credentials as creds_module
+
+    codex_home = tmp_path / ".codex"
+    codex_home.mkdir()
+    codex_path = codex_home / "auth.json"
+    source_payload = {
+        "OPENAI_API_KEY": None,
+        "tokens": {
+            "access_token": _jwt(
+                {"exp": 9999999999, "chatgpt_account_id": "acct_codex"}
+            ),
+            "refresh_token": "refresh_codex",
+            "id_token": "id_codex",
+            "account_id": "acct_codex",
+        },
+        "last_refresh": "preserve-me",
+    }
+    codex_path.write_text(json.dumps(source_payload, indent=2), encoding="utf-8")
+    source_bytes = codex_path.read_bytes()
+    managed_path = tmp_path / ".fcc" / "auth" / "chatgpt-oauth.json"
+    monkeypatch.setenv("CODEX_HOME", str(codex_home))
+    monkeypatch.setattr(
+        creds_module,
+        "chatgpt_oauth_auth_path",
+        lambda: managed_path,
+    )
+
+    credentials = creds_module.import_codex_cli_tokens()
+
+    assert credentials.source_name == "fcc-managed"
+    assert credentials.account_id == "acct_codex"
+    assert codex_path.read_bytes() == source_bytes
+    managed = json.loads(managed_path.read_text(encoding="utf-8"))
+    assert managed["tokens"]["refresh_token"] == "refresh_codex"
+    assert managed["tokens"]["id_token"] == "id_codex"
+
+
+def test_settings_references_managed_credentials_without_copying_secret(
+    tmp_path, monkeypatch
+):
+    from free_claude_code.config import settings as settings_module
+    from free_claude_code.config.constants import (
+        CHATGPT_OAUTH_MANAGED_CREDENTIAL_REFERENCE,
+    )
+    from free_claude_code.config.settings import Settings
+
+    managed_path = tmp_path / ".fcc" / "auth" / "chatgpt-oauth.json"
+    managed_path.parent.mkdir(parents=True)
+    managed_path.write_text('{"secret": "must-not-enter-settings"}', encoding="utf-8")
+    monkeypatch.delenv("CHATGPT_OAUTH_ACCESS_TOKEN", raising=False)
+    monkeypatch.setattr(
+        settings_module,
+        "chatgpt_oauth_auth_path",
+        lambda: managed_path,
+    )
+
+    settings = Settings()
+
+    assert (
+        settings.chatgpt_oauth_access_token
+        == CHATGPT_OAUTH_MANAGED_CREDENTIAL_REFERENCE
+    )
+    assert "must-not-enter-settings" not in settings.chatgpt_oauth_access_token
+
+
+def test_rejected_refresh_removes_only_fcc_managed_credentials(tmp_path, monkeypatch):
+    from free_claude_code.providers.chatgpt_oauth import credentials as creds_module
+
+    managed_path = _store_managed_credentials(
+        tmp_path,
+        monkeypatch,
+        {
+            "access_token": _jwt({"exp": 9999999999}),
+            "refresh_token": "refresh_invalid",
+            "id_token": "id_1",
+            "account_id": "acct_1",
+        },
+    )
+    codex_path = tmp_path / ".codex" / "auth.json"
+    codex_path.parent.mkdir()
+    codex_path.write_text('{"preserve": true}', encoding="utf-8")
+    monkeypatch.setattr(
+        creds_module,
+        "_refresh_access_token",
+        lambda refresh: (_ for _ in ()).throw(
+            creds_module.ChatGPTOAuthRefreshError(401)
+        ),
+    )
+
+    with pytest.raises(creds_module.ChatGPTOAuthError, match="Reconnect"):
+        creds_module.force_refresh_managed_chatgpt_oauth_credentials()
+
+    assert not managed_path.exists()
+    assert codex_path.read_text(encoding="utf-8") == '{"preserve": true}'
+
+
+def test_write_managed_auth_file_stores_complete_bundle(tmp_path):
     from free_claude_code.providers.chatgpt_oauth import oauth_login
 
-    auth_path = tmp_path / ".codex" / "auth.json"
-    oauth_login._write_codex_auth_file(
+    auth_path = tmp_path / ".fcc" / "auth" / "chatgpt-oauth.json"
+    oauth_login._write_managed_auth_file(
         {
             "access_token": "access_1",
             "refresh_token": "refresh_1",
             "id_token": "id_1",
+            "account_id": "acct_1",
             "expires_in": 3600,
         },
         auth_path=auth_path,
     )
 
     saved = json.loads(auth_path.read_text(encoding="utf-8"))
+    assert saved["version"] == 1
     assert saved["tokens"]["id_token"] == "id_1"
 
 
@@ -441,13 +593,15 @@ def test_load_credentials_extracts_account_id_from_jwt(tmp_path, monkeypatch):
     )
     token = f"{header}.{payload}."
 
-    codex_home = tmp_path / ".codex"
-    codex_home.mkdir()
-    (codex_home / "auth.json").write_text(
-        json.dumps({"tokens": {"access_token": token}}),
-        encoding="utf-8",
+    _store_managed_credentials(
+        tmp_path,
+        monkeypatch,
+        {
+            "access_token": token,
+            "refresh_token": "refresh_1",
+            "id_token": "id_1",
+        },
     )
-    monkeypatch.setenv("CODEX_HOME", str(codex_home))
 
     creds = load_chatgpt_oauth_credentials()
 
@@ -467,10 +621,10 @@ def test_build_headers_matches_opencode_shape(chatgpt_oauth_provider):
     headers = _build_headers(credentials, chatgpt_oauth_provider._session_id)
 
     assert headers["Authorization"] == "Bearer test_token"
-    assert headers["originator"] == "free-claude-code"
+    assert headers["originator"] == "codex_cli_rs"
     assert headers["session-id"] == chatgpt_oauth_provider._session_id
     assert "User-Agent" in headers
-    assert headers["User-Agent"].startswith("free-claude-code/")
+    assert headers["User-Agent"].startswith("codex_cli_rs/")
     assert headers["ChatGPT-Account-ID"] == "acct_123"
 
 
@@ -516,13 +670,13 @@ def test_model_filter_logic():
     assert _is_chatgpt_oauth_model("codex-mini-latest") is False
 
 
-def test_perform_chatgpt_oauth_login_writes_auth_file(tmp_path, monkeypatch):
+def test_perform_chatgpt_oauth_login_writes_managed_auth_file(tmp_path, monkeypatch):
     import base64
 
     from free_claude_code.providers.chatgpt_oauth import oauth_login
 
-    monkeypatch.setenv("CODEX_HOME", str(tmp_path / ".codex"))
     monkeypatch.setattr(oauth_login, "CHATGPT_OAUTH_POLL_SAFETY_MS", 1)
+    auth_file = tmp_path / ".fcc" / "auth" / "chatgpt-oauth.json"
 
     header = base64.urlsafe_b64encode(b"{}").decode().rstrip("=")
     payload = (
@@ -554,6 +708,7 @@ def test_perform_chatgpt_oauth_login_writes_auth_file(tmp_path, monkeypatch):
             "json": {
                 "access_token": access_token,
                 "refresh_token": "refresh_1",
+                "id_token": "id_1",
                 "expires_in": 3600,
             }
         },
@@ -566,12 +721,12 @@ def test_perform_chatgpt_oauth_login_writes_auth_file(tmp_path, monkeypatch):
     fake_client = httpx.Client(transport=httpx.MockTransport(_handler))
     tokens = oauth_login.perform_chatgpt_oauth_login(
         timeout_seconds=2,
+        auth_path=auth_file,
         http_client=fake_client,
     )
 
     assert tokens["access_token"] == access_token
     assert tokens["account_id"] == "acct_xyz"
-    auth_file = tmp_path / ".codex" / "auth.json"
     assert auth_file.exists()
     saved = json.loads(auth_file.read_text(encoding="utf-8"))
     assert saved["tokens"]["access_token"] == access_token
@@ -618,3 +773,77 @@ async def test_stream_response_uses_send_not_stream_context_manager(
     assert send_call is not None
     assert send_call.kwargs.get("stream") is True
     fake_response.aclose.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_stream_response_refreshes_managed_credentials_once_after_401(
+    monkeypatch,
+):
+    from unittest.mock import MagicMock
+
+    from free_claude_code.config.constants import (
+        CHATGPT_OAUTH_MANAGED_CREDENTIAL_REFERENCE,
+    )
+    from free_claude_code.providers.chatgpt_oauth import provider as provider_module
+    from free_claude_code.providers.chatgpt_oauth.credentials import (
+        ChatGPTOAuthCredentials,
+    )
+
+    provider = ChatGPTOAuthProvider(
+        _provider_config(api_key=CHATGPT_OAUTH_MANAGED_CREDENTIAL_REFERENCE),
+        rate_limiter=passthrough_rate_limiter(),
+    )
+    rejected = ChatGPTOAuthCredentials(
+        access_token="access_old",
+        account_id="acct_1",
+        refresh_token="refresh_old",
+        source_name="fcc-managed",
+    )
+    refreshed = ChatGPTOAuthCredentials(
+        access_token="access_new",
+        account_id="acct_1",
+        refresh_token="refresh_new",
+        source_name="fcc-managed",
+    )
+    refresh_calls: list[bool] = []
+    monkeypatch.setattr(
+        provider_module,
+        "load_chatgpt_oauth_credentials",
+        lambda **kwargs: rejected,
+    )
+
+    def _refresh():
+        refresh_calls.append(True)
+        return refreshed
+
+    monkeypatch.setattr(
+        provider_module,
+        "force_refresh_managed_chatgpt_oauth_credentials",
+        _refresh,
+    )
+
+    unauthorized = MagicMock(status_code=401)
+    unauthorized.aclose = AsyncMock()
+
+    async def _raw_stream():
+        yield b'data: {"type":"response.output_text.delta","delta":"ok"}\n\n'
+        yield b'data: {"type":"response.completed","response":{}}\n\n'
+
+    success = MagicMock(status_code=200)
+    success.aiter_raw = _raw_stream
+    success.aclose = AsyncMock()
+    provider._send_stream_request = AsyncMock(side_effect=[unauthorized, success])
+    request = MessagesRequest(
+        model="gpt-5",
+        messages=[Message(role="user", content="hi")],
+    )
+
+    chunks = [chunk async for chunk in provider.stream_response(request)]
+
+    assert any("text_delta" in chunk and "ok" in chunk for chunk in chunks)
+    assert refresh_calls == [True]
+    assert provider._send_stream_request.await_count == 2
+    second_call = provider._send_stream_request.await_args_list[1]
+    assert second_call.kwargs["headers"]["Authorization"] == "Bearer access_new"
+    unauthorized.aclose.assert_awaited_once()
+    success.aclose.assert_awaited_once()

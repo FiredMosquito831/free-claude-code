@@ -6,6 +6,14 @@ from pathlib import Path
 
 import pytest
 
+FCC_VERSION = "4.11.1"
+FCC_WHEEL_NAME = f"free_claude_code-{FCC_VERSION}-py3-none-any.whl"
+FCC_WHEEL_URL = (
+    "https://github.com/FiredMosquito831/free-claude-code/releases/download/"
+    f"v{FCC_VERSION}/{FCC_WHEEL_NAME}"
+)
+FCC_WHEEL_SHA256 = "96ac994b62e342220845ac43f5650b1aa04caf8897e58f827e440064b84d37ec"
+
 
 def _repo_root() -> Path:
     return Path(__file__).resolve().parents[2]
@@ -136,6 +144,7 @@ class PosixHarness:
             capture_output=True,
             text=True,
             env=env,
+            timeout=60,
         )
 
     def calls(self) -> list[str]:
@@ -176,7 +185,7 @@ while [ "$#" -gt 0 ]; do
 done
 echo "download:$url" >> "$CALL_LOG"
 case "$url:$FAIL_STEP" in
-    *claude.ai*:claude-download|*chatgpt.com*:codex-download|*pi.dev*:pi-download|*astral.sh*:uv-download)
+    *claude.ai*:claude-download|*chatgpt.com*:codex-download|*pi.dev*:pi-download|*astral.sh*:uv-download|*github.com/FiredMosquito831*:fcc-download)
         exit 41
         ;;
 esac
@@ -185,11 +194,24 @@ case "$url" in
     *chatgpt.com*) source="$FAKE_FIXTURES/codex-installer.sh" ;;
     *pi.dev*) source="$FAKE_FIXTURES/pi-installer.sh" ;;
     *astral.sh*) source="$FAKE_FIXTURES/uv-installer.sh" ;;
+    *github.com/FiredMosquito831*) source="$FAKE_FIXTURES/release-wheel.whl" ;;
     *) exit 42 ;;
 esac
 cp "$source" "$output"
 """,
     )
+    _write_executable(
+        bin_dir / "sha256sum",
+        f"""#!/bin/sh
+echo "sha256sum:$*" >> "$CALL_LOG"
+if [ "$FAIL_STEP" = "fcc-checksum" ]; then
+    printf '%064d  %s\\n' 0 "$1"
+else
+    printf '%s  %s\\n' "{FCC_WHEEL_SHA256}" "$1"
+fi
+""",
+    )
+    (fixtures / "release-wheel.whl").write_bytes(b"test release wheel")
     _write_executable(
         fixtures / "claude-installer.sh",
         """#!/bin/sh
@@ -248,7 +270,7 @@ if [ "$FAIL_STEP" = "fcc-verify" ]; then
     exit 36
 fi
 if [ "$name" = "fcc-server" ] && [ "${1:-}" = "--version" ]; then
-    echo "free-claude-code 3.5.18"
+    echo "free-claude-code 4.11.1"
 fi
 """,
     )
@@ -281,11 +303,13 @@ def test_install_sh_fresh_install_is_verified(posix_harness: PosixHarness) -> No
     assert any(
         call.startswith(
             "uv:tool install --force --refresh-package free-claude-code "
-            "--python 3.14.0 free-claude-code @ "
-            "https://github.com/Alishahryar1/free-claude-code/archive/refs/heads/main.zip"
+            "--python 3.14.0 free-claude-code @ file://"
         )
+        and FCC_WHEEL_NAME in call
         for call in calls
     )
+    assert f"download:{FCC_WHEEL_URL}" in calls
+    assert any(call.startswith("sha256sum:") for call in calls)
     assert not any(call.startswith("git:") for call in calls)
     assert calls[-3:] == [
         "uv:tool update-shell",
@@ -305,7 +329,8 @@ def test_install_sh_preserves_valid_existing_tools(
     result = posix_harness.run()
 
     assert result.returncode == 0, result.stderr
-    assert not any(call.startswith("download:") for call in posix_harness.calls())
+    downloads = [call for call in posix_harness.calls() if call.startswith("download:")]
+    assert downloads == [f"download:{FCC_WHEEL_URL}"]
     assert "leaving it unchanged" in result.stdout
 
 
@@ -369,6 +394,8 @@ def test_install_sh_replaces_obsolete_uv(posix_harness: PosixHarness) -> None:
         "uv-download",
         "uv-install",
         "uv-verify",
+        "fcc-download",
+        "fcc-checksum",
         "fcc-install",
         "path-update",
         "fcc-missing",
@@ -396,6 +423,8 @@ def test_install_sh_stops_without_success_on_each_failure(
         "uv-download": "uv-install",
         "uv-install": "uv:--version",
         "uv-verify": "uv:tool install",
+        "fcc-download": "sha256sum:",
+        "fcc-checksum": "uv:tool install",
         "fcc-install": "uv:tool update-shell",
         "path-update": "uv:tool dir --bin",
         "fcc-missing": "fcc-server:--version",
@@ -447,9 +476,8 @@ def test_install_sh_voice_flags_only_change_fcc_spec(
 
     assert result.returncode == 0, result.stderr
     assert any(
-        "--torch-backend cu130 free-claude-code[voice,voice_local] @ "
-        "https://github.com/Alishahryar1/free-claude-code/archive/refs/heads/main.zip"
-        in call
+        "--torch-backend cu130 free-claude-code[voice,voice_local] @ file://" in call
+        and FCC_WHEEL_NAME in call
         for call in posix_harness.calls()
     )
 
@@ -565,6 +593,7 @@ class PowerShellHarness:
             capture_output=True,
             text=True,
             env=env,
+            timeout=60,
         )
 
     def calls(self) -> list[str]:
@@ -574,8 +603,17 @@ class PowerShellHarness:
 
 
 @pytest.fixture(
-    params=_powershells() or (None,),
-    ids=lambda path: Path(path).name if path is not None else "unavailable",
+    params=[
+        pytest.param(
+            path,
+            id=Path(path).name,
+            marks=pytest.mark.xdist_group(
+                name=f"powershell-installer-{Path(path).stem.lower()}"
+            ),
+        )
+        for path in _powershells()
+    ]
+    or [pytest.param(None, id="unavailable")],
 )
 def powershell_harness(
     tmp_path: Path,
@@ -608,11 +646,12 @@ def powershell_harness(
 for %%I in ("%~f0") do set "FCC_NAME=%%~nI"
 echo %FCC_NAME%:%*>>"%CALL_LOG%"
 if "%FAIL_STEP%"=="fcc-verify" exit /b 55
-if "%FCC_NAME%"=="fcc-server" if "%1"=="--version" echo free-claude-code 3.5.18
+if "%FCC_NAME%"=="fcc-server" if "%1"=="--version" echo free-claude-code 4.11.1
 exit /b 0
 """,
         encoding="utf-8",
     )
+    (fixtures / "release-wheel.whl").write_bytes(b"test release wheel")
     (fixtures / "claude-installer.ps1").write_text(
         r"""if ($env:FAIL_STEP -eq "claude-install") { exit 61 }
 $bin = Join-Path $env:USERPROFILE ".local\bin"
@@ -663,7 +702,8 @@ function Invoke-RestMethod {
         ($env:FAIL_STEP -eq "claude-download" -and $Uri.Contains("claude.ai")) -or
         ($env:FAIL_STEP -eq "codex-download" -and $Uri.Contains("chatgpt.com")) -or
         ($env:FAIL_STEP -eq "pi-download" -and $Uri.Contains("pi.dev")) -or
-        ($env:FAIL_STEP -eq "uv-download" -and $Uri.Contains("astral.sh"))
+        ($env:FAIL_STEP -eq "uv-download" -and $Uri.Contains("astral.sh")) -or
+        ($env:FAIL_STEP -eq "fcc-download" -and $Uri.Contains("github.com/FiredMosquito831"))
     ) {
         throw "simulated download failure"
     }
@@ -679,10 +719,26 @@ function Invoke-RestMethod {
     elseif ($Uri.Contains("astral.sh")) {
         $source = Join-Path $env:FAKE_FIXTURES "uv-installer.ps1"
     }
+    elseif ($Uri.Contains("github.com/FiredMosquito831")) {
+        $source = Join-Path $env:FAKE_FIXTURES "release-wheel.whl"
+    }
     else {
         throw "unexpected installer URL: $Uri"
     }
     Copy-Item -LiteralPath $source -Destination $OutFile -Force
+}
+function Get-FileHash {
+    [CmdletBinding()]
+    param([string] $LiteralPath, [string] $Algorithm)
+
+    Add-Content -LiteralPath $env:CALL_LOG -Value "sha256:$LiteralPath"
+    $hash = if ($env:FAIL_STEP -eq "fcc-checksum") {
+        "0000000000000000000000000000000000000000000000000000000000000000"
+    }
+    else {
+        "96AC994B62E342220845AC43F5650B1AA04CAF8897E58F827E440064B84D37EC"
+    }
+    return [pscustomobject]@{ Hash = $hash }
 }
 $installer = [scriptblock]::Create([IO.File]::ReadAllText($env:FCC_INSTALLER))
 & $installer @args
@@ -728,11 +784,13 @@ def test_install_ps1_fresh_install_is_verified(
     assert any(
         call.startswith(
             "uv:tool install --force --refresh-package free-claude-code "
-            '--python 3.14.0 "free-claude-code @ '
-            'https://github.com/Alishahryar1/free-claude-code/archive/refs/heads/main.zip"'
+            '--python 3.14.0 "free-claude-code @ file:///'
         )
+        and FCC_WHEEL_NAME in call
         for call in calls
     )
+    assert f"download:{FCC_WHEEL_URL}" in calls
+    assert any(call.startswith("sha256:") for call in calls)
     assert not any(call.startswith("git:") for call in calls)
     assert calls[-3:] == [
         "uv:tool update-shell",
@@ -752,7 +810,10 @@ def test_install_ps1_preserves_valid_existing_tools(
     result = powershell_harness.run()
 
     assert result.returncode == 0, result.stderr
-    assert not any(call.startswith("download:") for call in powershell_harness.calls())
+    downloads = [
+        call for call in powershell_harness.calls() if call.startswith("download:")
+    ]
+    assert downloads == [f"download:{FCC_WHEEL_URL}"]
     assert "leaving it unchanged" in result.stdout
 
 
@@ -818,6 +879,8 @@ def test_install_ps1_replaces_obsolete_uv(
         "uv-download",
         "uv-install",
         "uv-verify",
+        "fcc-download",
+        "fcc-checksum",
         "fcc-install",
         "path-update",
         "fcc-missing",
@@ -845,6 +908,8 @@ def test_install_ps1_stops_without_success_on_each_failure(
         "uv-download": "uv-install",
         "uv-install": "uv:--version",
         "uv-verify": "uv:tool install",
+        "fcc-download": "sha256:",
+        "fcc-checksum": "uv:tool install",
         "fcc-install": "uv:tool update-shell",
         "path-update": "uv:tool dir --bin",
         "fcc-missing": "fcc-server:--version",
@@ -870,6 +935,7 @@ def test_install_ps1_dry_run_never_executes_commands(
         capture_output=True,
         text=True,
         env=powershell_harness.env,
+        timeout=60,
     )
 
     assert result.returncode == 0, result.stderr
@@ -910,9 +976,8 @@ def test_install_ps1_voice_flags_only_change_fcc_spec(
 
     assert result.returncode == 0, result.stderr
     assert any(
-        '--torch-backend cu130 "free-claude-code[voice,voice_local] @ '
-        'https://github.com/Alishahryar1/free-claude-code/archive/refs/heads/main.zip"'
-        in call
+        '--torch-backend cu130 "free-claude-code[voice,voice_local] @ file:///' in call
+        and FCC_WHEEL_NAME in call
         for call in powershell_harness.calls()
     )
 
@@ -928,13 +993,18 @@ def test_installers_use_native_clients_and_single_python_selection() -> None:
         assert "git+" not in text
         assert "git --version" not in text
         assert (
-            "https://github.com/Alishahryar1/free-claude-code/archive/refs/heads/main.zip"
+            "https://github.com/FiredMosquito831/free-claude-code/releases/download/"
             in text
         )
+        assert FCC_VERSION in text
+        assert FCC_WHEEL_SHA256 in text
+        assert "Alishahryar1/free-claude-code" not in text
+        assert "refs/heads/main" not in text
         assert "python install" not in text
         assert "--refresh-package" in text
         assert "tool update-shell" in text
         assert "--python" in text
+        assert "checksum mismatch" in text
 
     assert "https://pi.dev/install.sh" in shell
     assert "https://pi.dev/install.ps1" in powershell

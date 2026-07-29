@@ -10,6 +10,8 @@ MESSAGING_STATE_DIRNAME = "agent_workspace"
 FCC_LOGS_DIRNAME = "logs"
 SERVER_LOG_FILENAME = "server.log"
 CODEX_MODEL_CATALOG_FILENAME = "codex-model-catalog.json"
+AUTH_DIRNAME = "auth"
+CHATGPT_OAUTH_AUTH_FILENAME = "chatgpt-oauth.json"
 
 
 def config_dir_path() -> Path:
@@ -50,3 +52,9 @@ def codex_model_catalog_path() -> Path:
     """Return the generated Codex model catalog path."""
 
     return config_dir_path() / CODEX_MODEL_CATALOG_FILENAME
+
+
+def chatgpt_oauth_auth_path() -> Path:
+    """Return FCC's private renewable ChatGPT OAuth credential path."""
+
+    return config_dir_path() / AUTH_DIRNAME / CHATGPT_OAUTH_AUTH_FILENAME

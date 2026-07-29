@@ -13,7 +13,10 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
 
-$RepoArchiveUrl = "https://github.com/Alishahryar1/free-claude-code/archive/refs/heads/main.zip"
+$FccVersion = "4.11.1"
+$FccWheelName = "free_claude_code-$FccVersion-py3-none-any.whl"
+$FccWheelUrl = "https://github.com/FiredMosquito831/free-claude-code/releases/download/v$FccVersion/$FccWheelName"
+$FccWheelSha256 = "96ac994b62e342220845ac43f5650b1aa04caf8897e58f827e440064b84d37ec"
 $PythonVersion = "3.14.0"
 $MinUvVersion = "0.11.0"
 $ClaudeInstallUrl = "https://claude.ai/install.ps1"
@@ -420,7 +423,44 @@ function Ensure-Uv {
     Confirm-Uv
 }
 
+function Get-VerifiedReleaseWheel {
+    if ($DryRun) {
+        Write-Host "+ irm $FccWheelUrl -OutFile <temporary-wheel>"
+        Write-Host "+ verify SHA-256 $FccWheelSha256 for <temporary-wheel>"
+        return "<verified-release-wheel>"
+    }
+
+    $temporaryDirectory = Join-Path (
+        [IO.Path]::GetTempPath()
+    ) ("fcc-wheel-" + [guid]::NewGuid().ToString("N"))
+    $wheelPath = Join-Path $temporaryDirectory $FccWheelName
+    try {
+        New-Item -ItemType Directory -Path $temporaryDirectory | Out-Null
+        Write-Host "+ irm $FccWheelUrl -OutFile $(Format-Argument $wheelPath)"
+        Invoke-RestMethod -Uri $FccWheelUrl -OutFile $wheelPath -ErrorAction Stop
+        if (
+            (-not (Test-Path -LiteralPath $wheelPath -PathType Leaf)) -or
+            ((Get-Item -LiteralPath $wheelPath).Length -eq 0)
+        ) {
+            throw "The downloaded FCC release wheel was empty."
+        }
+
+        $actualSha256 = (Get-FileHash -LiteralPath $wheelPath -Algorithm SHA256).Hash
+        if ($actualSha256 -ne $FccWheelSha256) {
+            throw "FCC release wheel checksum mismatch; refusing to install."
+        }
+        Write-Host "Verified FCC v$FccVersion release wheel SHA-256."
+        return $wheelPath
+    }
+    catch {
+        Remove-Item -LiteralPath $temporaryDirectory -Recurse -Force -ErrorAction SilentlyContinue
+        throw
+    }
+}
+
 function Get-PackageSpec {
+    param([string] $PackageUrl)
+
     $includeNim = $VoiceNim
     $includeLocal = $VoiceLocal
 
@@ -430,19 +470,26 @@ function Get-PackageSpec {
     }
 
     if ($includeNim -and $includeLocal) {
-        return "free-claude-code[voice,voice_local] @ $RepoArchiveUrl"
+        return "free-claude-code[voice,voice_local] @ $PackageUrl"
     }
     if ($includeNim) {
-        return "free-claude-code[voice] @ $RepoArchiveUrl"
+        return "free-claude-code[voice] @ $PackageUrl"
     }
     if ($includeLocal) {
-        return "free-claude-code[voice_local] @ $RepoArchiveUrl"
+        return "free-claude-code[voice_local] @ $PackageUrl"
     }
-    return "free-claude-code @ $RepoArchiveUrl"
+    return "free-claude-code @ $PackageUrl"
 }
 
 function Install-FreeClaudeCode {
-    $packageSpec = Get-PackageSpec
+    $wheelPath = Get-VerifiedReleaseWheel
+    $packageUrl = if ($DryRun) {
+        "file:///<verified-release-wheel>"
+    }
+    else {
+        ([Uri]::new($wheelPath)).AbsoluteUri
+    }
+    $packageSpec = Get-PackageSpec -PackageUrl $packageUrl
     $arguments = @(
         "tool",
         "install",
@@ -465,7 +512,14 @@ function Install-FreeClaudeCode {
         }
         $uvPath = $uvCommand.Source
     }
-    Invoke-NativeCommand -FilePath $uvPath -Arguments $arguments
+    try {
+        Invoke-NativeCommand -FilePath $uvPath -Arguments $arguments
+    }
+    finally {
+        if (-not $DryRun) {
+            Remove-Item -LiteralPath (Split-Path -Parent $wheelPath) -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
 }
 
 function Configure-AndConfirmFreeClaudeCode {
@@ -508,7 +562,10 @@ function Configure-AndConfirmFreeClaudeCode {
         $installedCommands[$commandName] = $command.Source
     }
 
-    Invoke-NativeCommand -FilePath $installedCommands["fcc-server"] -Arguments @("--version")
+    $installedVersion = Invoke-NativeCapture -FilePath $installedCommands["fcc-server"] -Arguments @("--version")
+    if ($installedVersion -ne "free-claude-code $FccVersion") {
+        throw "Expected free-claude-code $FccVersion; found: $installedVersion"
+    }
 }
 
 if ($Help) {

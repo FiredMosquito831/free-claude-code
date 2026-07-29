@@ -1,31 +1,43 @@
-"""ChatGPT/Codex OAuth credential loading and refresh.
-
-This mirrors the token sources used by OpenAI's Codex CLI and the Hermes
-auth file. Refreshed tokens are written back to the source auth file so
-rotated refresh tokens survive restarts (matching OpenCode's behaviour of
-persisting refreshed credentials), and concurrent refreshes are deduplicated
-with a process-wide lock.
-"""
+"""FCC-owned ChatGPT/Codex OAuth credential loading and refresh."""
 
 import base64
-import contextlib
 import dataclasses
 import json
 import os
+import tempfile
 import threading
 import time
 from pathlib import Path
 from typing import Any
 
 import httpx
-from loguru import logger
+
+from free_claude_code.config.constants import (
+    CHATGPT_OAUTH_MANAGED_CREDENTIAL_REFERENCE,
+)
+from free_claude_code.config.paths import chatgpt_oauth_auth_path
 
 CODEX_OAUTH_CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann"
 CODEX_OAUTH_TOKEN_URL = "https://auth.openai.com/oauth/token"
+CODEX_OAUTH_ORIGINATOR = "codex_cli_rs"
+CODEX_OAUTH_SCOPE = (
+    "openid profile email offline_access api.connectors.read api.connectors.invoke"
+)
+MANAGED_CREDENTIAL_SCHEMA_VERSION = 1
+PRIVATE_DIR_MODE = 0o700
+PRIVATE_FILE_MODE = 0o600
 
 
 class ChatGPTOAuthError(Exception):
     """Raised when ChatGPT OAuth credential handling fails."""
+
+
+class ChatGPTOAuthRefreshError(ChatGPTOAuthError):
+    """Raised when OpenAI rejects or cannot complete a token refresh."""
+
+    def __init__(self, status_code: int) -> None:
+        self.status_code = status_code
+        super().__init__(f"OAuth refresh failed with HTTP {status_code}")
 
 
 @dataclasses.dataclass(frozen=True)
@@ -46,6 +58,8 @@ class _TokenSource:
     access_token: str | None
     refresh_token: str | None
     id_token: str | None = None
+    account_id: str | None = None
+    expires_at: int | None = None
 
     @property
     def has_access_token(self) -> bool:
@@ -74,6 +88,8 @@ def _load_json(path: Path) -> dict[str, Any]:
         return {}
     except json.JSONDecodeError as exc:
         raise ChatGPTOAuthError(f"Could not parse {path}: {exc}") from exc
+    except OSError as exc:
+        raise ChatGPTOAuthError(f"Could not read {path}: {exc}") from exc
 
 
 def _load_codex_cli_source() -> _TokenSource:
@@ -86,34 +102,39 @@ def _load_codex_cli_source() -> _TokenSource:
         access_token=tokens.get("access_token"),
         refresh_token=tokens.get("refresh_token"),
         id_token=tokens.get("id_token"),
+        account_id=tokens.get("account_id"),
+        expires_at=tokens.get("expires_at"),
     )
 
 
-def _load_hermes_source() -> _TokenSource:
-    path = _home() / ".hermes" / "auth.json"
+def _load_managed_source(path: Path | None = None) -> _TokenSource:
+    path = path or chatgpt_oauth_auth_path()
     payload = _load_json(path)
-    provider = (payload.get("providers") or {}).get("openai-codex") or {}
-    tokens = provider.get("tokens") or {}
+    if payload and payload.get("version") != MANAGED_CREDENTIAL_SCHEMA_VERSION:
+        raise ChatGPTOAuthError(
+            f"Unsupported FCC ChatGPT OAuth credential schema at {path}."
+        )
+    tokens = payload.get("tokens") or {}
     return _TokenSource(
-        name="hermes-openai-codex",
+        name="fcc-managed",
         path=path,
         access_token=tokens.get("access_token"),
         refresh_token=tokens.get("refresh_token"),
         id_token=tokens.get("id_token"),
+        account_id=tokens.get("account_id"),
+        expires_at=tokens.get("expires_at"),
     )
 
 
 def _reload_source(source: _TokenSource) -> _TokenSource:
     """Re-read one token source from disk (e.g. after another thread refreshed)."""
-    if source.name == "codex-cli":
-        return _load_codex_cli_source()
-    if source.name == "hermes-openai-codex":
-        return _load_hermes_source()
+    if source.name == "fcc-managed":
+        return _load_managed_source(source.path)
     return source
 
 
 def _load_sources() -> list[_TokenSource]:
-    return [_load_hermes_source(), _load_codex_cli_source()]
+    return [_load_managed_source()]
 
 
 def _decode_jwt_claims(token: str | None) -> dict[str, Any]:
@@ -180,24 +201,105 @@ def _access_token_seconds_remaining(access_token: str) -> int | None:
     return int(exp - time.time())
 
 
+def _token_expiry(tokens: dict[str, Any]) -> int | None:
+    expires_at = tokens.get("expires_at")
+    if isinstance(expires_at, (int, float)):
+        return int(expires_at)
+    expires_in = tokens.get("expires_in")
+    if isinstance(expires_in, (int, float)):
+        return int(time.time() + expires_in)
+    access_token = tokens.get("access_token")
+    claims = _decode_jwt_claims(access_token if isinstance(access_token, str) else None)
+    exp = claims.get("exp")
+    return int(exp) if isinstance(exp, (int, float)) else None
+
+
+def _atomic_write_private_json(path: Path, payload: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True, mode=PRIVATE_DIR_MODE)
+    if os.name != "nt":
+        os.chmod(path.parent, PRIVATE_DIR_MODE)
+    file_descriptor, temporary_name = tempfile.mkstemp(
+        prefix=f".{path.name}.",
+        suffix=".tmp",
+        dir=path.parent,
+        text=True,
+    )
+    temporary = Path(temporary_name)
+    try:
+        with os.fdopen(file_descriptor, "w", encoding="utf-8") as handle:
+            json.dump(payload, handle, indent=2)
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        if os.name != "nt":
+            os.chmod(temporary, PRIVATE_FILE_MODE)
+        os.replace(temporary, path)
+        if os.name != "nt":
+            os.chmod(path, PRIVATE_FILE_MODE)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def store_managed_chatgpt_oauth_tokens(
+    tokens: dict[str, Any],
+    *,
+    auth_path: Path | None = None,
+) -> Path:
+    """Validate and atomically persist FCC-owned renewable OAuth credentials."""
+
+    access_token = tokens.get("access_token")
+    refresh_token = tokens.get("refresh_token")
+    id_token = tokens.get("id_token")
+    if not all(
+        isinstance(value, str) and value
+        for value in (access_token, refresh_token, id_token)
+    ):
+        raise ChatGPTOAuthError(
+            "OpenAI OAuth response did not contain renewable credentials."
+        )
+    account_id = tokens.get("account_id")
+    if not isinstance(account_id, str) or not account_id:
+        account_id = extract_account_id_from_tokens(
+            access_token=access_token,
+            id_token=id_token,
+        )
+    if not account_id:
+        raise ChatGPTOAuthError(
+            "OpenAI OAuth response did not contain a ChatGPT account identifier."
+        )
+    path = auth_path or chatgpt_oauth_auth_path()
+    _atomic_write_private_json(
+        path,
+        {
+            "version": MANAGED_CREDENTIAL_SCHEMA_VERSION,
+            "tokens": {
+                "access_token": access_token,
+                "refresh_token": refresh_token,
+                "id_token": id_token,
+                "account_id": account_id,
+                "expires_at": _token_expiry(tokens),
+            },
+        },
+    )
+    return path
+
+
 def _refresh_access_token(
     refresh_token: str,
 ) -> tuple[str, str | None, int | None, str | None]:
     """Refresh an OAuth access token and return the new credential set."""
     response = httpx.post(
         CODEX_OAUTH_TOKEN_URL,
-        data={
+        json={
             "grant_type": "refresh_token",
             "refresh_token": refresh_token,
             "client_id": CODEX_OAUTH_CLIENT_ID,
         },
-        headers={"Content-Type": "application/x-www-form-urlencoded"},
+        headers={"originator": CODEX_OAUTH_ORIGINATOR},
         timeout=httpx.Timeout(30.0),
     )
     if response.status_code != 200:
-        raise ChatGPTOAuthError(
-            f"OAuth refresh failed with HTTP {response.status_code}"
-        )
+        raise ChatGPTOAuthRefreshError(response.status_code)
     payload = response.json()
     new_access = payload.get("access_token")
     new_refresh = payload.get("refresh_token") or refresh_token
@@ -223,44 +325,21 @@ def _persist_refreshed_tokens(
     id_token: str | None,
     expires_at: int | None,
 ) -> None:
-    """Write refreshed tokens back to the source auth file.
-
-    OpenCode persists refreshed credentials so rotated refresh tokens keep
-    working across restarts; we do the same. Failures are logged but never
-    fatal — the in-memory refreshed token still serves this process.
-    """
-    try:
-        payload = _load_json(source.path)
-        if source.name == "hermes-openai-codex":
-            tokens = (
-                payload.setdefault("providers", {})
-                .setdefault("openai-codex", {})
-                .setdefault("tokens", {})
-            )
-        else:
-            tokens = payload.setdefault("tokens", {})
-        tokens["access_token"] = access_token
-        if refresh_token:
-            tokens["refresh_token"] = refresh_token
-        if id_token:
-            tokens["id_token"] = id_token
-        if expires_at is not None:
-            tokens["expires_at"] = expires_at
-        source.path.parent.mkdir(parents=True, exist_ok=True)
-        temp_path = source.path.with_suffix(source.path.suffix + ".tmp")
-        try:
-            temp_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
-            os.replace(temp_path, source.path)
-        finally:
-            temp_path.unlink(missing_ok=True)
-        with contextlib.suppress(OSError):
-            os.chmod(source.path, 0o600)
-    except Exception as exc:
-        logger.warning(
-            "ChatGPT OAuth: could not persist refreshed tokens to {}: {}",
-            source.path,
-            exc,
+    """Write refreshed tokens back to FCC's private credential store."""
+    if source.name != "fcc-managed":
+        raise ChatGPTOAuthError(
+            "Refusing to write refreshed credentials outside FCC's auth store."
         )
+    store_managed_chatgpt_oauth_tokens(
+        {
+            "access_token": access_token,
+            "refresh_token": refresh_token or source.refresh_token,
+            "id_token": id_token or source.id_token,
+            "account_id": source.account_id,
+            "expires_at": expires_at,
+        },
+        auth_path=source.path,
+    )
 
 
 _REFRESH_LOCK = threading.Lock()
@@ -305,17 +384,19 @@ def _ensure_fresh_source(source: _TokenSource) -> _TokenSource:
             access_token=new_access,
             refresh_token=new_refresh,
             id_token=new_id_token or current.id_token,
+            account_id=(
+                extract_account_id_from_tokens(
+                    access_token=new_access,
+                    id_token=new_id_token or current.id_token,
+                )
+                or current.account_id
+            ),
+            expires_at=expires_at,
         )
 
 
 def _choose_runtime_source(sources: list[_TokenSource]) -> _TokenSource:
     refresh_errors: list[str] = []
-    for item in sources:
-        if item.name == "hermes-openai-codex" and item.has_access_token:
-            try:
-                return _ensure_fresh_source(item)
-            except ChatGPTOAuthError as exc:
-                refresh_errors.append(f"{item.name}: {exc}")
     for item in sources:
         if item.has_access_token:
             try:
@@ -324,7 +405,8 @@ def _choose_runtime_source(sources: list[_TokenSource]) -> _TokenSource:
                 refresh_errors.append(f"{item.name}: {exc}")
     suffix = f" Refresh failures: {'; '.join(refresh_errors)}" if refresh_errors else ""
     raise ChatGPTOAuthError(
-        f"No usable Codex/ChatGPT OAuth access token found.{suffix}"
+        "No usable FCC-managed ChatGPT OAuth credentials found. "
+        f"Sign in or import Codex credentials in Admin.{suffix}"
     )
 
 
@@ -337,49 +419,121 @@ def load_chatgpt_oauth_credentials(
 
     Priority:
       1. Explicit access_token / account_id.
-      2. Token files (~/.hermes/auth.json, ~/.codex/auth.json).
+      2. FCC's private renewable credential store.
     """
-    if access_token and access_token.strip():
+    normalized_access_token = (access_token or "").strip()
+    if (
+        normalized_access_token
+        and normalized_access_token != CHATGPT_OAUTH_MANAGED_CREDENTIAL_REFERENCE
+    ):
         resolved_account_id = (account_id or "").strip() or _extract_account_id(
-            access_token
+            normalized_access_token
         )
         return ChatGPTOAuthCredentials(
-            access_token=access_token.strip(),
+            access_token=normalized_access_token,
             account_id=resolved_account_id,
         )
 
     source = _choose_runtime_source(_load_sources())
-    resolved_account_id = (account_id or "").strip() or extract_account_id_from_tokens(
-        access_token=source.access_token,
-        id_token=source.id_token,
+    resolved_account_id = (
+        (account_id or "").strip()
+        or (source.account_id or "").strip()
+        or extract_account_id_from_tokens(
+            access_token=source.access_token,
+            id_token=source.id_token,
+        )
     )
     return ChatGPTOAuthCredentials(
         access_token=source.access_token or "",
         account_id=resolved_account_id,
         refresh_token=source.refresh_token,
+        expires_at=source.expires_at,
         source_name=source.name,
     )
 
 
+def force_refresh_managed_chatgpt_oauth_credentials() -> ChatGPTOAuthCredentials:
+    """Refresh FCC-owned credentials after an upstream unauthorized response."""
+
+    with _REFRESH_LOCK:
+        source = _load_managed_source()
+        if not source.has_refresh_token or source.refresh_token is None:
+            raise ChatGPTOAuthError(
+                "FCC ChatGPT OAuth credentials cannot be refreshed. Reconnect in Admin."
+            )
+        try:
+            access, refresh, expires_at, id_token = _refresh_access_token(
+                source.refresh_token
+            )
+        except ChatGPTOAuthRefreshError as exc:
+            if exc.status_code in {400, 401, 403}:
+                source.path.unlink(missing_ok=True)
+                raise ChatGPTOAuthError(
+                    "ChatGPT OAuth session expired. Reconnect in Admin."
+                ) from exc
+            raise
+        resolved_id_token = id_token or source.id_token
+        _persist_refreshed_tokens(
+            source,
+            access_token=access,
+            refresh_token=refresh,
+            id_token=resolved_id_token,
+            expires_at=expires_at,
+        )
+        account_id = (
+            extract_account_id_from_tokens(
+                access_token=access,
+                id_token=resolved_id_token,
+            )
+            or source.account_id
+            or ""
+        )
+        return ChatGPTOAuthCredentials(
+            access_token=access,
+            account_id=account_id,
+            refresh_token=refresh,
+            expires_at=expires_at,
+            source_name="fcc-managed",
+        )
+
+
 def import_codex_cli_tokens() -> ChatGPTOAuthCredentials:
-    """Load ChatGPT/Codex OAuth tokens from an existing Codex CLI installation.
+    """Copy renewable Codex CLI tokens into FCC's private credential store.
 
     Raises ChatGPTOAuthError when the auth file is missing, malformed, or does
-    not contain a usable access token.
+    not contain a complete renewable credential bundle. Codex's file is never
+    modified.
     """
     source = _load_codex_cli_source()
-    if not source.has_access_token:
+    if (
+        not source.has_access_token
+        or not source.has_refresh_token
+        or not isinstance(source.id_token, str)
+        or not source.id_token
+    ):
         path = source.path
         raise ChatGPTOAuthError(
-            f"No Codex CLI access token found at {path}. "
+            f"No renewable Codex CLI OAuth credentials found at {path}. "
             "Run 'codex login' first or use the ChatGPT OAuth Login button."
         )
+    store_managed_chatgpt_oauth_tokens(
+        {
+            "access_token": source.access_token,
+            "refresh_token": source.refresh_token,
+            "id_token": source.id_token,
+            "account_id": source.account_id,
+            "expires_at": source.expires_at,
+        }
+    )
+    managed = _ensure_fresh_source(_load_managed_source())
     return ChatGPTOAuthCredentials(
-        access_token=source.access_token or "",
-        account_id=extract_account_id_from_tokens(
-            access_token=source.access_token,
-            id_token=source.id_token,
+        access_token=managed.access_token or "",
+        account_id=(managed.account_id or "")
+        or extract_account_id_from_tokens(
+            access_token=managed.access_token,
+            id_token=managed.id_token,
         ),
-        refresh_token=source.refresh_token,
-        source_name=source.name,
+        refresh_token=managed.refresh_token,
+        expires_at=managed.expires_at,
+        source_name=managed.name,
     )

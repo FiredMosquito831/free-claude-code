@@ -17,6 +17,9 @@ from free_claude_code.config.admin.manifest import FIELD_BY_KEY
 from free_claude_code.config.admin.persistence import validate_updates
 from free_claude_code.config.admin.sources import is_locked_source
 from free_claude_code.config.admin.values import load_config_response, load_value_state
+from free_claude_code.config.constants import (
+    CHATGPT_OAUTH_MANAGED_CREDENTIAL_REFERENCE,
+)
 from free_claude_code.config.credentials import parse_credential_keys
 from free_claude_code.config.model_refs import configured_chat_model_refs
 from free_claude_code.config.provider_catalog import PROVIDER_CATALOG
@@ -590,7 +593,7 @@ class _ChatGPTOAuthExchangeRequest(BaseModel):
 
 class _ChatGPTOAuthExchangeResponse(BaseModel):
     status: str
-    access_token: str = ""
+    credential_reference: str = ""
     account_id: str = ""
     message: str = ""
 
@@ -636,15 +639,15 @@ async def chatgpt_oauth_exchange(
         )
     return _ChatGPTOAuthExchangeResponse(
         status="complete",
-        access_token=tokens.get("access_token", ""),
+        credential_reference=CHATGPT_OAUTH_MANAGED_CREDENTIAL_REFERENCE,
         account_id=tokens.get("account_id", ""),
-        message="Login successful. Tokens saved to ~/.codex/auth.json.",
+        message="Login successful. Credentials saved to FCC's private store.",
     )
 
 
 class _ChatGPTOAuthImportCodexResponse(BaseModel):
     status: str
-    access_token: str = ""
+    credential_reference: str = ""
     account_id: str = ""
     message: str = ""
 
@@ -660,9 +663,9 @@ async def chatgpt_oauth_import_codex(request: Request):
 
     return _ChatGPTOAuthImportCodexResponse(
         status="complete",
-        access_token=credentials.access_token,
+        credential_reference=CHATGPT_OAUTH_MANAGED_CREDENTIAL_REFERENCE,
         account_id=credentials.account_id,
-        message="Imported existing Codex CLI tokens.",
+        message="Copied renewable Codex credentials into FCC's private store.",
     )
 
 

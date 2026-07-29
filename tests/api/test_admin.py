@@ -1238,7 +1238,7 @@ def test_admin_chatgpt_oauth_initiate_returns_device_code(monkeypatch, tmp_path)
     assert "auth.openai.com/codex/device" in data["verification_url"]
 
 
-def test_admin_chatgpt_oauth_exchange_returns_tokens(monkeypatch, tmp_path):
+def test_admin_chatgpt_oauth_exchange_never_returns_bearer_token(monkeypatch, tmp_path):
     _set_home(monkeypatch, tmp_path)
     _clear_process_config(monkeypatch)
     app = create_test_app()
@@ -1262,7 +1262,8 @@ def test_admin_chatgpt_oauth_exchange_returns_tokens(monkeypatch, tmp_path):
     assert response.status_code == 200
     data = response.json()
     assert data["status"] == "complete"
-    assert data["access_token"] == "access_1"
+    assert data["credential_reference"] == "fcc-managed-oauth"
+    assert "access_token" not in data
     assert data["account_id"] == "acct_1"
 
 
@@ -1299,7 +1300,9 @@ def test_admin_chatgpt_oauth_import_codex_is_loopback_only(monkeypatch, tmp_path
     assert response.status_code == 403
 
 
-def test_admin_chatgpt_oauth_import_codex_returns_tokens(monkeypatch, tmp_path):
+def test_admin_chatgpt_oauth_import_codex_returns_managed_reference(
+    monkeypatch, tmp_path
+):
     _set_home(monkeypatch, tmp_path)
     _clear_process_config(monkeypatch)
     app = create_test_app()
@@ -1313,7 +1316,7 @@ def test_admin_chatgpt_oauth_import_codex_returns_tokens(monkeypatch, tmp_path):
             access_token="codex_token",
             account_id="codex_acct",
             refresh_token="codex_refresh",
-            source_name="codex-cli",
+            source_name="fcc-managed",
         )
 
     with patch(
@@ -1325,7 +1328,8 @@ def test_admin_chatgpt_oauth_import_codex_returns_tokens(monkeypatch, tmp_path):
     assert response.status_code == 200
     data = response.json()
     assert data["status"] == "complete"
-    assert data["access_token"] == "codex_token"
+    assert data["credential_reference"] == "fcc-managed-oauth"
+    assert "access_token" not in data
     assert data["account_id"] == "codex_acct"
 
 

@@ -81,11 +81,12 @@ _PROVIDER_FIELD_OVERRIDES: dict[str, dict[str, Any]] = {
         ),
     },
     "CHATGPT_OAUTH_ACCESS_TOKEN": {
-        "label": "ChatGPT OAuth Access Token",
+        "label": "ChatGPT OAuth Credential",
         "description": (
-            "Experimental/unsanctioned: OAuth access token for ChatGPT/Codex. "
-            "Leave empty to auto-load from ~/.codex/auth.json after running "
-            "'fcc-chatgpt-oauth-login' or 'codex login'. "
+            "Experimental/unsanctioned: managed by the login/import buttons. "
+            "FCC stores renewable credentials privately under ~/.fcc/auth. "
+            "A raw access token may still be entered as an advanced override, "
+            "but it cannot be refreshed. "
             "Use at your own risk; this flow is not an official OpenAI API product."
         ),
     },
@@ -269,7 +270,8 @@ def _chatgpt_oauth_login_field_specs() -> tuple[dict[str, Any], ...]:
             "field_type": "oauth_login",
             "description": (
                 "Experimental/unsanctioned: click the button to log in to ChatGPT/Codex "
-                "via OAuth. Tokens are saved to ~/.codex/auth.json. "
+                "via OAuth. Renewable credentials are saved in FCC's private auth store; "
+                "Codex CLI credentials are not modified. "
                 "Use at your own risk; this is not an official OpenAI API product."
             ),
         },
@@ -280,7 +282,8 @@ def _chatgpt_oauth_login_field_specs() -> tuple[dict[str, Any], ...]:
             "field_type": "oauth_login",
             "description": (
                 "Experimental/unsanctioned: if you have already run 'codex login', "
-                "click the button to import the existing tokens from ~/.codex/auth.json."
+                "copy its renewable credentials into FCC's private auth store. "
+                "The Codex CLI file remains unchanged."
             ),
         },
     )

@@ -1,7 +1,10 @@
 #!/bin/sh
 set -eu
 
-REPO_ARCHIVE_URL="https://github.com/Alishahryar1/free-claude-code/archive/refs/heads/main.zip"
+FCC_VERSION="4.11.1"
+FCC_WHEEL_NAME="free_claude_code-${FCC_VERSION}-py3-none-any.whl"
+FCC_WHEEL_URL="https://github.com/FiredMosquito831/free-claude-code/releases/download/v${FCC_VERSION}/${FCC_WHEEL_NAME}"
+FCC_WHEEL_SHA256="96ac994b62e342220845ac43f5650b1aa04caf8897e58f827e440064b84d37ec"
 PYTHON_VERSION="3.14.0"
 MIN_UV_VERSION="0.11.0"
 CLAUDE_INSTALL_URL="https://claude.ai/install.sh"
@@ -15,6 +18,8 @@ voice_local=0
 voice_all=0
 torch_backend=""
 temporary_script=""
+temporary_directory=""
+release_wheel_path=""
 
 show_usage() {
     cat <<'USAGE'
@@ -80,6 +85,9 @@ run() {
 cleanup() {
     if [ -n "$temporary_script" ] && [ -e "$temporary_script" ]; then
         rm -f "$temporary_script"
+    fi
+    if [ -n "$temporary_directory" ] && [ -d "$temporary_directory" ]; then
+        rm -rf -- "$temporary_directory"
     fi
 }
 
@@ -401,7 +409,39 @@ validate_args() {
     fi
 }
 
+download_verified_release_wheel() {
+    if [ "$dry_run" -eq 1 ]; then
+        print_command curl -fsSL "$FCC_WHEEL_URL" -o "<temporary-wheel>"
+        printf '+ verify SHA-256 %s for <temporary-wheel>\n' "$FCC_WHEEL_SHA256"
+        release_wheel_path="<verified-release-wheel>"
+        return 0
+    fi
+
+    temporary_directory=$(mktemp -d "${TMPDIR:-/tmp}/fcc-wheel.XXXXXX") ||
+        fail "Unable to create a temporary directory for the FCC release wheel."
+    release_wheel_path="$temporary_directory/$FCC_WHEEL_NAME"
+    print_command curl -fsSL "$FCC_WHEEL_URL" -o "$release_wheel_path"
+    if ! curl -fsSL "$FCC_WHEEL_URL" -o "$release_wheel_path"; then
+        fail "Could not download the pinned FCC v$FCC_VERSION release wheel."
+    fi
+    [ -s "$release_wheel_path" ] ||
+        fail "The downloaded FCC release wheel was empty."
+
+    if command -v sha256sum >/dev/null 2>&1; then
+        actual_sha256=$(sha256sum "$release_wheel_path")
+    elif command -v shasum >/dev/null 2>&1; then
+        actual_sha256=$(shasum -a 256 "$release_wheel_path")
+    else
+        fail "sha256sum or shasum is required to verify the FCC release wheel."
+    fi
+    actual_sha256=${actual_sha256%% *}
+    [ "$actual_sha256" = "$FCC_WHEEL_SHA256" ] ||
+        fail "FCC release wheel checksum mismatch; refusing to install."
+    printf 'Verified FCC v%s release wheel SHA-256.\n' "$FCC_VERSION"
+}
+
 package_spec() {
+    package_url=$1
     include_nim=$voice_nim
     include_local=$voice_local
 
@@ -411,18 +451,20 @@ package_spec() {
     fi
 
     if [ "$include_nim" -eq 1 ] && [ "$include_local" -eq 1 ]; then
-        printf 'free-claude-code[voice,voice_local] @ %s' "$REPO_ARCHIVE_URL"
+        printf 'free-claude-code[voice,voice_local] @ %s' "$package_url"
     elif [ "$include_nim" -eq 1 ]; then
-        printf 'free-claude-code[voice] @ %s' "$REPO_ARCHIVE_URL"
+        printf 'free-claude-code[voice] @ %s' "$package_url"
     elif [ "$include_local" -eq 1 ]; then
-        printf 'free-claude-code[voice_local] @ %s' "$REPO_ARCHIVE_URL"
+        printf 'free-claude-code[voice_local] @ %s' "$package_url"
     else
-        printf 'free-claude-code @ %s' "$REPO_ARCHIVE_URL"
+        printf 'free-claude-code @ %s' "$package_url"
     fi
 }
 
 install_free_claude_code() {
-    spec=$(package_spec)
+    download_verified_release_wheel
+    package_url="file://$release_wheel_path"
+    spec=$(package_spec "$package_url")
 
     if [ -n "$torch_backend" ]; then
         run uv tool install --force --refresh-package free-claude-code --python "$PYTHON_VERSION" --torch-backend "$torch_backend" "$spec"
@@ -458,7 +500,15 @@ configure_and_verify_free_claude_code() {
         [ -x "$tool_bin/$command_name" ] || fail "Free Claude Code installation did not create $tool_bin/$command_name."
     done
 
-    run "$tool_bin/fcc-server" --version
+    print_command "$tool_bin/fcc-server" --version
+    if installed_version=$("$tool_bin/fcc-server" --version); then
+        printf '%s\n' "$installed_version"
+    else
+        status=$?
+        fail "Free Claude Code version verification failed with exit code $status."
+    fi
+    [ "$installed_version" = "free-claude-code $FCC_VERSION" ] ||
+        fail "Expected free-claude-code $FCC_VERSION; found: $installed_version"
 }
 
 parse_args "$@"

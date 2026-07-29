@@ -4,7 +4,6 @@ This mirrors the device-auth path used by OpenCode so Free Claude Code can
 obtain ChatGPT/Codex OAuth tokens without requiring the official ``codex`` CLI.
 """
 
-import json
 import time
 from pathlib import Path
 from typing import Any
@@ -13,10 +12,11 @@ import httpx
 
 from .credentials import (
     CODEX_OAUTH_CLIENT_ID,
+    CODEX_OAUTH_ORIGINATOR,
     CODEX_OAUTH_TOKEN_URL,
-    _codex_home,
-    _decode_jwt_claims,
+    ChatGPTOAuthError,
     extract_account_id_from_tokens,
+    store_managed_chatgpt_oauth_tokens,
 )
 
 CHATGPT_OAUTH_ISSUER = "https://auth.openai.com"
@@ -67,6 +67,7 @@ def _initiate_device_auth(
             CHATGPT_OAUTH_DEVICE_URL,
             headers={
                 "Content-Type": "application/json",
+                "originator": CODEX_OAUTH_ORIGINATOR,
                 "User-Agent": _user_agent(),
             },
             json={"client_id": CODEX_OAUTH_CLIENT_ID},
@@ -109,6 +110,7 @@ def _poll_device_auth(
                 CHATGPT_OAUTH_DEVICE_TOKEN_URL,
                 headers={
                     "Content-Type": "application/json",
+                    "originator": CODEX_OAUTH_ORIGINATOR,
                     "User-Agent": _user_agent(),
                 },
                 json={
@@ -153,7 +155,10 @@ def _exchange_authorization_code(
     try:
         response = client.post(
             CODEX_OAUTH_TOKEN_URL,
-            headers={"Content-Type": "application/x-www-form-urlencoded"},
+            headers={
+                "Content-Type": "application/x-www-form-urlencoded",
+                "originator": CODEX_OAUTH_ORIGINATOR,
+            },
             data={
                 "grant_type": "authorization_code",
                 "code": authorization_code,
@@ -177,48 +182,17 @@ def _exchange_authorization_code(
     return data
 
 
-def _extract_expires_at(tokens: dict[str, Any]) -> int | None:
-    """Return a Unix timestamp for token expiry, if known."""
-    # Prefer the explicit expires_in from the token response.
-    expires_in = tokens.get("expires_in")
-    if isinstance(expires_in, (int, float)):
-        return int(time.time() + expires_in)
-    # Fall back to the exp claim in the access token.
-    access_token = tokens.get("access_token")
-    if isinstance(access_token, str):
-        claims = _decode_jwt_claims(access_token)
-        exp = claims.get("exp")
-        if isinstance(exp, (int, float)):
-            return int(exp)
-    return None
-
-
-def _write_codex_auth_file(
+def _write_managed_auth_file(
     tokens: dict[str, Any],
     *,
     auth_path: Path | None = None,
 ) -> Path:
-    """Persist tokens to the Codex CLI auth file used by the provider loader."""
-    path = auth_path or (_codex_home() / "auth.json")
-    path.parent.mkdir(parents=True, exist_ok=True)
+    """Persist a complete renewable bundle to FCC's private credential store."""
 
-    access_token = tokens.get("access_token")
-    refresh_token = tokens.get("refresh_token")
-    id_token = tokens.get("id_token")
-    expires_at = _extract_expires_at(tokens)
-
-    payload_tokens: dict[str, Any] = {
-        "access_token": access_token,
-        "refresh_token": refresh_token,
-    }
-    if isinstance(id_token, str) and id_token:
-        payload_tokens["id_token"] = id_token
-    if expires_at is not None:
-        payload_tokens["expires_at"] = expires_at
-
-    payload = {"tokens": payload_tokens}
-    path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
-    return path
+    try:
+        return store_managed_chatgpt_oauth_tokens(tokens, auth_path=auth_path)
+    except ChatGPTOAuthError as exc:
+        raise ChatGPTOAuthLoginError(str(exc)) from exc
 
 
 def perform_chatgpt_oauth_login(
@@ -274,13 +248,15 @@ def perform_chatgpt_oauth_login(
     if not isinstance(access_token, str) or not access_token:
         raise ChatGPTOAuthLoginError("Token exchange did not return an access_token")
 
-    account_id = extract_account_id_from_tokens(
-        access_token=access_token,
-        id_token=tokens.get("id_token"),
-    )
+    account_id = tokens.get("account_id")
+    if not isinstance(account_id, str) or not account_id:
+        account_id = extract_account_id_from_tokens(
+            access_token=access_token,
+            id_token=tokens.get("id_token"),
+        )
     tokens["account_id"] = account_id
 
-    path = _write_codex_auth_file(tokens, auth_path=auth_path)
+    path = _write_managed_auth_file(tokens, auth_path=auth_path)
     print(f"Tokens saved to: {path}", flush=True)
     if account_id:
         print(f"Account ID: {account_id}", flush=True)
@@ -329,10 +305,12 @@ def exchange_device_auth_for_tokens(
     if not isinstance(access_token, str) or not access_token:
         raise ChatGPTOAuthLoginError("Token exchange did not return an access_token")
 
-    account_id = extract_account_id_from_tokens(
-        access_token=access_token,
-        id_token=tokens.get("id_token"),
-    )
+    account_id = tokens.get("account_id")
+    if not isinstance(account_id, str) or not account_id:
+        account_id = extract_account_id_from_tokens(
+            access_token=access_token,
+            id_token=tokens.get("id_token"),
+        )
     tokens["account_id"] = account_id
-    _write_codex_auth_file(tokens, auth_path=auth_path)
+    _write_managed_auth_file(tokens, auth_path=auth_path)
     return tokens

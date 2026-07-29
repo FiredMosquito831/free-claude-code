@@ -1010,17 +1010,14 @@ async function importChatGPTOAuthCodexTokens(button) {
       body: "{}",
     });
     if (result.status === "complete") {
-      const tokenField = document.querySelector('[data-key="CHATGPT_OAUTH_ACCESS_TOKEN"] input');
-      const accountField = document.querySelector('[data-key="CHATGPT_OAUTH_ACCOUNT_ID"] input');
-      if (tokenField) {
-        tokenField.value = result.access_token;
-        tokenField.dispatchEvent(new Event("input"));
-      }
-      if (accountField && result.account_id) {
-        accountField.value = result.account_id;
-        accountField.dispatchEvent(new Event("input"));
-      }
-      showMessage("Imported existing Codex CLI tokens. Apply settings to save.", "ok");
+      fillChatGPTOAuthFields(
+        result.credential_reference,
+        result.account_id,
+      );
+      showMessage(
+        "Copied renewable Codex credentials. Apply settings to activate the provider.",
+        "ok",
+      );
     }
   } catch (error) {
     showMessage(`Could not import Codex tokens: ${error.message}`, "error");
@@ -1078,8 +1075,14 @@ async function pollBrowserOAuthLogin() {
       body: "{}",
     });
     if (result.status === "complete") {
-      fillChatGPTOAuthFields(result.access_token, result.account_id);
-      showMessage("ChatGPT OAuth login complete. Apply settings to save.", "ok");
+      fillChatGPTOAuthFields(
+        result.credential_reference,
+        result.account_id,
+      );
+      showMessage(
+        "ChatGPT OAuth login complete. Apply settings to activate the provider.",
+        "ok",
+      );
       return;
     }
     if (result.status === "error") {
@@ -1089,7 +1092,7 @@ async function pollBrowserOAuthLogin() {
   throw new Error("Timed out waiting for the browser login to complete");
 }
 
-function fillChatGPTOAuthFields(accessToken, accountId) {
+function fillChatGPTOAuthFields(credentialReference, accountId) {
   const tokenField = document.querySelector(
     '[data-key="CHATGPT_OAUTH_ACCESS_TOKEN"] input',
   );
@@ -1097,7 +1100,7 @@ function fillChatGPTOAuthFields(accessToken, accountId) {
     '[data-key="CHATGPT_OAUTH_ACCOUNT_ID"] input',
   );
   if (tokenField) {
-    tokenField.value = accessToken;
+    tokenField.value = credentialReference;
     tokenField.dispatchEvent(new Event("input"));
   }
   if (accountField && accountId) {
@@ -1132,8 +1135,14 @@ async function startDeviceOAuthLogin(button) {
       }),
     });
     if (result.status === "complete") {
-      fillChatGPTOAuthFields(result.access_token, result.account_id);
-      showMessage("ChatGPT OAuth login complete. Apply settings to save.", "ok");
+      fillChatGPTOAuthFields(
+        result.credential_reference,
+        result.account_id,
+      );
+      showMessage(
+        "ChatGPT OAuth login complete. Apply settings to activate the provider.",
+        "ok",
+      );
       return;
     }
   }
