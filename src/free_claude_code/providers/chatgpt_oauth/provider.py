@@ -1,5 +1,6 @@
 """Direct ChatGPT/Codex OAuth provider using the Responses API."""
 
+import asyncio
 import platform
 import re
 import uuid
@@ -28,7 +29,12 @@ from free_claude_code.providers.model_listing import model_infos_from_ids
 from free_claude_code.providers.rate_limit import ProviderRateLimiter
 
 from .conversion import build_chatgpt_oauth_request_body
-from .credentials import ChatGPTOAuthError, load_chatgpt_oauth_credentials
+from .credentials import (
+    CODEX_OAUTH_ORIGINATOR,
+    ChatGPTOAuthError,
+    force_refresh_managed_chatgpt_oauth_credentials,
+    load_chatgpt_oauth_credentials,
+)
 from .streaming import ChatGPTOAuthStreamConverter, iter_chatgpt_oauth_sse_events
 
 CHATGPT_OAUTH_DEFAULT_BASE = "https://chatgpt.com/backend-api"
@@ -48,10 +54,9 @@ _CHATGPT_OAUTH_GPT_VERSION_RE = re.compile(r"^gpt-(\d+\.\d+)")
 
 
 def _user_agent() -> str:
-    """Return a User-Agent string matching the shape used by OpenCode."""
-    version = package_version()
+    """Return the Codex OAuth client identity used by the upstream provider."""
     return (
-        f"free-claude-code/{version} "
+        f"{CODEX_OAUTH_ORIGINATOR}/{package_version()} "
         f"({platform.system()} {platform.release()}; {platform.machine()})"
     )
 
@@ -80,7 +85,7 @@ def _build_headers(credentials: Any, session_id: str) -> dict[str, str]:
         "Content-Type": "application/json",
         "Accept": "text/event-stream",
         "OpenAI-Beta": "responses=experimental",
-        "originator": "free-claude-code",
+        "originator": CODEX_OAUTH_ORIGINATOR,
         "User-Agent": _user_agent(),
         "session-id": session_id,
     }
@@ -162,7 +167,7 @@ class ChatGPTOAuthProvider(BaseProvider):
         headers: dict[str, str],
         body: dict[str, Any],
     ) -> httpx.Response:
-        """Build and send a streaming POST, raising on HTTP errors.
+        """Build and send a streaming POST, preserving 401 for one refresh.
 
         ``httpx.AsyncClient.stream`` returns an async context manager, which is
         not awaitable and therefore cannot be passed directly to the retry
@@ -172,7 +177,7 @@ class ChatGPTOAuthProvider(BaseProvider):
         """
         request = self._client.build_request("POST", url, headers=headers, json=body)
         response = await self._client.send(request, stream=True)
-        if response.status_code >= 400:
+        if response.status_code >= 400 and response.status_code != 401:
             error_body = await response.aread()
             await response.aclose()
             error_text = error_body.decode("utf-8", errors="replace")
@@ -240,16 +245,54 @@ class ChatGPTOAuthProvider(BaseProvider):
 
             async with self._rate_limiter.concurrency_slot():
                 try:
+                    active_credentials = credentials
+                    active_headers = headers
+                    refreshed_after_unauthorized = False
                     response = await self._rate_limiter.execute_with_retry(
                         self._send_stream_request,
                         provider_failure_override=self._provider_failure_override,
                         url=url,
-                        headers=headers,
+                        headers=active_headers,
                         body=body,
                     )
+                    if (
+                        response.status_code == 401
+                        and active_credentials.source_name == "fcc-managed"
+                    ):
+                        await response.aclose()
+                        try:
+                            active_credentials = await asyncio.to_thread(
+                                force_refresh_managed_chatgpt_oauth_credentials
+                            )
+                        except ChatGPTOAuthError as exc:
+                            raise ApplicationUnavailableError(str(exc)) from exc
+                        active_headers = _build_headers(
+                            active_credentials, self._session_id
+                        )
+                        refreshed_after_unauthorized = True
+                        response = await self._rate_limiter.execute_with_retry(
+                            self._send_stream_request,
+                            provider_failure_override=self._provider_failure_override,
+                            url=url,
+                            headers=active_headers,
+                            body=body,
+                        )
                     try:
                         if response.status_code >= 400:
                             self._log_error(tag, req_tag, None, request_id)
+                            if (
+                                response.status_code == 401
+                                and refreshed_after_unauthorized
+                            ):
+                                raise ApplicationUnavailableError(
+                                    "ChatGPT OAuth authorization was rejected after "
+                                    "one refresh. Reconnect in Admin."
+                                )
+                            if response.status_code == 401:
+                                raise ApplicationUnavailableError(
+                                    "ChatGPT OAuth access token was rejected. "
+                                    "Sign in again in Admin."
+                                )
                             raise ApplicationUnavailableError(
                                 f"ChatGPT OAuth API error {response.status_code}"
                             )

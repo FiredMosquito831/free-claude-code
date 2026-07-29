@@ -5,3 +5,6 @@ HTTP_CONNECT_TIMEOUT_DEFAULT = 10.0
 
 # Anthropic Messages API default when the client omits max_tokens.
 ANTHROPIC_DEFAULT_MAX_OUTPUT_TOKENS = 81920
+
+# Non-secret marker stored in Settings when FCC owns renewable ChatGPT credentials.
+CHATGPT_OAUTH_MANAGED_CREDENTIAL_REFERENCE = "fcc-managed-oauth"

@@ -19,6 +19,7 @@ FAKE_TOKENS = {
     "access_token": "access_browser_1",
     "refresh_token": "refresh_browser_1",
     "id_token": "id_browser_1",
+    "account_id": "acct_browser_1",
     "expires_in": 3600,
 }
 
@@ -43,13 +44,15 @@ def test_build_authorize_url_contains_codex_params():
     assert params["response_type"] == ["code"]
     assert params["client_id"] == ["app_EMoamEEZ73f0CkXaXp7hrann"]
     assert params["redirect_uri"] == ["http://localhost:1455/auth/callback"]
-    assert params["scope"] == ["openid profile email offline_access"]
+    assert params["scope"] == [
+        "openid profile email offline_access api.connectors.read api.connectors.invoke"
+    ]
     assert params["code_challenge"] == ["chal"]
     assert params["code_challenge_method"] == ["S256"]
     assert params["id_token_add_organizations"] == ["true"]
     assert params["codex_cli_simplified_flow"] == ["true"]
     assert params["state"] == ["st"]
-    assert params["originator"] == ["free-claude-code"]
+    assert params["originator"] == ["codex_cli_rs"]
 
 
 @pytest.fixture
@@ -99,12 +102,15 @@ def test_browser_login_callback_completes_flow(callback_server, tmp_path):
     assert flow.tokens == FAKE_TOKENS
 
     status = browser_login.browser_login_status(
-        auth_path=tmp_path / ".codex" / "auth.json"
+        auth_path=tmp_path / ".fcc" / "auth" / "chatgpt-oauth.json"
     )
     assert status["status"] == "complete"
-    assert status["access_token"] == "access_browser_1"
+    assert status["credential_reference"] == "fcc-managed-oauth"
+    assert "access_token" not in status
 
-    saved = json.loads((tmp_path / ".codex" / "auth.json").read_text(encoding="utf-8"))
+    saved = json.loads(
+        (tmp_path / ".fcc" / "auth" / "chatgpt-oauth.json").read_text(encoding="utf-8")
+    )
     assert saved["tokens"]["access_token"] == "access_browser_1"
     assert saved["tokens"]["refresh_token"] == "refresh_browser_1"
     assert saved["tokens"]["id_token"] == "id_browser_1"
@@ -123,7 +129,7 @@ def test_browser_login_callback_rejects_bad_state(callback_server, tmp_path):
     assert "CSRF" in (flow.error or "")
 
     status = browser_login.browser_login_status(
-        auth_path=tmp_path / ".codex" / "auth.json"
+        auth_path=tmp_path / ".fcc" / "auth" / "chatgpt-oauth.json"
     )
     assert status["status"] == "error"
 
@@ -132,7 +138,11 @@ def test_browser_login_callback_surfaces_oauth_error(callback_server):
     flow = _begin_flow(callback_server)
 
     params = urllib.parse.urlencode(
-        {"error": "access_denied", "error_description": "User denied access"}
+        {
+            "error": "access_denied",
+            "error_description": "User denied access",
+            "state": flow.state,
+        }
     )
     port = callback_server.server_address[1]
     response = httpx.get(
@@ -140,9 +150,43 @@ def test_browser_login_callback_surfaces_oauth_error(callback_server):
         timeout=10.0,
     )
 
-    assert response.status_code == 200
+    assert response.status_code == 400
     assert "User denied access" in response.text
     assert flow.error == "User denied access"
+
+
+def test_browser_login_callback_validates_state_before_oauth_error(callback_server):
+    flow = _begin_flow(callback_server)
+    params = urllib.parse.urlencode(
+        {
+            "error": "access_denied",
+            "error_description": "forged",
+            "state": "forged-state",
+        }
+    )
+    port = callback_server.server_address[1]
+
+    response = httpx.get(
+        f"http://127.0.0.1:{port}/auth/callback?{params}",
+        timeout=10.0,
+    )
+
+    assert response.status_code == 400
+    assert "Invalid state" in response.text
+    assert flow.error == "Invalid state - potential CSRF attack"
+
+
+def test_callback_page_escapes_oauth_error_content():
+    body = browser_login._callback_page(
+        "<script>alert(1)</script>",
+        "<img src=x onerror=alert(2)>",
+        success=False,
+    ).decode()
+
+    assert "<script>alert(1)</script>" not in body
+    assert "<img src=x onerror=alert(2)>" not in body
+    assert "&lt;script&gt;" in body
+    assert "&lt;img" in body
 
 
 def test_start_browser_login_uses_server_port(callback_server):
@@ -153,3 +197,52 @@ def test_start_browser_login_uses_server_port(callback_server):
     port = callback_server.server_address[1]
     assert params["redirect_uri"] == [f"http://localhost:{port}/auth/callback"]
     assert callback_server.active_flow is not None
+
+
+def test_callback_server_tries_second_allowlisted_port(monkeypatch):
+    attempts: list[int] = []
+
+    class FakeServer:
+        def __init__(self, port):
+            attempts.append(port)
+            if port == 1455:
+                raise OSError("blocked")
+            self.server_address = ("127.0.0.1", port)
+            self.active_flow = None
+
+        def begin_flow(self, flow):
+            flow.port = self.server_address[1]
+            self.active_flow = flow
+
+        def serve_forever(self):
+            return
+
+    monkeypatch.setattr(browser_login, "_SERVER", None)
+    monkeypatch.setattr(browser_login, "_CallbackHTTPServer", FakeServer)
+    monkeypatch.setattr(browser_login, "_CallbackIPv6HTTPServer", FakeServer)
+
+    payload = browser_login.start_browser_login()
+
+    params = urllib.parse.parse_qs(
+        urllib.parse.urlparse(payload["authorize_url"]).query
+    )
+    assert attempts == [1455, 1455, 1457, 1457]
+    assert params["redirect_uri"] == ["http://localhost:1457/auth/callback"]
+
+
+def test_callback_server_reports_immediate_fallback_when_ports_are_blocked(
+    monkeypatch,
+):
+    class BlockedServer:
+        def __init__(self, port):
+            raise OSError(f"{port} blocked")
+
+    monkeypatch.setattr(browser_login, "_SERVER", None)
+    monkeypatch.setattr(browser_login, "_CallbackHTTPServer", BlockedServer)
+    monkeypatch.setattr(browser_login, "_CallbackIPv6HTTPServer", BlockedServer)
+
+    with pytest.raises(
+        browser_login.ChatGPTOAuthBrowserUnavailableError,
+        match="device-code login",
+    ):
+        browser_login.start_browser_login()

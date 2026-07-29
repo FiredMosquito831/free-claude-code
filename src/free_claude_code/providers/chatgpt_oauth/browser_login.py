@@ -9,38 +9,48 @@ callback completes the flow.
 
 import base64
 import hashlib
+import html
 import secrets
+import socket
 import string
 import sys
 import threading
 import time
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlencode, urlparse
 
 import httpx
 
+from free_claude_code.config.constants import (
+    CHATGPT_OAUTH_MANAGED_CREDENTIAL_REFERENCE,
+)
+
 from .credentials import (
     CODEX_OAUTH_CLIENT_ID,
+    CODEX_OAUTH_ORIGINATOR,
+    CODEX_OAUTH_SCOPE,
     CODEX_OAUTH_TOKEN_URL,
     extract_account_id_from_tokens,
 )
 from .oauth_login import (
     ChatGPTOAuthLoginError,
     ChatGPTOAuthLoginTimeoutError,
-    _write_codex_auth_file,
+    _write_managed_auth_file,
     perform_chatgpt_oauth_login,
 )
 
 CHATGPT_OAUTH_ISSUER = "https://auth.openai.com"
 CHATGPT_OAUTH_AUTHORIZE_URL = f"{CHATGPT_OAUTH_ISSUER}/oauth/authorize"
-OAUTH_CALLBACK_HOST = "127.0.0.1"
+OAUTH_CALLBACK_HOST = "localhost"
 OAUTH_CALLBACK_PORT = 1455
+OAUTH_CALLBACK_PORTS = (1455, 1457)
 OAUTH_CALLBACK_PATH = "/auth/callback"
 OAUTH_CANCEL_PATH = "/cancel"
-OAUTH_SCOPE = "openid profile email offline_access"
-OAUTH_ORIGINATOR = "free-claude-code"
+OAUTH_SCOPE = CODEX_OAUTH_SCOPE
+OAUTH_ORIGINATOR = CODEX_OAUTH_ORIGINATOR
 BROWSER_LOGIN_TIMEOUT_SECONDS = 300.0
 
 
@@ -84,11 +94,13 @@ def build_authorize_url(
 
 def _callback_page(title: str, message: str, *, success: bool) -> bytes:
     color = "#10a37f" if success else "#d93025"
+    safe_title = html.escape(title)
+    safe_message = html.escape(message)
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>{title}</title>
+<title>{safe_title}</title>
 <style>
   body {{ font-family: system-ui, sans-serif; display: flex; min-height: 100vh;
          align-items: center; justify-content: center; margin: 0;
@@ -100,8 +112,8 @@ def _callback_page(title: str, message: str, *, success: bool) -> bytes:
 </head>
 <body>
   <div class="card">
-    <h1>{title}</h1>
-    <p>{message}</p>
+    <h1>{safe_title}</h1>
+    <p>{safe_message}</p>
     <p>You can close this tab now.</p>
   </div>
   <script>setTimeout(function () {{ window.close(); }}, 3000);</script>
@@ -117,7 +129,10 @@ def _exchange_code_for_tokens(
     """Exchange an authorization code for OAuth tokens (PKCE)."""
     response = httpx.post(
         CODEX_OAUTH_TOKEN_URL,
-        headers={"Content-Type": "application/x-www-form-urlencoded"},
+        headers={
+            "Content-Type": "application/x-www-form-urlencoded",
+            "originator": CODEX_OAUTH_ORIGINATOR,
+        },
         data={
             "grant_type": "authorization_code",
             "code": code,
@@ -203,27 +218,25 @@ class _CallbackHandler(BaseHTTPRequestHandler):
             return
 
         params = parse_qs(parsed.query)
-        error = (params.get("error") or [None])[0]
-        if error is not None:
-            description = (params.get("error_description") or [error])[0]
-            if flow is not None:
-                flow.finish_error(description)
-            self._send_page(200, "Login failed", description, success=False)
-            return
-
-        code = (params.get("code") or [None])[0]
         state = (params.get("state") or [None])[0]
-        if not code:
-            message = "Missing authorization code"
+        if flow is None or state != flow.state:
+            message = "Invalid state - potential CSRF attack"
             if flow is not None:
                 flow.finish_error(message)
             self._send_page(400, "Login failed", message, success=False)
             return
 
-        if flow is None or state != flow.state:
-            message = "Invalid state - potential CSRF attack"
-            if flow is not None:
-                flow.finish_error(message)
+        error = (params.get("error") or [None])[0]
+        if error is not None:
+            description = (params.get("error_description") or [error])[0]
+            flow.finish_error(description)
+            self._send_page(400, "Login failed", description, success=False)
+            return
+
+        code = (params.get("code") or [None])[0]
+        if not code:
+            message = "Missing authorization code"
+            flow.finish_error(message)
             self._send_page(400, "Login failed", message, success=False)
             return
 
@@ -250,7 +263,7 @@ class _CallbackHTTPServer(ThreadingHTTPServer):
     def __init__(self, port: int = OAUTH_CALLBACK_PORT) -> None:
         self.active_flow: _BrowserLoginFlow | None = None
         self.flow_lock = threading.Lock()
-        super().__init__((OAUTH_CALLBACK_HOST, port), _CallbackHandler)
+        super().__init__(("127.0.0.1", port), _CallbackHandler)
 
     def begin_flow(self, flow: _BrowserLoginFlow) -> None:
         with self.flow_lock:
@@ -258,34 +271,73 @@ class _CallbackHTTPServer(ThreadingHTTPServer):
             self.active_flow = flow
 
 
+class _CallbackIPv6HTTPServer(_CallbackHTTPServer):
+    address_family = socket.AF_INET6
+
+    def __init__(self, port: int = OAUTH_CALLBACK_PORT) -> None:
+        self.active_flow = None
+        self.flow_lock = threading.Lock()
+        ThreadingHTTPServer.__init__(self, ("::1", port), _CallbackHandler)
+
+    def server_bind(self) -> None:
+        if hasattr(socket, "IPV6_V6ONLY"):
+            self.socket.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 1)
+        super().server_bind()
+
+
+class _CallbackServerGroup:
+    """One localhost callback port served on every available loopback family."""
+
+    def __init__(self, servers: list[_CallbackHTTPServer]) -> None:
+        self.servers = tuple(servers)
+
+    @property
+    def active_flow(self) -> _BrowserLoginFlow | None:
+        return self.servers[0].active_flow
+
+    def begin_flow(self, flow: _BrowserLoginFlow) -> None:
+        flow.port = self.servers[0].server_address[1]
+        for server in self.servers:
+            server.begin_flow(flow)
+
+    def start(self) -> None:
+        for index, server in enumerate(self.servers):
+            thread = threading.Thread(
+                target=server.serve_forever,
+                name=f"chatgpt-oauth-callback-{index}",
+                daemon=True,
+            )
+            thread.start()
+
+
 _SERVER_LOCK = threading.Lock()
-_SERVER: _CallbackHTTPServer | None = None
-_SERVER_THREAD: threading.Thread | None = None
+_SERVER: _CallbackServerGroup | _CallbackHTTPServer | None = None
 
 
-def _ensure_callback_server() -> _CallbackHTTPServer:
+def _ensure_callback_server() -> _CallbackServerGroup | _CallbackHTTPServer:
     """Start (or reuse) the local OAuth callback server."""
-    global _SERVER, _SERVER_THREAD
+    global _SERVER
     with _SERVER_LOCK:
         if _SERVER is not None:
             return _SERVER
-        try:
-            server = _CallbackHTTPServer()
-        except OSError as exc:
-            raise ChatGPTOAuthBrowserUnavailableError(
-                f"Could not start the local OAuth callback server on "
-                f"{OAUTH_CALLBACK_HOST}:{OAUTH_CALLBACK_PORT} ({exc}). "
-                "Close whatever is using that port or use the device login flow."
-            ) from exc
-        thread = threading.Thread(
-            target=server.serve_forever,
-            name="chatgpt-oauth-callback",
-            daemon=True,
+        errors: list[str] = []
+        for port in OAUTH_CALLBACK_PORTS:
+            servers: list[_CallbackHTTPServer] = []
+            for server_type in (_CallbackHTTPServer, _CallbackIPv6HTTPServer):
+                try:
+                    servers.append(server_type(port))
+                except OSError as exc:
+                    errors.append(f"{server_type.__name__}:{port}: {exc}")
+            if servers:
+                group = _CallbackServerGroup(servers)
+                group.start()
+                _SERVER = group
+                return group
+        detail = "; ".join(errors)
+        raise ChatGPTOAuthBrowserUnavailableError(
+            "Could not bind localhost callback ports 1455 or 1457. "
+            f"The device-code login will be used instead. ({detail})"
         )
-        thread.start()
-        _SERVER = server
-        _SERVER_THREAD = thread
-        return server
 
 
 def start_browser_login() -> dict[str, str]:
@@ -307,7 +359,7 @@ def start_browser_login() -> dict[str, str]:
 
 def browser_login_status(
     *,
-    auth_path: Any = None,
+    auth_path: Path | None = None,
 ) -> dict[str, Any]:
     """Return the status of the in-flight browser login.
 
@@ -333,17 +385,19 @@ def browser_login_status(
                 "status": "error",
                 "message": "Token exchange returned no access token",
             }
-        account_id = extract_account_id_from_tokens(
-            access_token=access_token,
-            id_token=tokens.get("id_token"),
-        )
+        account_id = tokens.get("account_id")
+        if not isinstance(account_id, str) or not account_id:
+            account_id = extract_account_id_from_tokens(
+                access_token=access_token,
+                id_token=tokens.get("id_token"),
+            )
         tokens["account_id"] = account_id
-        _write_codex_auth_file(tokens, auth_path=auth_path)
+        _write_managed_auth_file(tokens, auth_path=auth_path)
         return {
             "status": "complete",
-            "access_token": access_token,
+            "credential_reference": CHATGPT_OAUTH_MANAGED_CREDENTIAL_REFERENCE,
             "account_id": account_id,
-            "message": "Login successful. Tokens saved to ~/.codex/auth.json.",
+            "message": "Login successful. Credentials saved to FCC's private store.",
         }
 
     return {
@@ -355,7 +409,7 @@ def browser_login_status(
 def perform_browser_login(
     *,
     timeout_seconds: float = BROWSER_LOGIN_TIMEOUT_SECONDS,
-    auth_path: Any = None,
+    auth_path: Path | None = None,
 ) -> dict[str, Any]:
     """Run the full browser login: start server, open browser, wait, persist.
 
@@ -389,12 +443,14 @@ def perform_browser_login(
             "Token exchange did not return an access_token"
         )
 
-    account_id = extract_account_id_from_tokens(
-        access_token=access_token,
-        id_token=tokens.get("id_token"),
-    )
+    account_id = tokens.get("account_id")
+    if not isinstance(account_id, str) or not account_id:
+        account_id = extract_account_id_from_tokens(
+            access_token=access_token,
+            id_token=tokens.get("id_token"),
+        )
     tokens["account_id"] = account_id
-    path = _write_codex_auth_file(tokens, auth_path=auth_path)
+    path = _write_managed_auth_file(tokens, auth_path=auth_path)
     print(f"Tokens saved to: {path}", flush=True)
     if account_id:
         print(f"Account ID: {account_id}", flush=True)
