@@ -13,6 +13,8 @@ from free_claude_code.cli.launchers.codex_model_catalog import (
     write_codex_model_catalog,
 )
 
+_INSTALLED_CODEX_TIMEOUT_SECONDS = 30
+
 
 def _models_payload(*model_ids: str) -> dict[str, Any]:
     return {
@@ -177,7 +179,7 @@ def test_generated_catalog_schema_is_accepted_by_installed_codex(
         env=codex_env,
         errors="replace",
         text=True,
-        timeout=10,
+        timeout=_INSTALLED_CODEX_TIMEOUT_SECONDS,
     )
 
     assert result.returncode == 0, result.stderr

@@ -569,11 +569,17 @@ class _ChatGPTOAuthBrowserInitiateResponse(BaseModel):
 
 
 @router.post("/admin/api/chatgpt-oauth/browser/initiate")
-async def chatgpt_oauth_browser_initiate(request: Request):
+async def chatgpt_oauth_browser_initiate(
+    request: Request,
+    same_host_confirmed: bool = False,
+):
     """Start a browser-based ChatGPT OAuth login (PKCE + local callback)."""
     require_loopback_admin(request)
     try:
-        payload = await asyncio.to_thread(start_browser_login)
+        payload = await asyncio.to_thread(
+            start_browser_login,
+            allow_remote=same_host_confirmed,
+        )
     except ChatGPTOAuthBrowserUnavailableError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     return _ChatGPTOAuthBrowserInitiateResponse(**payload)

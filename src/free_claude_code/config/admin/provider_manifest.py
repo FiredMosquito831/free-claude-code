@@ -254,8 +254,8 @@ def _chatgpt_oauth_account_field_specs() -> tuple[dict[str, Any], ...]:
             "settings_attr": "chatgpt_oauth_account_id",
             "description": (
                 "Experimental/unsanctioned: ChatGPT account ID used for the "
-                "ChatGPT-Account-ID header. Optional when using a bridge; "
-                "auto-extracted from the access token JWT when empty."
+                "ChatGPT-Account-ID header. Leave empty when using FCC-managed "
+                "OAuth credentials so it is resolved from the current token."
             ),
         },
     )
@@ -269,9 +269,10 @@ def _chatgpt_oauth_login_field_specs() -> tuple[dict[str, Any], ...]:
             "section_id": "providers",
             "field_type": "oauth_login",
             "description": (
-                "Experimental/unsanctioned: click the button to log in to ChatGPT/Codex "
-                "via OAuth. Renewable credentials are saved in FCC's private auth store; "
-                "Codex CLI credentials are not modified. "
+                "Experimental/unsanctioned: device-code login works across WSL and "
+                "remote environments. Browser login is available only when the browser "
+                "and FCC share the same localhost. Renewable credentials are saved in "
+                "FCC's private auth store; Codex CLI credentials are not modified. "
                 "Use at your own risk; this is not an official OpenAI API product."
             ),
         },

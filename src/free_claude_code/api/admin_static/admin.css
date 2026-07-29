@@ -406,6 +406,7 @@ textarea:focus-visible,
 .oauth-login-control {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 12px;
   padding: 12px;
   background: var(--accent-muted);

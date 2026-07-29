@@ -13,6 +13,9 @@ from free_claude_code.config.admin.values import MASKED_SECRET
 from free_claude_code.config.server_urls import local_admin_url
 from free_claude_code.config.settings import Settings
 from free_claude_code.providers.base import BaseProvider, ProviderConfig
+from free_claude_code.providers.chatgpt_oauth.browser_login import (
+    ChatGPTOAuthBrowserUnavailableError,
+)
 from free_claude_code.providers.credential_rotation import CredentialRotationState
 from free_claude_code.providers.runtime.rotating import RotatingProvider
 from tests.api.support import create_test_app, provider_manager_for_app
@@ -51,6 +54,14 @@ def _clear_process_config(monkeypatch) -> None:
         "ZAI_BASE_URL",
         "CLAUDE_WORKSPACE",
         "CLAUDE_CLI_BIN",
+        "WSL_DISTRO_NAME",
+        "WSL_INTEROP",
+        "SSH_CONNECTION",
+        "SSH_CLIENT",
+        "SSH_TTY",
+        "CODESPACES",
+        "GITPOD_WORKSPACE_ID",
+        "REMOTE_CONTAINERS",
     ):
         monkeypatch.delenv(key, raising=False)
 
@@ -150,6 +161,19 @@ def test_admin_api_fetches_bypass_browser_cache():
     )
 
     assert 'cache: "no-store"' in script
+
+
+def test_admin_static_exposes_explicit_chatgpt_oauth_login_methods():
+    script = Path("src/free_claude_code/api/admin_static/admin.js").read_text(
+        encoding="utf-8"
+    )
+
+    assert '"Log in with device code"' in script
+    assert '"Browser login (same device)"' in script
+    assert "/chatgpt-oauth/browser/initiate?same_host_confirmed=true" in script
+    assert 'accountField.value = accountId || "";' in script
+    assert "startChatGPTOAuthDeviceLogin(deviceButton, loginButtons)" in script
+    assert "startChatGPTOAuthBrowserLogin(browserButton, loginButtons)" in script
 
 
 def test_admin_page_no_longer_renders_generated_env_panel(monkeypatch, tmp_path):
@@ -1236,6 +1260,50 @@ def test_admin_chatgpt_oauth_initiate_returns_device_code(monkeypatch, tmp_path)
     assert data["device_auth_id"] == "device_1"
     assert data["user_code"] == "ABCD-EFGH"
     assert "auth.openai.com/codex/device" in data["verification_url"]
+
+
+def test_admin_chatgpt_oauth_browser_initiate_uses_remote_guard_by_default(
+    monkeypatch,
+    tmp_path,
+):
+    _set_home(monkeypatch, tmp_path)
+    _clear_process_config(monkeypatch)
+    app = create_test_app()
+
+    with patch(
+        "free_claude_code.api.admin_routes.start_browser_login",
+        side_effect=ChatGPTOAuthBrowserUnavailableError("device login required"),
+    ) as start_login:
+        response = _local_client(app).post("/admin/api/chatgpt-oauth/browser/initiate")
+
+    assert response.status_code == 503
+    assert "device login required" in response.json()["detail"]
+    start_login.assert_called_once_with(allow_remote=False)
+
+
+def test_admin_chatgpt_oauth_browser_initiate_allows_explicit_same_host_override(
+    monkeypatch,
+    tmp_path,
+):
+    _set_home(monkeypatch, tmp_path)
+    _clear_process_config(monkeypatch)
+    app = create_test_app()
+    payload = {
+        "authorize_url": "https://auth.openai.com/oauth/authorize?state=safe",
+        "expires_in": "300",
+    }
+
+    with patch(
+        "free_claude_code.api.admin_routes.start_browser_login",
+        return_value=payload,
+    ) as start_login:
+        response = _local_client(app).post(
+            "/admin/api/chatgpt-oauth/browser/initiate?same_host_confirmed=true"
+        )
+
+    assert response.status_code == 200
+    assert response.json() == payload
+    start_login.assert_called_once_with(allow_remote=True)
 
 
 def test_admin_chatgpt_oauth_exchange_never_returns_bearer_token(monkeypatch, tmp_path):
