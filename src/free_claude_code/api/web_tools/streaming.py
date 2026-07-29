@@ -72,12 +72,15 @@ def _search_summary(
     """Rich per-result digest: optional provider answer lead, then numbered
     title (date) + url + excerpt capped at ``websearch_digest_chars``.
 
-    Legacy scrape items carry only title/url, which reproduces the old shape.
+    Sparse results still render with title and URL; provider metadata is optional.
     """
 
     if not results:
         return f"No web search results found for: {query}"
     lines = [f"Search results for: {query}"]
+    provider = results[0].get("provider", "")
+    if provider:
+        lines.append(f"Source provider: {provider}")
     answer = results[0].get("answer", "") if settings.websearch_digest_answer else ""
     if answer:
         lines.append(answer)

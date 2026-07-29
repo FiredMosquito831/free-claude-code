@@ -52,7 +52,7 @@ Run your coding agents with free, paid, or local models. Choose and validate pro
 | **Protocol fidelity** | Streaming, tool use, reasoning, and image input preserved across compatible models, with configurable reasoning control. |
 | **Key rotation** | Multi-key credential rotation for both model and web search providers: comma-separated keys, four rotation policies, health tracking with cooldowns/circuit breaking/lockout, and per-key admin management. |
 | **Web search** | Claude Code's official `web_search` server tool fulfilled at the proxy level by 14 search providers, with 50+ advanced per-provider options, rich result digests, and zero-config keyless fallback. |
-| **Request analytics** | Persistent SQLite log of every request, plus Requests and Web Search tabs in the Admin UI with filters, stats, and weekly/monthly rollups. |
+| **Observability** | Persistent local request and web-search analytics with consistent filters, range-aware rollups, provider/key health, latency, errors, known spend, export, and auto-refresh. |
 | **Editor integrations** | Claude Code and Codex in VS Code, or Claude Code through JetBrains ACP. |
 | **Messaging** | Optionally run Claude Code sessions through Discord or Telegram with voice-note transcription. |
 | **Security** | Optional token authentication for the local proxy. |
@@ -68,16 +68,16 @@ Everything is configured through the same `.env` file (see [.env.example](.env.e
 macOS/Linux:
 
 ```bash
-curl -fsSL "https://raw.githubusercontent.com/FiredMosquito831/free-claude-code/v4.11.2/scripts/install.sh" | sh
+curl -fsSL "https://raw.githubusercontent.com/FiredMosquito831/free-claude-code/v4.12.0/scripts/install.sh" | sh
 ```
 
 Windows PowerShell:
 
 ```powershell
-& ([scriptblock]::Create((irm "https://raw.githubusercontent.com/FiredMosquito831/free-claude-code/v4.11.2/scripts/install.ps1")))
+& ([scriptblock]::Create((irm "https://raw.githubusercontent.com/FiredMosquito831/free-claude-code/v4.12.0/scripts/install.ps1")))
 ```
 
-These commands are pinned to the verified `v4.11.2` fork release. Use the command published by a newer reviewed release when you choose to update. You can review the installers before running them: [install.sh](scripts/install.sh) and [install.ps1](scripts/install.ps1).
+These commands are pinned to the verified `v4.12.0` fork release. Use the command published by a newer reviewed release when you choose to update. You can review the installers before running them: [install.sh](scripts/install.sh) and [install.ps1](scripts/install.ps1).
 
 ### 2. Start The Server
 
@@ -315,25 +315,36 @@ FCC supports 14 search backends, resolved by `WEB_SEARCH_PROVIDER`:
 | SearchAPI.io | `SEARCHAPI_API_KEY` | 100 free one-time requests | [searchapi.io](https://www.searchapi.io/) |
 | SerpAPI | `SERPAPI_API_KEY` | 250 free searches/month | [serpapi.com/manage-api-key](https://serpapi.com/manage-api-key) |
 
-`WEB_SEARCH_PROVIDER` accepts `auto` (default), `off`, or one of the provider IDs `ddgs | ollama | exa | tavily | brave | searxng | jina | serper | firecrawl | linkup | perplexity | parallel | searchapi | serpapi`:
+`WEB_SEARCH_PROVIDER` accepts `auto` (default), `off`, `disabled`, or one of the provider IDs `ddgs | ollama | exa | tavily | brave | searxng | jina | serper | firecrawl | linkup | perplexity | parallel | searchapi | serpapi`:
 
 - **`auto`** picks the first configured provider in catalog order; with no keys set it falls back to keyless `ddgs`, so search works **zero-config out of the box**.
-- **`off`** disables the provider system and uses the legacy DuckDuckGo HTML scrape.
-- An explicit ID pins that provider.
+- **`off`** preserves the legacy DuckDuckGo HTML scraper without using the provider registry.
+- **`disabled`** rejects web searches without making an outbound search request.
+- An explicit ID pins that provider and is strict by default: missing credentials or upstream failure are surfaced instead of silently changing providers.
 
-Full fallback chain: **explicitly configured provider → auto-resolved configured provider → `ddgs` (keyless) → legacy scrape (`off`)**.
+`WEB_SEARCH_FALLBACK_POLICY` controls the route after the selected provider:
+
+| Policy | Behavior |
+| --- | --- |
+| `auto` (default) | `WEB_SEARCH_PROVIDER=auto` uses selected → DDGS → legacy; a named provider is strict |
+| `none` | Selected provider only |
+| `ddgs` | Selected provider → DDGS |
+| `legacy` | Selected provider → DDGS → legacy scraper |
+
+Configuration failures such as a missing API key always fail visibly. DDGS is never attempted twice, and the rich digest identifies the provider that ultimately produced the results.
 
 Minimal `.env` example (two keys with round-robin, see below):
 
 ```bash
 WEB_SEARCH_PROVIDER=auto
+WEB_SEARCH_FALLBACK_POLICY=auto
 TAVILY_API_KEY="tvly-key1,tvly-key2"
 TAVILY_API_KEY_ROTATION=round_robin
 # Optional outbound proxy for web search (http/socks5):
 WEBSEARCH_PROXY=""
 ```
 
-You can also configure everything from **Admin UI → Web Search**: provider cards show free-tier notes and key status, each card has an **Advanced options** drawer, and an analytics view with a weekly/monthly toggle shows usage per provider and per key. Deep per-provider pricing, free-tier details, and a capability matrix live in [research/web-search-providers.md](research/web-search-providers.md) and [research/web-search-advanced.md](research/web-search-advanced.md).
+You can also configure everything from **Admin UI → Web Search**. The route summary shows the complete configured chain and the last observed terminal route; the effective card is highlighted, providers can be selected directly, and each card exposes testing, key health, rotation, and advanced options. Deep per-provider pricing, free-tier details, and a capability matrix live in [research/web-search-providers.md](research/web-search-providers.md) and [research/web-search-advanced.md](research/web-search-advanced.md).
 
 ### Multi-key rotation (web search keys)
 
@@ -379,7 +390,9 @@ WEBSEARCH_DIGEST_ANSWER=true   # include the provider answer lead
 
 ### Web search analytics
 
-Every search is recorded (non-blocking, background-writer SQLite at `~/.fcc/logs/websearch.db`) with provider, key label, query (256 chars), result count, duration, status, and cost where known. The Admin UI Web Search tab aggregates this into weekly/monthly rollups per provider and per key, plus top errors:
+Every logical search and each provider attempt are recorded by a non-blocking background writer in `~/.fcc/logs/websearch.db`. Route records include a correlation ID, primary and terminal providers, the attempted chain, fallback use, final status, end-to-end latency, results, and known cost; attempt records retain provider, key label, query (256 chars), result count, duration, status, and error details. Legacy scraper outcomes are included as terminal route results.
+
+The Admin UI keeps the two levels explicit: top cards and the main trend chart report logical searches, route success/fallback rate, average attempts, and end-to-end latency, while provider/key tables and recent rows report individual attempts. It also provides independent time-range and UTC bucket controls (hour/day/ISO week/month), case-insensitive provider/status/query filtering, terminal-provider outcomes, route and attempt errors, known spend, JSON export, dropped-writer telemetry, and stale-data warnings. Existing pre-4.12 attempt history remains visible, but logical-route metrics begin with 4.12:
 
 ```bash
 WEBSEARCH_LOG_ENABLED=true
@@ -394,13 +407,13 @@ The Admin UI (`http://127.0.0.1:8082/admin`, local-only) is the control center f
 
 - **Providers** — API keys, model catalog, **Validate** / **Apply**, per-provider **Test**, and **Manage keys** for multi-key rotation state (per-key health/usage, key reset).
 - **Model Config** — the `MODEL` picker, model-tier routing (`MODEL_FABLE` / `MODEL_OPUS` / `MODEL_SONNET` / `MODEL_HAIKU`), and reasoning control.
-- **Web Search** — provider cards with free-tier notes and key status, per-card **Advanced options** drawers, and weekly/monthly analytics per provider and per key.
-- **Requests** — the full request analytics log (see below).
+- **Web Search** — configured and last-observed route summaries, strict/fallback policy, provider cards, key health, advanced options, and separate route/attempt analytics.
+- **Analytics** — the full model-request observability dashboard (see below).
 - **Messaging** — Discord/Telegram bot and voice-note settings.
 
 ### Request Analytics
 
-FCC keeps a persistent log of every completed request (non-blocking background writer, SQLite at `~/.fcc/logs/requests.db`) and surfaces it in **Admin UI → Requests**. Each record captures endpoint/protocol, requested and resolved model, provider, stream flag, input/output text (capped at 50k chars) with SHA-256 hashes and lengths, reasoning and params, token counts, TTFT and duration, status (success/error/cancelled), and error details. The tab offers search, filters (provider/model/status/endpoint/time range), per-request detail views, aggregate stats (totals, error rate, p50/p95 latency, per-provider and per-model breakdowns, top errors, hourly/daily series), and a clear-all action (`/admin/api/requests*` endpoints back it).
+FCC keeps a persistent log of every completed request (non-blocking background writer, SQLite at `~/.fcc/logs/requests.db`) and surfaces it in **Admin UI → Analytics**. Each record captures endpoint/protocol, requested and resolved model, provider, stream flag, input/output text (capped at 50k chars) with SHA-256 hashes and lengths, reasoning and params, token counts, TTFT and duration, status (success/error/cancelled), and error details. Every filter (provider/model/status/endpoint/search/time range) applies consistently to metric cards, linearly interpolated p50/p95 latency, provider/model breakdowns, top errors, charts, and the request table. The dashboard adds race-safe auto-refresh, page-size controls, accessible chart legends, provider performance, JSON export, keyboard-friendly request details, explicit unavailable/stale states, and an unambiguous clear-all action (`/admin/api/requests*` endpoints back it).
 
 ```bash
 REQUEST_LOG_ENABLED=true
@@ -589,32 +602,32 @@ macOS/Linux:
 
 ```bash
 # NVIDIA NIM transcription
-curl -fsSL "https://raw.githubusercontent.com/FiredMosquito831/free-claude-code/v4.11.2/scripts/install.sh" | sh -s -- --voice-nim
+curl -fsSL "https://raw.githubusercontent.com/FiredMosquito831/free-claude-code/v4.12.0/scripts/install.sh" | sh -s -- --voice-nim
 
 # Local Whisper on CPU or CUDA
-curl -fsSL "https://raw.githubusercontent.com/FiredMosquito831/free-claude-code/v4.11.2/scripts/install.sh" | sh -s -- --voice-local
+curl -fsSL "https://raw.githubusercontent.com/FiredMosquito831/free-claude-code/v4.12.0/scripts/install.sh" | sh -s -- --voice-local
 
 # Both backends
-curl -fsSL "https://raw.githubusercontent.com/FiredMosquito831/free-claude-code/v4.11.2/scripts/install.sh" | sh -s -- --voice-all
+curl -fsSL "https://raw.githubusercontent.com/FiredMosquito831/free-claude-code/v4.12.0/scripts/install.sh" | sh -s -- --voice-all
 
 # Local Whisper with the CUDA 13.0 PyTorch backend
-curl -fsSL "https://raw.githubusercontent.com/FiredMosquito831/free-claude-code/v4.11.2/scripts/install.sh" | sh -s -- --voice-local --torch-backend cu130
+curl -fsSL "https://raw.githubusercontent.com/FiredMosquito831/free-claude-code/v4.12.0/scripts/install.sh" | sh -s -- --voice-local --torch-backend cu130
 ```
 
 Windows PowerShell:
 
 ```powershell
 # NVIDIA NIM transcription
-& ([scriptblock]::Create((irm "https://raw.githubusercontent.com/FiredMosquito831/free-claude-code/v4.11.2/scripts/install.ps1"))) -VoiceNim
+& ([scriptblock]::Create((irm "https://raw.githubusercontent.com/FiredMosquito831/free-claude-code/v4.12.0/scripts/install.ps1"))) -VoiceNim
 
 # Local Whisper on CPU or CUDA
-& ([scriptblock]::Create((irm "https://raw.githubusercontent.com/FiredMosquito831/free-claude-code/v4.11.2/scripts/install.ps1"))) -VoiceLocal
+& ([scriptblock]::Create((irm "https://raw.githubusercontent.com/FiredMosquito831/free-claude-code/v4.12.0/scripts/install.ps1"))) -VoiceLocal
 
 # Both backends
-& ([scriptblock]::Create((irm "https://raw.githubusercontent.com/FiredMosquito831/free-claude-code/v4.11.2/scripts/install.ps1"))) -VoiceAll
+& ([scriptblock]::Create((irm "https://raw.githubusercontent.com/FiredMosquito831/free-claude-code/v4.12.0/scripts/install.ps1"))) -VoiceAll
 
 # Local Whisper with the CUDA 13.0 PyTorch backend
-& ([scriptblock]::Create((irm "https://raw.githubusercontent.com/FiredMosquito831/free-claude-code/v4.11.2/scripts/install.ps1"))) -VoiceLocal -TorchBackend cu130
+& ([scriptblock]::Create((irm "https://raw.githubusercontent.com/FiredMosquito831/free-claude-code/v4.12.0/scripts/install.ps1"))) -VoiceLocal -TorchBackend cu130
 ```
 
 Restart `fcc-server`. In **Admin UI → Messaging → Voice**, enable voice notes, select `cpu`, `cuda`, or `nvidia_nim`, and choose the Whisper model. Local gated models need `HUGGINGFACE_API_KEY`; NVIDIA NIM transcription needs `NVIDIA_NIM_API_KEY`.

@@ -19,6 +19,7 @@ class TestWebSearchSettings:
         monkeypatch.setitem(Settings.model_config, "env_file", ())
         settings = Settings()
         assert settings.web_search_provider == "auto"
+        assert settings.web_search_fallback_policy == "auto"
         assert settings.exa_api_key is None
         assert settings.searxng_base_url is None
         assert settings.websearch_log_enabled is True
@@ -63,7 +64,8 @@ class TestWebSearchSettings:
         assert settings.searxng_base_url == "https://sx.test"
 
     @pytest.mark.parametrize(
-        "value", ["auto", "off", *WEBSEARCH_CATALOG.keys(), "AUTO", " Exa "]
+        "value",
+        ["auto", "off", "disabled", *WEBSEARCH_CATALOG.keys(), "AUTO", " Exa "],
     )
     def test_web_search_provider_valid_values(self, monkeypatch, value: str) -> None:
         settings = _settings(monkeypatch, WEB_SEARCH_PROVIDER=value)
@@ -73,6 +75,28 @@ class TestWebSearchSettings:
         monkeypatch.setitem(Settings.model_config, "env_file", ())
         monkeypatch.setenv("WEB_SEARCH_PROVIDER", "google")
         with pytest.raises(ValidationError, match="web_search_provider"):
+            Settings()
+
+    @pytest.mark.parametrize(
+        ("value", "expected"),
+        [
+            ("auto", "auto"),
+            ("none", "none"),
+            ("ddgs", "ddgs"),
+            ("legacy", "legacy"),
+            (" LEGACY ", "legacy"),
+        ],
+    )
+    def test_web_search_fallback_policy_valid_values(
+        self, monkeypatch, value: str, expected: str
+    ) -> None:
+        settings = _settings(monkeypatch, WEB_SEARCH_FALLBACK_POLICY=value)
+        assert settings.web_search_fallback_policy == expected
+
+    def test_web_search_fallback_policy_invalid_rejected(self, monkeypatch) -> None:
+        monkeypatch.setitem(Settings.model_config, "env_file", ())
+        monkeypatch.setenv("WEB_SEARCH_FALLBACK_POLICY", "always")
+        with pytest.raises(ValidationError, match="web_search_fallback_policy"):
             Settings()
 
     def test_log_settings_load(self, monkeypatch) -> None:

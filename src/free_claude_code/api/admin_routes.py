@@ -684,6 +684,11 @@ def _request_log_store_or_none(
     return store_from_settings(settings)
 
 
+def _validate_request_log_status(status: str | None) -> None:
+    if status is not None and status not in {"success", "error", "cancelled"}:
+        raise HTTPException(status_code=422, detail="Invalid status filter")
+
+
 @router.get("/admin/api/requests")
 async def list_request_log(
     request: Request,
@@ -709,8 +714,7 @@ async def list_request_log(
             "limit": limit,
             "offset": offset,
         }
-    if status is not None and status not in {"success", "error", "cancelled"}:
-        raise HTTPException(status_code=422, detail="Invalid status filter")
+    _validate_request_log_status(status)
     rows, total = store.list_requests(
         limit=limit,
         offset=offset,
@@ -735,8 +739,13 @@ async def list_request_log(
 @router.get("/admin/api/requests/stats")
 async def request_log_stats(
     request: Request,
+    provider: str | None = None,
+    model: str | None = None,
+    status: str | None = None,
+    endpoint: str | None = None,
     since: float | None = None,
     until: float | None = None,
+    q: str | None = None,
     settings: Settings = Depends(get_settings),
 ):
     """Aggregate request analytics over an optional epoch-second window."""
@@ -744,7 +753,16 @@ async def request_log_stats(
     store = _request_log_store_or_none(settings)
     if store is None:
         return {"enabled": False}
-    result = store.stats(since=since, until=until)
+    _validate_request_log_status(status)
+    result = store.stats(
+        provider=provider,
+        model=model,
+        status=status,
+        endpoint=endpoint,
+        since=since,
+        until=until,
+        q=q,
+    )
     result["enabled"] = True
     result["capture_bodies"] = bool(settings.request_log_capture_bodies)
     return result

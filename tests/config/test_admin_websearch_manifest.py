@@ -86,6 +86,7 @@ def test_web_search_provider_select_lists_catalog_in_order() -> None:
     assert _option_values(field) == (
         "auto",
         "off",
+        "disabled",
         *SUPPORTED_WEBSEARCH_PROVIDER_IDS,
     )
     labels = {
@@ -95,6 +96,17 @@ def test_web_search_provider_select_lists_catalog_in_order() -> None:
     }
     for provider_id, descriptor in WEBSEARCH_CATALOG.items():
         assert labels[provider_id] == descriptor.display_name
+
+
+def test_web_search_fallback_policy_is_explicit() -> None:
+    field = FIELD_BY_KEY["WEB_SEARCH_FALLBACK_POLICY"]
+    assert field.section_id == "websearch"
+    assert field.field_type == "select"
+    assert field.settings_attr == "web_search_fallback_policy"
+    assert field.default == "auto"
+    assert _option_values(field) == ("auto", "none", "ddgs", "legacy")
+    assert "named provider" in field.description
+    assert "Missing credentials always fail visibly" in field.description
 
 
 def test_secret_fields_generated_for_every_keyed_catalog_provider() -> None:
@@ -149,6 +161,7 @@ def test_websearch_field_specs_cover_section_fields() -> None:
     keys = {spec["key"] for spec in websearch_field_specs()}
     expected = {
         "WEB_SEARCH_PROVIDER",
+        "WEB_SEARCH_FALLBACK_POLICY",
         "SEARXNG_BASE_URL",
         *(
             descriptor.credential_env

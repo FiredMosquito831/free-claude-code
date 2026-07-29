@@ -11,9 +11,14 @@ from free_claude_code.websearch.analytics import (
     default_websearch_db_path,
     get_shared_store,
     record_search,
+    record_search_route,
     reset_analytics_state,
 )
-from free_claude_code.websearch.registry import SearchOutcome, search
+from free_claude_code.websearch.registry import (
+    SearchOutcome,
+    SearchRouteOutcome,
+    search,
+)
 from tests.websearch.support import StubWebSearchProvider, build_config
 
 _BASE_TS = datetime(2026, 6, 15, 12, 0, tzinfo=UTC).timestamp()
@@ -36,6 +41,8 @@ def _outcome(
     error_kind: str | None = None,
     error_message: str | None = None,
     cost_usd: float | None = None,
+    route_id: str | None = None,
+    attempt_number: int = 1,
 ) -> SearchOutcome:
     return SearchOutcome(
         ts_epoch=ts_epoch,
@@ -50,6 +57,44 @@ def _outcome(
         error_kind=error_kind,
         error_message=error_message,
         cost_usd=cost_usd,
+        route_id=route_id,
+        attempt_number=attempt_number,
+    )
+
+
+def _route_outcome(
+    *,
+    route_id: str = "route-1",
+    ts_epoch: float = _BASE_TS,
+    query: str = "query",
+    primary_provider: str = "exa",
+    terminal_provider: str = "exa",
+    provider_path: tuple[str, ...] = ("exa",),
+    attempt_count: int = 1,
+    fallback_used: bool = False,
+    duration_ms: float = 25.0,
+    status: str = "success",
+    results_count: int = 3,
+    cost_usd: float | None = None,
+    error_kind: str | None = None,
+    error_message: str | None = None,
+) -> SearchRouteOutcome:
+    return SearchRouteOutcome(
+        route_id=route_id,
+        ts_epoch=ts_epoch,
+        ts_iso=datetime.fromtimestamp(ts_epoch, tz=UTC).isoformat(),
+        query=query,
+        primary_provider=primary_provider,
+        terminal_provider=terminal_provider,
+        provider_path=provider_path,
+        attempt_count=attempt_count,
+        fallback_used=fallback_used,
+        duration_ms=duration_ms,
+        status=status,
+        results_count=results_count,
+        cost_usd=cost_usd,
+        error_kind=error_kind,
+        error_message=error_message,
     )
 
 
@@ -153,6 +198,15 @@ class TestRoundTrip:
         assert row["status"] == "success"
         assert row["results_count"] == 1
 
+    def test_attempt_correlation_fields_round_trip(self, store) -> None:
+        store.record(_outcome(route_id="route-123", attempt_number=2))
+        store.flush()
+
+        (row,) = store.requests()["items"]
+
+        assert row["route_id"] == "route-123"
+        assert row["attempt_number"] == 2
+
 
 class TestRetention:
     def test_prunes_to_max_rows_keeping_newest(self, tmp_path) -> None:
@@ -237,6 +291,32 @@ class TestStats:
             },
         ]
 
+    @pytest.mark.parametrize(
+        ("period", "expected_buckets"),
+        (
+            ("hourly", ["2026-06-15T12:00", "2026-06-16T13:00"]),
+            ("daily", ["2026-06-15", "2026-06-16"]),
+        ),
+    )
+    def test_hourly_and_daily_series_buckets(
+        self, store, period, expected_buckets
+    ) -> None:
+        store.record(
+            _outcome(ts_epoch=_ts("2026-06-15T12:15:00+00:00"), provider="exa")
+        )
+        store.record(
+            _outcome(ts_epoch=_ts("2026-06-15T12:45:00+00:00"), provider="exa")
+        )
+        store.record(
+            _outcome(ts_epoch=_ts("2026-06-16T13:00:00+00:00"), provider="exa")
+        )
+        store.flush()
+
+        stats = store.stats(period)
+
+        assert [entry["bucket"] for entry in stats["series"]] == expected_buckets
+        assert [entry["requests"] for entry in stats["series"]] == [2, 1]
+
     def test_by_provider_and_totals_aggregation(self, store) -> None:
         store.record(_outcome(provider="exa", duration_ms=10.0, results_count=4))
         store.record(
@@ -279,6 +359,131 @@ class TestStats:
         assert tavily["cost_usd"] == 0.01
         assert stats["top_errors"] == [
             {"error_kind": "upstream", "error_message": "boom", "count": 1}
+        ]
+
+    def test_filters_apply_to_every_rollup_and_report_bounds(self, store) -> None:
+        since = _ts("2026-06-15T12:00:00+00:00")
+        until = _ts("2026-06-15T13:00:00+00:00")
+        store.record(
+            _outcome(
+                ts_epoch=since + 10,
+                provider="exa",
+                key_label="exak…selected",
+                query="needle selected",
+                results_count=0,
+                duration_ms=25.0,
+                status="error",
+                error_kind="selected_error",
+                error_message="selected failure",
+            )
+        )
+        store.record(
+            _outcome(
+                ts_epoch=since + 20,
+                provider="exa",
+                query="different query",
+                results_count=0,
+                status="error",
+                error_kind="wrong_query",
+                error_message="excluded",
+            )
+        )
+        store.record(
+            _outcome(
+                ts_epoch=since + 30,
+                provider="exa",
+                query="needle success",
+                status="success",
+            )
+        )
+        store.record(
+            _outcome(
+                ts_epoch=since + 40,
+                provider="tavily",
+                query="needle other provider",
+                results_count=0,
+                status="error",
+                error_kind="wrong_provider",
+                error_message="excluded",
+            )
+        )
+        store.record(
+            _outcome(
+                ts_epoch=until + 1,
+                provider="exa",
+                query="needle outside window",
+                results_count=0,
+                status="error",
+                error_kind="outside_window",
+                error_message="excluded",
+            )
+        )
+        store.flush()
+
+        stats = store.stats(
+            "hourly",
+            provider="exa",
+            status="error",
+            q="needle",
+            since_epoch=since,
+            until_epoch=until,
+        )
+
+        assert stats["filters"] == {
+            "provider": "exa",
+            "status": "error",
+            "q": "needle",
+            "since_epoch": since,
+            "until_epoch": until,
+        }
+        assert stats["window"] == {
+            "since_epoch": since,
+            "until_epoch": until,
+        }
+        assert stats["dropped_records"] == 0
+        assert stats["totals"] == {
+            "requests": 1,
+            "successes": 0,
+            "errors": 1,
+            "avg_duration_ms": 25.0,
+            "results": 0,
+            "cost_usd": None,
+        }
+        assert stats["by_provider"] == [
+            {
+                "provider": "exa",
+                "requests": 1,
+                "errors": 1,
+                "avg_duration_ms": 25.0,
+                "results": 0,
+                "cost_usd": None,
+            }
+        ]
+        assert stats["by_key"] == [
+            {
+                "provider": "exa",
+                "key_label": "exak…selected",
+                "requests": 1,
+                "errors": 1,
+                "avg_duration_ms": 25.0,
+                "results": 0,
+            }
+        ]
+        assert stats["top_errors"] == [
+            {
+                "error_kind": "selected_error",
+                "error_message": "selected failure",
+                "count": 1,
+            }
+        ]
+        assert stats["series"] == [
+            {
+                "bucket": "2026-06-15T12:00",
+                "provider": "exa",
+                "requests": 1,
+                "errors": 1,
+                "results": 0,
+            }
         ]
 
     def test_by_key_groups_provider_and_key_label(self, store) -> None:
@@ -329,26 +534,180 @@ class TestStats:
     def test_stats_on_empty_database(self, store) -> None:
         stats = store.stats()
 
-        assert stats == {
-            "period": "weekly",
-            "totals": {
-                "requests": 0,
-                "successes": 0,
-                "errors": 0,
-                "avg_duration_ms": None,
-                "results": 0,
-                "cost_usd": None,
-            },
-            "by_provider": [],
-            "by_key": [],
-            "series": [],
-            "top_errors": [],
+        expected_attempt_totals = {
+            "requests": 0,
+            "successes": 0,
+            "errors": 0,
+            "avg_duration_ms": None,
+            "results": 0,
+            "cost_usd": None,
         }
+        assert stats["period"] == "weekly"
+        assert stats["window"] == {"since_epoch": None, "until_epoch": None}
+        assert stats["totals"] == expected_attempt_totals
+        assert stats["attempts"]["totals"] == expected_attempt_totals
+        assert stats["routes"]["totals"] == {
+            "searches": 0,
+            "successes": 0,
+            "errors": 0,
+            "fallbacks": 0,
+            "fallback_rate": 0.0,
+            "avg_attempts": None,
+            "avg_duration_ms": None,
+            "results": 0,
+            "cost_usd": None,
+        }
+        assert stats["routes"]["series"] == []
+        assert stats["last_route"] is None
         assert store.requests() == {"total": 0, "limit": 50, "offset": 0, "items": []}
 
     def test_unknown_period_rejected(self, store) -> None:
         with pytest.raises(ValueError, match="unknown stats period"):
-            store.stats("daily")
+            store.stats("yearly")
+
+
+class TestRouteStats:
+    def test_fallback_attempts_are_one_logical_search(self, store) -> None:
+        store.record(
+            _outcome(
+                route_id="route-fallback",
+                attempt_number=1,
+                provider="exa",
+                status="error",
+                results_count=0,
+                error_kind="upstream",
+                error_message="primary failed",
+            )
+        )
+        store.record(
+            _outcome(
+                route_id="route-fallback",
+                attempt_number=2,
+                provider="ddgs",
+                status="success",
+                results_count=4,
+            )
+        )
+        store.record_route(
+            _route_outcome(
+                route_id="route-fallback",
+                primary_provider="exa",
+                terminal_provider="ddgs",
+                provider_path=("exa", "ddgs"),
+                attempt_count=2,
+                fallback_used=True,
+                duration_ms=50.0,
+                results_count=4,
+            )
+        )
+        store.flush()
+
+        stats = store.stats("daily")
+
+        assert stats["attempts"]["totals"]["requests"] == 2
+        assert stats["attempts"]["totals"]["errors"] == 1
+        assert stats["routes"]["totals"] == {
+            "searches": 1,
+            "successes": 1,
+            "errors": 0,
+            "fallbacks": 1,
+            "fallback_rate": 1.0,
+            "avg_attempts": 2.0,
+            "avg_duration_ms": 50.0,
+            "results": 4,
+            "cost_usd": None,
+        }
+        assert stats["routes"]["series"] == [
+            {
+                "bucket": "2026-06-15",
+                "provider": "ddgs",
+                "searches": 1,
+                "errors": 0,
+                "fallbacks": 1,
+                "results": 4,
+            }
+        ]
+        assert stats["routes"]["by_primary_provider"][0]["provider"] == "exa"
+        assert stats["routes"]["by_primary_provider"][0]["searches"] == 1
+        assert stats["routes"]["by_terminal_provider"][0]["provider"] == "ddgs"
+        assert stats["routes"]["by_terminal_provider"][0]["fallbacks"] == 1
+        assert stats["last_route"]["route_id"] == "route-fallback"
+        assert stats["last_route"]["providers"] == ["exa", "ddgs"]
+        assert stats["last_route"]["fallback_used"] is True
+
+    @pytest.mark.parametrize("provider", ("exa", "ddgs"))
+    def test_provider_filter_matches_any_provider_in_route(
+        self, store, provider
+    ) -> None:
+        store.record_route(
+            _route_outcome(
+                route_id="route-chain",
+                primary_provider="exa",
+                terminal_provider="ddgs",
+                provider_path=("exa", "ddgs"),
+                attempt_count=2,
+                fallback_used=True,
+            )
+        )
+        store.record_route(
+            _route_outcome(
+                route_id="route-other",
+                primary_provider="tavily",
+                terminal_provider="tavily",
+                provider_path=("tavily",),
+            )
+        )
+        store.flush()
+
+        routes = store.stats(provider=provider)["routes"]
+
+        assert routes["totals"]["searches"] == 1
+        assert routes["last_route"]["route_id"] == "route-chain"
+
+    def test_route_filters_are_case_insensitive_and_isolate_errors(self, store) -> None:
+        store.record_route(
+            _route_outcome(
+                route_id="selected",
+                query="Needle Query",
+                status="error",
+                results_count=0,
+                error_kind="quota",
+                error_message="selected failure",
+            )
+        )
+        store.record_route(
+            _route_outcome(
+                route_id="wrong-query",
+                query="different",
+                status="error",
+                results_count=0,
+                error_kind="upstream",
+                error_message="excluded",
+            )
+        )
+        store.record_route(
+            _route_outcome(route_id="wrong-status", query="NEEDLE success")
+        )
+        store.flush()
+
+        routes = store.stats(status="error", q="needle")["routes"]
+
+        assert routes["totals"]["searches"] == 1
+        assert routes["top_errors"] == [
+            {
+                "error_kind": "quota",
+                "error_message": "selected failure",
+                "count": 1,
+            }
+        ]
+        assert routes["last_route"]["route_id"] == "selected"
+
+    def test_attempt_query_filter_is_case_insensitive(self, store) -> None:
+        store.record(_outcome(query="Mixed CASE Query"))
+        store.flush()
+
+        assert store.requests(q="case")["total"] == 1
+        assert store.stats(q="mixed case")["attempts"]["totals"]["requests"] == 1
 
 
 class TestRecordSearch:
@@ -361,12 +720,14 @@ class TestRecordSearch:
 
     def test_enabled_logging_persists_to_default_path(self) -> None:
         record_search(_outcome(query="shared query"))
+        record_search_route(_route_outcome(query="shared query"))
 
         store = get_shared_store()
         store.flush()
         page = store.requests()
         assert page["total"] == 1
         assert page["items"][0]["query"] == "shared query"
+        assert store.stats()["routes"]["totals"]["searches"] == 1
         assert default_websearch_db_path().is_file()
         assert default_websearch_db_path().parent.name == "logs"
         assert default_websearch_db_path().parent.parent.name == ".fcc"
@@ -388,6 +749,87 @@ class TestRecordSearch:
         page = store.requests(limit=500)
         assert page["total"] == 8
         assert page["items"][0]["query"] == "bulk 104"
+
+
+class TestSchemaMigration:
+    def test_existing_attempt_database_is_migrated_without_data_loss(
+        self, tmp_path
+    ) -> None:
+        db_path = tmp_path / "legacy-websearch.db"
+        connection = sqlite3.connect(db_path)
+        connection.executescript(
+            """
+            CREATE TABLE search_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ts_epoch REAL NOT NULL,
+                ts_iso TEXT NOT NULL,
+                provider TEXT NOT NULL,
+                key_index INTEGER NOT NULL,
+                key_label TEXT NOT NULL,
+                query TEXT NOT NULL,
+                results_count INTEGER NOT NULL,
+                duration_ms REAL NOT NULL,
+                status TEXT NOT NULL,
+                error_kind TEXT,
+                error_message TEXT,
+                cost_usd REAL
+            );
+            """
+        )
+        connection.execute(
+            "INSERT INTO search_log ("
+            "ts_epoch, ts_iso, provider, key_index, key_label, query,"
+            "results_count, duration_ms, status, error_kind, error_message, cost_usd"
+            ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                _BASE_TS,
+                datetime.fromtimestamp(_BASE_TS, tz=UTC).isoformat(),
+                "exa",
+                0,
+                "",
+                "historical",
+                1,
+                10.0,
+                "success",
+                None,
+                None,
+                None,
+            ),
+        )
+        connection.commit()
+        connection.close()
+
+        store = WebSearchLogStore(db_path)
+        store.record(
+            _outcome(
+                query="correlated",
+                route_id="new-route",
+                attempt_number=2,
+            )
+        )
+        store.record_route(_route_outcome(route_id="new-route", query="correlated"))
+        store.flush()
+
+        rows = store.requests(limit=10)["items"]
+        historical = next(row for row in rows if row["query"] == "historical")
+        correlated = next(row for row in rows if row["query"] == "correlated")
+        assert historical["route_id"] is None
+        assert historical["attempt_number"] == 1
+        assert correlated["route_id"] == "new-route"
+        assert correlated["attempt_number"] == 2
+        assert store.stats()["routes"]["totals"]["searches"] == 1
+
+        with sqlite3.connect(db_path) as migrated:
+            columns = {
+                row[1] for row in migrated.execute("PRAGMA table_info(search_log)")
+            }
+            route_table = migrated.execute(
+                "SELECT name FROM sqlite_master"
+                " WHERE type = 'table' AND name = 'search_route_log'"
+            ).fetchone()
+        assert {"route_id", "attempt_number"} <= columns
+        assert route_table == ("search_route_log",)
+        store.close()
 
 
 class TestWriterBehavior:

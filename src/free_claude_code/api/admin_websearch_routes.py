@@ -13,7 +13,7 @@ router = APIRouter()
 
 _MAX_LIMIT = 500
 
-Period = Literal["weekly", "monthly"]
+Period = Literal["hourly", "daily", "weekly", "monthly"]
 
 
 def get_websearch_log_store() -> WebSearchLogStore:
@@ -26,12 +26,24 @@ def get_websearch_log_store() -> WebSearchLogStore:
 async def websearch_stats(
     request: Request,
     period: Period = "weekly",
+    provider: str | None = None,
+    status: Literal["success", "error"] | None = None,
+    q: str | None = None,
+    since: str | None = None,
+    until: str | None = None,
     store: WebSearchLogStore = Depends(get_websearch_log_store),
 ) -> dict[str, Any]:
-    """Per-provider/per-key rollups bucketed by ISO week or month."""
+    """Filtered rollups using hourly, daily, ISO-weekly, or monthly buckets."""
 
     require_loopback_admin(request)
-    return store.stats(period)
+    return store.stats(
+        period,
+        provider=provider,
+        status=status,
+        q=q,
+        since_epoch=_parse_iso_bound(since, "since"),
+        until_epoch=_parse_iso_bound(until, "until"),
+    )
 
 
 @router.get("/admin/api/websearch/requests")

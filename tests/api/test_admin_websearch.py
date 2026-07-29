@@ -186,16 +186,23 @@ class TestStatsEndpoint:
             {"error_kind": "rate_limit", "error_message": "429 too many", "count": 1}
         ]
 
-    def test_stats_monthly_period(self, client, log_store) -> None:
+    @pytest.mark.parametrize("period", ("hourly", "daily", "weekly", "monthly"))
+    def test_stats_accepts_supported_periods(self, client, log_store, period) -> None:
         _seed(log_store)
 
-        response = client.get(
-            "/admin/api/websearch/stats", params={"period": "monthly"}
-        )
+        response = client.get("/admin/api/websearch/stats", params={"period": period})
 
         assert response.status_code == 200
         body = response.json()
-        assert body["period"] == "monthly"
+        assert body["period"] == period
+
+    def test_stats_monthly_period(self, client, log_store) -> None:
+        _seed(log_store)
+
+        body = client.get(
+            "/admin/api/websearch/stats", params={"period": "monthly"}
+        ).json()
+
         assert body["series"] == [
             {
                 "bucket": "2026-06",
@@ -220,8 +227,72 @@ class TestStatsEndpoint:
             },
         ]
 
+    def test_stats_filters_apply_to_every_response_section(
+        self, client, log_store
+    ) -> None:
+        _seed(log_store)
+
+        response = client.get(
+            "/admin/api/websearch/stats",
+            params={
+                "period": "daily",
+                "provider": "exa",
+                "status": "error",
+                "q": "banana",
+                "since": "2026-06-08T00:00:00+00:00",
+                "until": "2026-06-08T23:59:59+00:00",
+            },
+        )
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["filters"] == {
+            "provider": "exa",
+            "status": "error",
+            "q": "banana",
+            "since_epoch": _ts("2026-06-08T00:00:00+00:00"),
+            "until_epoch": _ts("2026-06-08T23:59:59+00:00"),
+        }
+        assert body["window"] == {
+            "since_epoch": _ts("2026-06-08T00:00:00+00:00"),
+            "until_epoch": _ts("2026-06-08T23:59:59+00:00"),
+        }
+        assert body["dropped_records"] == 0
+        assert body["totals"]["requests"] == 1
+        assert body["totals"]["errors"] == 1
+        assert [entry["provider"] for entry in body["by_provider"]] == ["exa"]
+        assert len(body["by_key"]) == 1
+        assert body["top_errors"] == [
+            {
+                "error_kind": "rate_limit",
+                "error_message": "429 too many",
+                "count": 1,
+            }
+        ]
+        assert body["series"] == [
+            {
+                "bucket": "2026-06-08",
+                "provider": "exa",
+                "requests": 1,
+                "errors": 1,
+                "results": 0,
+            }
+        ]
+
     def test_stats_invalid_period_is_422(self, client) -> None:
-        response = client.get("/admin/api/websearch/stats", params={"period": "daily"})
+        response = client.get("/admin/api/websearch/stats", params={"period": "yearly"})
+
+        assert response.status_code == 422
+
+    def test_stats_invalid_since_is_400(self, client) -> None:
+        response = client.get(
+            "/admin/api/websearch/stats", params={"since": "not-a-date"}
+        )
+
+        assert response.status_code == 400
+
+    def test_stats_invalid_status_is_422(self, client) -> None:
+        response = client.get("/admin/api/websearch/stats", params={"status": "weird"})
 
         assert response.status_code == 422
 

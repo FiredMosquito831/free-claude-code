@@ -182,8 +182,8 @@ def test_stats_aggregates(store: RequestLogStore) -> None:
     assert stats["tokens_in"] == 20
     assert stats["tokens_out"] == 8
     assert stats["avg_duration_ms"] == pytest.approx(200.0)
-    assert stats["p50_duration_ms"] == pytest.approx(100.0)
-    assert stats["p95_duration_ms"] == pytest.approx(300.0)
+    assert stats["p50_duration_ms"] == pytest.approx(200.0)
+    assert stats["p95_duration_ms"] == pytest.approx(290.0)
     assert stats["by_provider"][0]["key"] == "nvidia_nim"
     assert stats["by_provider"][0]["requests"] == 3
     assert stats["by_provider"][0]["errors"] == 1
@@ -204,6 +204,165 @@ def test_stats_window_filter(store: RequestLogStore) -> None:
     daily = store.stats()
     assert daily["total"] == 2
     assert all("T" not in point["bucket"] for point in daily["series"])
+
+
+def test_stats_applies_all_list_filters_to_every_aggregate(
+    store: RequestLogStore,
+) -> None:
+    base = time.time()
+    store.enqueue(
+        _record(
+            "match-error",
+            provider="selected",
+            requested_model="requested-match",
+            resolved_model="resolved-other",
+            endpoint="/v1/responses",
+            ts_epoch=base,
+            status="error",
+            input_text="needle in input",
+            output_text="ignored",
+            tokens_in=7,
+            tokens_out=3,
+            duration_ms=40.0,
+            ttft_ms=8.0,
+            error_message="selected failure",
+        )
+    )
+    store.enqueue(
+        _record(
+            "match-success",
+            provider="selected",
+            requested_model="requested-match",
+            resolved_model="resolved-other",
+            endpoint="/v1/responses",
+            ts_epoch=base + 60,
+            input_text="ignored",
+            output_text="needle in output",
+            tokens_in=11,
+            tokens_out=5,
+            duration_ms=80.0,
+            ttft_ms=12.0,
+        )
+    )
+    store.enqueue(
+        _record(
+            "wrong-provider",
+            provider="other",
+            requested_model="requested-match",
+            endpoint="/v1/responses",
+            ts_epoch=base + 120,
+            status="error",
+            input_text="needle",
+            error_message="unselected failure",
+        )
+    )
+    store.enqueue(
+        _record(
+            "wrong-model",
+            provider="selected",
+            requested_model="different",
+            resolved_model="different",
+            endpoint="/v1/responses",
+            ts_epoch=base + 180,
+            input_text="needle",
+        )
+    )
+    store.enqueue(
+        _record(
+            "wrong-endpoint",
+            provider="selected",
+            requested_model="requested-match",
+            endpoint="/v1/messages",
+            ts_epoch=base + 240,
+            input_text="needle",
+        )
+    )
+    store.enqueue(
+        _record(
+            "outside-window",
+            provider="selected",
+            requested_model="requested-match",
+            endpoint="/v1/responses",
+            ts_epoch=base + 3600,
+            input_text="needle",
+        )
+    )
+    store.close()
+
+    stats = store.stats(
+        provider="selected",
+        model="requested-match",
+        endpoint="/v1/responses",
+        since=base - 1,
+        until=base + 300,
+        q="needle",
+    )
+
+    assert stats["total"] == 2
+    assert stats["success"] == 1
+    assert stats["error"] == 1
+    assert stats["cancelled"] == 0
+    assert stats["error_rate"] == pytest.approx(0.5)
+    assert stats["tokens_in"] == 18
+    assert stats["tokens_out"] == 8
+    assert stats["avg_duration_ms"] == pytest.approx(60.0)
+    assert stats["p50_duration_ms"] == pytest.approx(60.0)
+    assert stats["p95_duration_ms"] == pytest.approx(78.0)
+    assert stats["avg_ttft_ms"] == pytest.approx(10.0)
+    assert stats["by_provider"] == [
+        {
+            "key": "selected",
+            "requests": 2,
+            "tokens_in": 18,
+            "tokens_out": 8,
+            "errors": 1,
+            "avg_duration_ms": 60.0,
+        }
+    ]
+    assert stats["by_model"] == [
+        {
+            "key": "resolved-other",
+            "requests": 2,
+            "tokens_in": 18,
+            "tokens_out": 8,
+            "errors": 1,
+            "avg_duration_ms": 60.0,
+        }
+    ]
+    assert stats["top_errors"] == [{"message": "selected failure", "count": 1}]
+    assert sum(point["requests"] for point in stats["series"]) == 2
+    assert sum(point["tokens"] for point in stats["series"]) == 26
+    assert sum(point["errors"] for point in stats["series"]) == 1
+
+
+def test_stats_status_filter_changes_cards_breakdowns_errors_and_series(
+    store: RequestLogStore,
+) -> None:
+    base = time.time()
+    store.enqueue(_record("success", ts_epoch=base, duration_ms=10.0))
+    store.enqueue(
+        _record(
+            "error",
+            ts_epoch=base + 1,
+            status="error",
+            duration_ms=90.0,
+            error_message="boom",
+        )
+    )
+    store.close()
+
+    stats = store.stats(status="success")
+
+    assert stats["total"] == 1
+    assert stats["success"] == 1
+    assert stats["error"] == 0
+    assert stats["error_rate"] == 0.0
+    assert stats["p50_duration_ms"] == 10.0
+    assert stats["by_provider"][0]["requests"] == 1
+    assert stats["by_provider"][0]["errors"] == 0
+    assert stats["top_errors"] == []
+    assert stats["series"][0]["requests"] == 1
+    assert stats["series"][0]["errors"] == 0
 
 
 def test_prune_keeps_newest(tmp_path) -> None:
