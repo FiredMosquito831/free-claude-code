@@ -594,24 +594,36 @@ function inputForField(field) {
   if (field.type === "oauth_login") {
     const wrapper = document.createElement("div");
     wrapper.className = "oauth-login-control";
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className =
-      field.key === "CHATGPT_OAUTH_IMPORT_CODEX"
-        ? "secondary-button"
-        : "primary-button";
-    button.textContent =
-      field.key === "CHATGPT_OAUTH_IMPORT_CODEX"
-        ? "Import existing Codex login"
-        : "Log in with ChatGPT";
-    button.addEventListener("click", () => {
-      if (field.key === "CHATGPT_OAUTH_IMPORT_CODEX") {
+    if (field.key === "CHATGPT_OAUTH_IMPORT_CODEX") {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "secondary-button";
+      button.textContent = "Import existing Codex login";
+      button.addEventListener("click", () => {
         importChatGPTOAuthCodexTokens(button);
-      } else {
-        startChatGPTOAuthLogin(button);
-      }
+      });
+      wrapper.appendChild(button);
+      return wrapper;
+    }
+
+    const deviceButton = document.createElement("button");
+    deviceButton.type = "button";
+    deviceButton.className = "primary-button";
+    deviceButton.textContent = "Log in with device code";
+
+    const browserButton = document.createElement("button");
+    browserButton.type = "button";
+    browserButton.className = "secondary-button";
+    browserButton.textContent = "Browser login (same device)";
+
+    const loginButtons = [deviceButton, browserButton];
+    deviceButton.addEventListener("click", () => {
+      startChatGPTOAuthDeviceLogin(deviceButton, loginButtons);
     });
-    wrapper.appendChild(button);
+    browserButton.addEventListener("click", () => {
+      startChatGPTOAuthBrowserLogin(browserButton, loginButtons);
+    });
+    wrapper.append(deviceButton, browserButton);
     return wrapper;
   }
 
@@ -1027,43 +1039,56 @@ async function importChatGPTOAuthCodexTokens(button) {
   }
 }
 
-async function startChatGPTOAuthLogin(button) {
-  const original = button.textContent;
-  button.disabled = true;
-  button.textContent = "Starting login...";
-
+async function runChatGPTOAuthLogin(button, buttons, progressLabel, login) {
+  const labels = buttons.map((candidate) => candidate.textContent);
+  buttons.forEach((candidate) => {
+    candidate.disabled = true;
+  });
+  button.textContent = progressLabel;
   try {
-    // Primary: browser PKCE flow — the login page opens automatically and the
-    // local callback completes the flow; no code to copy or paste.
-    try {
-      const initiate = await api("/admin/api/chatgpt-oauth/browser/initiate", {
-        method: "POST",
-        body: "{}",
-      });
+    await login();
+  } catch (error) {
+    showMessage(`ChatGPT OAuth login failed: ${error.message}`, "error");
+  } finally {
+    buttons.forEach((candidate, index) => {
+      candidate.disabled = false;
+      candidate.textContent = labels[index];
+    });
+  }
+}
+
+async function startChatGPTOAuthDeviceLogin(button, buttons) {
+  await runChatGPTOAuthLogin(
+    button,
+    buttons,
+    "Starting device login...",
+    startDeviceOAuthLogin,
+  );
+}
+
+async function startChatGPTOAuthBrowserLogin(button, buttons) {
+  await runChatGPTOAuthLogin(
+    button,
+    buttons,
+    "Starting browser login...",
+    async () => {
+      // This explicit option is only safe when the browser and FCC share the
+      // same localhost. Device-code login is the cross-WSL/remote default.
+      const initiate = await api(
+        "/admin/api/chatgpt-oauth/browser/initiate?same_host_confirmed=true",
+        {
+          method: "POST",
+          body: "{}",
+        },
+      );
       window.open(initiate.authorize_url, "_blank", "noopener");
       showMessage(
-        "ChatGPT OAuth: complete the login in the browser tab that just opened.",
+        "ChatGPT OAuth: complete the login in the same-device browser tab.",
         "warn",
       );
       await pollBrowserOAuthLogin();
-      button.disabled = false;
-      button.textContent = original;
-      return;
-    } catch (browserError) {
-      showMessage(
-        `Browser login unavailable (${browserError.message}); trying device-code login...`,
-        "warn",
-      );
-    }
-
-    await startDeviceOAuthLogin(button);
-    button.disabled = false;
-    button.textContent = original;
-  } catch (error) {
-    button.disabled = false;
-    button.textContent = original;
-    showMessage(`ChatGPT OAuth login failed: ${error.message}`, "error");
-  }
+    },
+  );
 }
 
 async function pollBrowserOAuthLogin() {
@@ -1103,13 +1128,13 @@ function fillChatGPTOAuthFields(credentialReference, accountId) {
     tokenField.value = credentialReference;
     tokenField.dispatchEvent(new Event("input"));
   }
-  if (accountField && accountId) {
-    accountField.value = accountId;
+  if (accountField) {
+    accountField.value = accountId || "";
     accountField.dispatchEvent(new Event("input"));
   }
 }
 
-async function startDeviceOAuthLogin(button) {
+async function startDeviceOAuthLogin() {
   const initiate = await api("/admin/api/chatgpt-oauth/initiate", {
     method: "POST",
     body: "{}",

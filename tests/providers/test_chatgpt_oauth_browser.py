@@ -190,7 +190,7 @@ def test_callback_page_escapes_oauth_error_content():
 
 
 def test_start_browser_login_uses_server_port(callback_server):
-    payload = browser_login.start_browser_login()
+    payload = browser_login.start_browser_login(allow_remote=True)
 
     parsed = urllib.parse.urlparse(payload["authorize_url"])
     params = urllib.parse.parse_qs(parsed.query)
@@ -221,7 +221,7 @@ def test_callback_server_tries_second_allowlisted_port(monkeypatch):
     monkeypatch.setattr(browser_login, "_CallbackHTTPServer", FakeServer)
     monkeypatch.setattr(browser_login, "_CallbackIPv6HTTPServer", FakeServer)
 
-    payload = browser_login.start_browser_login()
+    payload = browser_login.start_browser_login(allow_remote=True)
 
     params = urllib.parse.parse_qs(
         urllib.parse.urlparse(payload["authorize_url"]).query
@@ -245,4 +245,105 @@ def test_callback_server_reports_immediate_fallback_when_ports_are_blocked(
         browser_login.ChatGPTOAuthBrowserUnavailableError,
         match="device-code login",
     ):
+        browser_login.start_browser_login(allow_remote=True)
+
+
+@pytest.mark.parametrize(
+    ("environment", "expected"),
+    [
+        ({"WSL_DISTRO_NAME": "Ubuntu-24.04"}, "WSL"),
+        ({"WSL_INTEROP": "/run/WSL/123_interop"}, "WSL"),
+        ({"SSH_CONNECTION": "client server"}, "remote development environment"),
+        ({"CODESPACES": "true"}, "remote development environment"),
+        ({}, None),
+    ],
+)
+def test_browser_callback_remote_reason(environment, expected):
+    reason = browser_login.browser_callback_remote_reason(environment)
+
+    if expected is None:
+        assert reason is None
+    else:
+        assert expected in (reason or "")
+
+
+def test_start_browser_login_rejects_wsl_before_binding(monkeypatch):
+    class UnexpectedServer:
+        def __init__(self, port):
+            raise AssertionError(f"callback server unexpectedly bound port {port}")
+
+    monkeypatch.setenv("WSL_DISTRO_NAME", "Ubuntu-24.04")
+    monkeypatch.setattr(browser_login, "_SERVER", None)
+    monkeypatch.setattr(browser_login, "_CallbackHTTPServer", UnexpectedServer)
+    monkeypatch.setattr(browser_login, "_CallbackIPv6HTTPServer", UnexpectedServer)
+
+    with pytest.raises(
+        browser_login.ChatGPTOAuthBrowserUnavailableError,
+        match="Device-code login is required by default",
+    ):
         browser_login.start_browser_login()
+
+
+def test_explicit_same_device_browser_allows_wsl_override(
+    callback_server,
+    monkeypatch,
+):
+    monkeypatch.setenv("WSL_DISTRO_NAME", "Ubuntu-24.04")
+
+    payload = browser_login.start_browser_login(allow_remote=True)
+
+    assert payload["authorize_url"].startswith(
+        "https://auth.openai.com/oauth/authorize?"
+    )
+
+
+def test_cli_defaults_to_device_login_under_wsl(monkeypatch):
+    device_calls: list[str] = []
+    monkeypatch.setenv("WSL_DISTRO_NAME", "Ubuntu-24.04")
+    monkeypatch.setattr(browser_login.sys, "argv", ["fcc-chatgpt-oauth-login"])
+    monkeypatch.setattr(
+        browser_login,
+        "perform_chatgpt_oauth_login",
+        lambda: device_calls.append("device"),
+    )
+
+    browser_login.chatgpt_oauth_login_command()
+
+    assert device_calls == ["device"]
+
+
+def test_cli_explicit_browser_override_under_wsl(monkeypatch):
+    browser_calls: list[bool] = []
+    monkeypatch.setenv("WSL_DISTRO_NAME", "Ubuntu-24.04")
+    monkeypatch.setattr(
+        browser_login.sys,
+        "argv",
+        ["fcc-chatgpt-oauth-login", "--browser"],
+    )
+    monkeypatch.setattr(
+        browser_login,
+        "perform_browser_login",
+        lambda *, allow_remote=False: browser_calls.append(allow_remote),
+    )
+    monkeypatch.setattr(
+        browser_login,
+        "perform_chatgpt_oauth_login",
+        lambda: pytest.fail("device login should not run"),
+    )
+
+    browser_login.chatgpt_oauth_login_command()
+
+    assert browser_calls == [True]
+
+
+def test_cli_rejects_conflicting_login_methods(monkeypatch):
+    monkeypatch.setattr(
+        browser_login.sys,
+        "argv",
+        ["fcc-chatgpt-oauth-login", "--device", "--browser"],
+    )
+
+    with pytest.raises(SystemExit) as exc_info:
+        browser_login.chatgpt_oauth_login_command()
+
+    assert exc_info.value.code == 2

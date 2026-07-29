@@ -10,6 +10,7 @@ callback completes the flow.
 import base64
 import hashlib
 import html
+import os
 import secrets
 import socket
 import string
@@ -17,6 +18,7 @@ import sys
 import threading
 import time
 import webbrowser
+from collections.abc import Mapping
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
@@ -52,6 +54,15 @@ OAUTH_CANCEL_PATH = "/cancel"
 OAUTH_SCOPE = CODEX_OAUTH_SCOPE
 OAUTH_ORIGINATOR = CODEX_OAUTH_ORIGINATOR
 BROWSER_LOGIN_TIMEOUT_SECONDS = 300.0
+_WSL_ENV_KEYS = ("WSL_DISTRO_NAME", "WSL_INTEROP")
+_REMOTE_ENV_KEYS = (
+    "SSH_CONNECTION",
+    "SSH_CLIENT",
+    "SSH_TTY",
+    "CODESPACES",
+    "GITPOD_WORKSPACE_ID",
+    "REMOTE_CONTAINERS",
+)
 
 
 class ChatGPTOAuthBrowserLoginError(ChatGPTOAuthLoginError):
@@ -60,6 +71,38 @@ class ChatGPTOAuthBrowserLoginError(ChatGPTOAuthLoginError):
 
 class ChatGPTOAuthBrowserUnavailableError(ChatGPTOAuthBrowserLoginError):
     """Raised when the browser flow cannot start (no browser or busy port)."""
+
+
+def browser_callback_remote_reason(
+    environ: Mapping[str, str] | None = None,
+) -> str | None:
+    """Explain why a browser may not share this process's loopback namespace."""
+
+    environment = os.environ if environ is None else environ
+    if any(environment.get(key, "").strip() for key in _WSL_ENV_KEYS):
+        return (
+            "FCC is running under WSL, while the browser commonly uses Windows "
+            "localhost instead of WSL localhost"
+        )
+    if any(environment.get(key, "").strip() for key in _REMOTE_ENV_KEYS):
+        return (
+            "FCC is running in a remote development environment whose browser "
+            "may not share the same localhost"
+        )
+    return None
+
+
+def _require_same_host_browser(*, allow_remote: bool) -> None:
+    """Reject automatic browser login when callback reachability is ambiguous."""
+
+    if allow_remote:
+        return
+    if reason := browser_callback_remote_reason():
+        raise ChatGPTOAuthBrowserUnavailableError(
+            f"{reason}. Device-code login is required by default. "
+            "Use the explicit same-device browser option only when the browser "
+            "shares FCC's network namespace."
+        )
 
 
 def _generate_pkce() -> tuple[str, str]:
@@ -314,8 +357,12 @@ _SERVER_LOCK = threading.Lock()
 _SERVER: _CallbackServerGroup | _CallbackHTTPServer | None = None
 
 
-def _ensure_callback_server() -> _CallbackServerGroup | _CallbackHTTPServer:
+def _ensure_callback_server(
+    *,
+    allow_remote: bool = False,
+) -> _CallbackServerGroup | _CallbackHTTPServer:
     """Start (or reuse) the local OAuth callback server."""
+    _require_same_host_browser(allow_remote=allow_remote)
     global _SERVER
     with _SERVER_LOCK:
         if _SERVER is not None:
@@ -340,13 +387,15 @@ def _ensure_callback_server() -> _CallbackServerGroup | _CallbackHTTPServer:
         )
 
 
-def start_browser_login() -> dict[str, str]:
+def start_browser_login(*, allow_remote: bool = False) -> dict[str, str]:
     """Begin a browser login and return the authorize URL to open.
 
     Replaces any older pending flow. The caller opens the returned URL in the
-    user's browser and then polls :func:`browser_login_status`.
+    user's browser and then polls :func:`browser_login_status`. Remote/WSL
+    callers must opt in explicitly because bind success does not prove that
+    the browser can reach the same loopback namespace.
     """
-    server = _ensure_callback_server()
+    server = _ensure_callback_server(allow_remote=allow_remote)
     flow = _BrowserLoginFlow()
     server.begin_flow(flow)
     return {
@@ -410,6 +459,7 @@ def perform_browser_login(
     *,
     timeout_seconds: float = BROWSER_LOGIN_TIMEOUT_SECONDS,
     auth_path: Path | None = None,
+    allow_remote: bool = False,
 ) -> dict[str, Any]:
     """Run the full browser login: start server, open browser, wait, persist.
 
@@ -417,7 +467,7 @@ def perform_browser_login(
     ChatGPTOAuthLoginTimeoutError on timeout, or ChatGPTOAuthBrowserLoginError
     on failure. Returns the token payload on success.
     """
-    server = _ensure_callback_server()
+    server = _ensure_callback_server(allow_remote=allow_remote)
     flow = _BrowserLoginFlow()
     server.begin_flow(flow)
     authorize_url = build_authorize_url(flow.redirect_uri, flow.challenge, flow.state)
@@ -460,13 +510,26 @@ def perform_browser_login(
 def chatgpt_oauth_login_command() -> None:
     """CLI entry point for ``fcc-chatgpt-oauth-login``.
 
-    Uses the browser PKCE flow by default (opens the login page automatically)
-    and falls back to the headless device-code flow when a browser cannot be
-    opened. ``--device`` forces the device flow.
+    Uses the browser PKCE flow by default on a local machine and falls back to
+    device-code login when the callback may be remote or unavailable.
+    ``--device`` forces device login; ``--browser`` explicitly allows browser
+    login when the caller knows the browser shares FCC's localhost.
     """
     force_device = "--device" in sys.argv[1:]
+    force_browser = "--browser" in sys.argv[1:]
+
+    if force_device and force_browser:
+        print(
+            "Choose only one ChatGPT OAuth method: --device or --browser.",
+            file=sys.stderr,
+            flush=True,
+        )
+        raise SystemExit(2)
 
     try:
+        if force_browser:
+            perform_browser_login(allow_remote=True)
+            return
         if not force_device:
             try:
                 perform_browser_login()
