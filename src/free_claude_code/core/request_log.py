@@ -209,6 +209,23 @@ class RequestLogStore:
             conn.close()
 
     @staticmethod
+    def _ensure_stats_index(conn: sqlite3.Connection) -> None:
+        """Add a covering index for the aggregate queries.
+
+        SQLite stores every column of a row together, so a scan over the
+        numeric columns ``stats`` needs still walks the overflow pages holding
+        up to 100k characters of request/response text per row. An index that
+        carries those columns lets the aggregates run index-only and skip the
+        bodies entirely.
+        """
+        with contextlib.suppress(sqlite3.Error):
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_requests_stats ON requests("
+                " ts_epoch, status, provider, resolved_model, endpoint,"
+                " requested_model, duration_ms, ttft_ms, tokens_in, tokens_out)"
+            )
+
+    @staticmethod
     def _ensure_auto_vacuum(conn: sqlite3.Connection) -> None:
         """Enable incremental auto-vacuum so pruned pages can be reclaimed.
 
@@ -262,8 +279,10 @@ class RequestLogStore:
         # batch re-runs the WAL/synchronous pragmas on every flush.
         conn = self._connect()
         try:
-            # Off the request path: a one-time conversion VACUUM on a large
-            # existing database can take tens of seconds.
+            # Both of these are one-time migrations that can take seconds on a
+            # large existing database, so they belong here and never on a
+            # request path.
+            self._ensure_stats_index(conn)
             self._ensure_auto_vacuum(conn)
             while not stopping:
                 try:

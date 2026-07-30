@@ -466,6 +466,39 @@ def test_auto_vacuum_becomes_incremental(tmp_path) -> None:
         store.close()
 
 
+def test_stats_covering_index_is_created(tmp_path) -> None:
+    """Aggregates must be able to run index-only, without touching bodies."""
+    store = RequestLogStore(tmp_path / "requests.db", max_rows=10)
+    try:
+        deadline = time.monotonic() + 10.0
+        plan: list[str] = []
+        while time.monotonic() < deadline:
+            conn = sqlite3.connect(store.db_path)
+            try:
+                names = {
+                    row[0]
+                    for row in conn.execute(
+                        "SELECT name FROM sqlite_master WHERE type='index'"
+                    )
+                }
+                if "idx_requests_stats" in names:
+                    plan = [
+                        str(row[3])
+                        for row in conn.execute(
+                            "EXPLAIN QUERY PLAN SELECT COUNT(*),"
+                            " AVG(duration_ms) FROM requests"
+                        )
+                    ]
+                    break
+            finally:
+                conn.close()
+            time.sleep(0.05)
+        assert plan, "covering index was never created"
+        assert any("idx_requests_stats" in step for step in plan), plan
+    finally:
+        store.close()
+
+
 def test_construction_does_not_block_on_vacuum(tmp_path) -> None:
     """Converting a large database must not happen on the caller's thread."""
     path = tmp_path / "requests.db"
