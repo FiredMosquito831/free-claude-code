@@ -1,10 +1,10 @@
 #!/bin/sh
 set -eu
 
-FCC_VERSION="4.13.0"
+FCC_VERSION="4.14.2"
 FCC_WHEEL_NAME="free_claude_code-${FCC_VERSION}-py3-none-any.whl"
 FCC_WHEEL_URL="https://github.com/FiredMosquito831/free-claude-code/releases/download/v${FCC_VERSION}/${FCC_WHEEL_NAME}"
-FCC_WHEEL_SHA256="679565810225215ae3c045cc5c8ef43e4fa53676179ddb1583a25412e811b770"
+FCC_WHEEL_SHA256="2974e7120f57e458eb8b147631d82eeef9cc7f8200726769d73372716aebb2d6"
 PYTHON_VERSION="3.14.0"
 MIN_UV_VERSION="0.11.0"
 CLAUDE_INSTALL_URL="https://claude.ai/install.sh"
