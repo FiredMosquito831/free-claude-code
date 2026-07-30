@@ -1,5 +1,6 @@
 """Web search usage analytics admin API (loopback-only, like the admin UI)."""
 
+import asyncio
 from datetime import UTC, datetime
 from typing import Any, Literal
 
@@ -36,7 +37,9 @@ async def websearch_stats(
     """Filtered rollups using hourly, daily, ISO-weekly, or monthly buckets."""
 
     require_loopback_admin(request)
-    return store.stats(
+    # SQLite work is synchronous; keep it off the event loop.
+    return await asyncio.to_thread(
+        store.stats,
         period,
         provider=provider,
         status=status,
@@ -62,7 +65,8 @@ async def websearch_requests(
     """Paged request log (newest first) with provider/status/text/date filters."""
 
     require_loopback_admin(request)
-    return store.requests(
+    return await asyncio.to_thread(
+        store.requests,
         limit=limit,
         offset=offset,
         provider=provider,
@@ -83,7 +87,7 @@ async def websearch_request_detail(
     """One provider attempt with captured input/output and config snapshot."""
 
     require_loopback_admin(request)
-    item = store.request(request_id)
+    item = await asyncio.to_thread(store.request, request_id)
     if item is None:
         raise HTTPException(status_code=404, detail="web search request not found")
     return item
@@ -97,7 +101,7 @@ async def websearch_requests_clear(
     """Delete every recorded web search request."""
 
     require_loopback_admin(request)
-    deleted = store.clear()
+    deleted = await asyncio.to_thread(store.clear)
     return {"cleared": True, "deleted": deleted}
 
 

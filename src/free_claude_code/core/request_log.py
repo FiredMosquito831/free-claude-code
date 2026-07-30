@@ -6,6 +6,7 @@ import queue
 import sqlite3
 import threading
 import time
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -27,6 +28,36 @@ _WRITER_BATCH_SIZE = 50
 _WRITER_POLL_SECONDS = 0.25
 _QUEUE_MAX_SIZE = 10_000
 _STOP = object()
+_STATS_CACHE_TTL_SECONDS = 5.0
+
+# Columns read for list views. Body columns are deliberately excluded and
+# replaced by SQL-side ``substr`` previews so list queries never load full
+# request/response bodies into memory just to truncate them in Python.
+_LIST_METADATA_COLUMNS = (
+    "id",
+    "ts_epoch",
+    "ts_iso",
+    "endpoint",
+    "protocol",
+    "requested_model",
+    "provider",
+    "resolved_model",
+    "stream",
+    "input_sha256",
+    "output_sha256",
+    "input_chars",
+    "output_chars",
+    "reasoning",
+    "params",
+    "tokens_in",
+    "tokens_out",
+    "ttft_ms",
+    "duration_ms",
+    "status",
+    "error_kind",
+    "error_message",
+    "headers",
+)
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS requests (
@@ -120,6 +151,8 @@ class RequestLogStore:
         self._queue: queue.Queue[Any] = queue.Queue(maxsize=_QUEUE_MAX_SIZE)
         self._inserts_since_prune = 0
         self._closed = threading.Event()
+        self._stats_lock = threading.Lock()
+        self._stats_cache: dict[tuple[Any, ...], tuple[float, dict[str, Any]]] = {}
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
         self._init_db()
         self._writer = threading.Thread(
@@ -140,9 +173,52 @@ class RequestLogStore:
         conn.execute("PRAGMA synchronous=NORMAL")
         return conn
 
+    @contextlib.contextmanager
+    def _connection(self) -> Iterator[sqlite3.Connection]:
+        """Yield a connection that is always closed.
+
+        ``sqlite3.Connection.__exit__`` only commits or rolls back; it never
+        closes. Connections are garbage-collected rather than reference-counted,
+        so relying on scope exit leaks file descriptors until the next GC pass.
+        """
+        conn = self._connect()
+        try:
+            with conn:
+                yield conn
+        finally:
+            conn.close()
+
     def _init_db(self) -> None:
-        with self._connect() as conn:
-            conn.executescript(_SCHEMA)
+        conn = self._connect()
+        try:
+            self._ensure_auto_vacuum(conn)
+            with conn:
+                conn.executescript(_SCHEMA)
+        finally:
+            conn.close()
+
+    @staticmethod
+    def _ensure_auto_vacuum(conn: sqlite3.Connection) -> None:
+        """Enable incremental auto-vacuum so pruned pages can be reclaimed.
+
+        Without this the database file only ever grows: ``prune`` frees pages
+        onto the internal freelist but never returns them to the filesystem.
+        """
+        try:
+            mode = conn.execute("PRAGMA auto_vacuum").fetchone()[0]
+            if int(mode) == 2:
+                return
+            conn.execute("PRAGMA auto_vacuum=INCREMENTAL")
+            # Changing auto_vacuum on a populated database only takes effect
+            # after a full VACUUM, which also reclaims existing free pages.
+            previous = conn.isolation_level
+            conn.isolation_level = None
+            try:
+                conn.execute("VACUUM")
+            finally:
+                conn.isolation_level = previous
+        except sqlite3.Error as exc:
+            logger.warning("Request log auto_vacuum setup failed: {}", exc)
 
     # ------------------------------------------------------------------ writes
 
@@ -150,6 +226,12 @@ class RequestLogStore:
         """Queue one record without blocking the request path."""
         if self._closed.is_set():
             return
+        # Cap before queueing, not at flush time: an uncapped record sits in the
+        # queue holding its full body, so a backlog could retain far more than
+        # the persisted per-row limit.
+        record.input_text = cap_text(record.input_text)
+        record.output_text = cap_text(record.output_text)
+        record.error_message = cap_text(record.error_message, MAX_ERROR_CHARS)
         try:
             self._queue.put_nowait(record)
         except queue.Full:
@@ -158,38 +240,44 @@ class RequestLogStore:
     def _writer_loop(self) -> None:
         pending: list[RequestRecord] = []
         stopping = False
-        while not stopping:
-            try:
-                item = self._queue.get(timeout=_WRITER_POLL_SECONDS)
-            except queue.Empty:
-                item = None
-            if item is None:
-                if pending:
-                    self._flush(pending)
+        # One connection for the writer thread's lifetime; reconnecting per
+        # batch re-runs the WAL/synchronous pragmas on every flush.
+        conn = self._connect()
+        try:
+            while not stopping:
+                try:
+                    item = self._queue.get(timeout=_WRITER_POLL_SECONDS)
+                except queue.Empty:
+                    item = None
+                if item is None:
+                    if pending:
+                        self._flush(pending, conn)
+                        pending.clear()
+                    continue
+                if item is _STOP:
+                    stopping = True
+                else:
+                    pending.append(item)
+                if len(pending) >= _WRITER_BATCH_SIZE:
+                    self._flush(pending, conn)
                     pending.clear()
-                continue
-            if item is _STOP:
-                stopping = True
-            else:
-                pending.append(item)
-            if len(pending) >= _WRITER_BATCH_SIZE:
-                self._flush(pending)
-                pending.clear()
-        # Drain anything enqueued behind the stop sentinel, then exit.
-        while True:
-            try:
-                item = self._queue.get_nowait()
-            except queue.Empty:
-                break
-            if item is not None and item is not _STOP:
-                pending.append(item)
-        if pending:
-            self._flush(pending)
+            # Drain anything enqueued behind the stop sentinel, then exit.
+            while True:
+                try:
+                    item = self._queue.get_nowait()
+                except queue.Empty:
+                    break
+                if item is not None and item is not _STOP:
+                    pending.append(item)
+            if pending:
+                self._flush(pending, conn)
+        finally:
+            conn.close()
 
-    def _flush(self, batch: list[RequestRecord]) -> None:
+    def _flush(self, batch: list[RequestRecord], conn: sqlite3.Connection) -> None:
         rows = [self._record_to_row(record) for record in batch]
         try:
-            with self._connect() as conn:
+            with conn:
                 conn.executemany(
                     """
                     INSERT OR REPLACE INTO requests (
@@ -318,13 +406,27 @@ class RequestLogStore:
         )
         limit = max(1, min(limit, 500))
         offset = max(0, offset)
-        with self._connect() as conn:
+        if body_preview_chars is None:
+            body_select = "input_text, output_text"
+            body_args: list[Any] = []
+        else:
+            preview = max(0, body_preview_chars)
+            body_select = (
+                "substr(input_text, 1, ?) AS input_text,"
+                " length(input_text) AS input_text_length,"
+                " substr(output_text, 1, ?) AS output_text,"
+                " length(output_text) AS output_text_length"
+            )
+            body_args = [preview, preview]
+        columns = ", ".join(_LIST_METADATA_COLUMNS)
+        with self._connection() as conn:
             total = conn.execute(
                 f"SELECT COUNT(*) FROM requests{where}", args
             ).fetchone()[0]
             cursor = conn.execute(
-                f"SELECT * FROM requests{where} ORDER BY ts_epoch DESC LIMIT ? OFFSET ?",
-                [*args, limit, offset],
+                f"SELECT {columns}, {body_select} FROM requests{where}"
+                " ORDER BY ts_epoch DESC LIMIT ? OFFSET ?",
+                [*body_args, *args, limit, offset],
             )
             rows = [
                 self._row_to_dict(row, body_preview_chars=body_preview_chars)
@@ -333,7 +435,7 @@ class RequestLogStore:
         return rows, total
 
     def get_request(self, request_id: str) -> dict[str, Any] | None:
-        with self._connect() as conn:
+        with self._connection() as conn:
             cursor = conn.execute("SELECT * FROM requests WHERE id = ?", (request_id,))
             row = cursor.fetchone()
         if row is None:
@@ -347,6 +449,14 @@ class RequestLogStore:
         data = dict(row)
         data["stream"] = bool(data["stream"])
         for key in ("input_text", "output_text"):
+            # List queries project a SQL-side preview plus the untruncated
+            # length, so the full body never reaches Python.
+            length = data.pop(f"{key}_length", None)
+            if length is not None:
+                data[f"{key}_truncated"] = (
+                    body_preview_chars is not None and int(length) > body_preview_chars
+                )
+                continue
             text = data.get(key)
             if (
                 body_preview_chars is not None
@@ -379,6 +489,12 @@ class RequestLogStore:
         until: float | None = None,
         q: str | None = None,
     ) -> dict[str, Any]:
+        cache_key = (provider, model, status, endpoint, since, until, q)
+        now = time.monotonic()
+        with self._stats_lock:
+            cached = self._stats_cache.get(cache_key)
+            if cached is not None and now - cached[0] < _STATS_CACHE_TTL_SECONDS:
+                return dict(cached[1])
         where, args = self._where(
             provider=provider,
             model=model,
@@ -388,7 +504,7 @@ class RequestLogStore:
             until=until,
             q=q,
         )
-        with self._connect() as conn:
+        with self._connection() as conn:
             totals = conn.execute(
                 f"""
                 SELECT COUNT(*) AS total,
@@ -427,7 +543,7 @@ class RequestLogStore:
             series = self._series(conn, where, args, since=since, until=until)
 
         total = totals["total"] or 0
-        return {
+        payload = {
             "window": {"since": since, "until": until},
             "total": total,
             "success": totals["success"] or 0,
@@ -445,6 +561,9 @@ class RequestLogStore:
             "series": series,
             "top_errors": top_errors,
         }
+        with self._stats_lock:
+            self._stats_cache[cache_key] = (now, payload)
+        return dict(payload)
 
     @staticmethod
     def _breakdown(
@@ -511,8 +630,9 @@ class RequestLogStore:
         """Delete oldest rows beyond the configured retention cap."""
         if self._max_rows <= 0:
             return 0
+        conn = self._connect()
         try:
-            with self._connect() as conn:
+            with conn:
                 cursor = conn.execute(
                     "DELETE FROM requests WHERE id IN ("
                     " SELECT id FROM requests ORDER BY ts_epoch DESC"
@@ -520,13 +640,23 @@ class RequestLogStore:
                     ")",
                     (self._max_rows,),
                 )
-                return cursor.rowcount
+                removed = cursor.rowcount
+            if removed:
+                # Return the freed pages to the filesystem instead of leaving
+                # them on the freelist, where they would grow the file forever.
+                with contextlib.suppress(sqlite3.Error):
+                    conn.execute("PRAGMA incremental_vacuum")
+            return removed
         except sqlite3.Error as exc:
             logger.warning("Request log prune failed: {}", exc)
             return 0
+        finally:
+            conn.close()
 
     def clear(self) -> int:
-        with self._connect() as conn:
+        with self._stats_lock:
+            self._stats_cache.clear()
+        with self._connection() as conn:
             cursor = conn.execute("DELETE FROM requests")
             return cursor.rowcount
 
