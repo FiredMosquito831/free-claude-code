@@ -8,6 +8,7 @@ from loguru import logger
 
 from free_claude_code.application.model_metadata import ProviderModelInfo
 from free_claude_code.config.constants import HTTP_CONNECT_TIMEOUT_DEFAULT
+from free_claude_code.config.credentials import mask_key_label
 from free_claude_code.core.anthropic.models import MessagesRequest
 from free_claude_code.core.diagnostics import (
     exception_cause_types,
@@ -51,6 +52,15 @@ class BaseProvider(ABC):
 
     def __init__(self, config: ProviderConfig):
         self._config = config
+
+    @property
+    def credential_label(self) -> str | None:
+        """Masked label of the credential this provider uses, for analytics.
+
+        Providers that rotate across several credentials return ``None`` here
+        and report the credential they actually picked per request instead.
+        """
+        return mask_key_label(self._config.api_key) if self._config.api_key else None
 
     @abstractmethod
     def preflight_stream(

@@ -6,6 +6,7 @@ from typing import Any
 from free_claude_code.application.errors import ApplicationUnavailableError
 from free_claude_code.application.model_metadata import ProviderModelInfo
 from free_claude_code.core.anthropic.models import MessagesRequest
+from free_claude_code.core.credential_attribution import record_credential
 from free_claude_code.core.reasoning import DEFAULT_REASONING_POLICY, ReasoningPolicy
 from free_claude_code.providers.base import BaseProvider, ProviderConfig
 from free_claude_code.providers.credential_rotation import CredentialRotationState
@@ -25,12 +26,27 @@ class RotatingProvider(BaseProvider):
         config: ProviderConfig,
         providers: Sequence[BaseProvider],
         state: CredentialRotationState,
+        key_labels: Sequence[str] = (),
     ) -> None:
         super().__init__(config)
         if not providers:
             raise ValueError("RotatingProvider requires at least one sub-provider")
         self._providers = tuple(providers)
         self._state = state
+        # Masked ``first4…last4`` labels, index-aligned with ``providers``. Used
+        # only to identify a credential in analytics and admin views; the raw
+        # key values stay inside the sub-providers.
+        self._key_labels = tuple(key_labels)
+
+    @property
+    def credential_label(self) -> str | None:
+        """No single label applies: the credential is chosen per request."""
+        return None
+
+    def _key_label(self, index: int) -> str | None:
+        if 0 <= index < len(self._key_labels):
+            return self._key_labels[index]
+        return None
 
     def preflight_stream(
         self,
@@ -95,13 +111,13 @@ class RotatingProvider(BaseProvider):
                     f"Retry in {max(1, int(wait))}s."
                 )
             if index in attempted:
-                remaining = [
-                    i for i in range(len(self._providers)) if i not in attempted
-                ]
-                if not remaining:
-                    break
-                index = remaining[0]
+                # The pool handed back a credential this request already tried,
+                # so it has nothing better left. Stop rather than reaching past
+                # the pool for an untried index, which would bypass the health
+                # checks and could dispatch to a locked-out credential.
+                break
             attempted.add(index)
+            record_credential(index, self._key_label(index))
 
             iterator = self._providers[index].stream_response(
                 request,
@@ -112,6 +128,7 @@ class RotatingProvider(BaseProvider):
             try:
                 first_chunk = await iterator.__anext__()
             except StopAsyncIteration:
+                await self._state.report_success(index)
                 return
             except Exception as error:
                 last_error = error
@@ -121,12 +138,27 @@ class RotatingProvider(BaseProvider):
                     raise
                 continue
 
+            settled = False
             try:
                 yield first_chunk
                 async for chunk in iterator:
                     yield chunk
-            finally:
+            except Exception as error:
+                # Output has already started, so this request cannot move to
+                # another credential -- but the failure still has to count
+                # against this one, or a credential that consistently dies
+                # mid-stream would never cool down.
+                settled = True
                 await maybe_await_aclose(iterator)
+                await self._state.report_failure(index, error)
+                raise
+            finally:
+                if not settled:
+                    await maybe_await_aclose(iterator)
+                    # Covers client disconnect and cancellation, where neither
+                    # success nor failure is reported: release any half-open
+                    # probe so the credential is not benched permanently.
+                    self._state.release_probe(index)
             await self._state.report_success(index)
             return
 
@@ -135,4 +167,8 @@ class RotatingProvider(BaseProvider):
 
     def key_health(self) -> list[dict[str, Any]]:
         """Per-credential health snapshots (index-aligned with api_keys)."""
-        return self._state.get_metrics()
+        metrics = self._state.get_metrics()
+        for index, entry in enumerate(metrics):
+            entry["index"] = index
+            entry["key_label"] = self._key_label(index)
+        return metrics

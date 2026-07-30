@@ -481,7 +481,7 @@ def test_stats_covering_index_is_created(tmp_path) -> None:
                         "SELECT name FROM sqlite_master WHERE type='index'"
                     )
                 }
-                if "idx_requests_stats" in names:
+                if "idx_requests_stats_v2" in names:
                     plan = [
                         str(row[3])
                         for row in conn.execute(
@@ -494,7 +494,7 @@ def test_stats_covering_index_is_created(tmp_path) -> None:
                 conn.close()
             time.sleep(0.05)
         assert plan, "covering index was never created"
-        assert any("idx_requests_stats" in step for step in plan), plan
+        assert any("idx_requests_stats_v2" in step for step in plan), plan
     finally:
         store.close()
 
@@ -571,3 +571,110 @@ def test_shared_store_registry(tmp_path) -> None:
     reset_request_log_stores()
     assert get_request_log_store(path) is not first
     reset_request_log_stores()
+
+
+_OLD_SCHEMA = """
+CREATE TABLE IF NOT EXISTS requests (
+    id TEXT PRIMARY KEY, ts_epoch REAL NOT NULL, ts_iso TEXT NOT NULL,
+    endpoint TEXT NOT NULL, protocol TEXT NOT NULL, requested_model TEXT,
+    provider TEXT, resolved_model TEXT, stream INTEGER NOT NULL DEFAULT 0,
+    input_text TEXT, output_text TEXT, input_sha256 TEXT, output_sha256 TEXT,
+    input_chars INTEGER, output_chars INTEGER, reasoning TEXT, params TEXT,
+    tokens_in INTEGER, tokens_out INTEGER, ttft_ms REAL, duration_ms REAL,
+    status TEXT NOT NULL, error_kind TEXT, error_message TEXT, headers TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_requests_stats ON requests(
+    ts_epoch, status, provider, resolved_model, endpoint,
+    requested_model, duration_ms, ttft_ms, tokens_in, tokens_out);
+"""
+
+
+def _indexes(db_path) -> set[str]:
+    conn = sqlite3.connect(db_path)
+    try:
+        return {
+            str(row[0])
+            for row in conn.execute("SELECT name FROM sqlite_master WHERE type='index'")
+        }
+    finally:
+        conn.close()
+
+
+def test_key_attribution_round_trips(store: RequestLogStore) -> None:
+    store.enqueue(_record("r1", key_index=1, key_label="abcd…wxyz"))
+    store.close()
+    row = store.get_request("r1")
+    assert row is not None
+    assert row["key_index"] == 1
+    assert row["key_label"] == "abcd…wxyz"
+
+
+def test_list_filters_and_aggregates_by_key(store: RequestLogStore) -> None:
+    store.enqueue(_record("r1", key_index=0, key_label="aaaa…1111"))
+    store.enqueue(_record("r2", key_index=0, key_label="aaaa…1111"))
+    store.enqueue(_record("r3", key_index=1, key_label="bbbb…2222"))
+    store.close()
+
+    rows, total = store.list_requests(key="aaaa…1111")
+    assert total == 2
+    assert {row["id"] for row in rows} == {"r1", "r2"}
+    assert all(row["key_label"] == "aaaa…1111" for row in rows)
+
+    by_key = {entry["key"]: entry for entry in store.stats()["by_key"]}
+    assert by_key["aaaa…1111"]["requests"] == 2
+    assert by_key["bbbb…2222"]["requests"] == 1
+
+
+def test_stats_key_filter_narrows_totals(store: RequestLogStore) -> None:
+    store.enqueue(_record("r1", key_index=0, key_label="aaaa…1111"))
+    store.enqueue(_record("r2", key_index=1, key_label="bbbb…2222"))
+    store.close()
+    assert store.stats()["total"] == 2
+    assert store.stats(key="bbbb…2222")["total"] == 1
+
+
+def test_migrates_a_database_created_before_key_columns(tmp_path) -> None:
+    """An existing log must gain the key columns without losing its rows."""
+    db_path = tmp_path / "requests.db"
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.executescript(_OLD_SCHEMA)
+        conn.execute(
+            "INSERT INTO requests (id, ts_epoch, ts_iso, endpoint, protocol,"
+            " status, provider, tokens_in, tokens_out)"
+            " VALUES ('legacy', ?, 'x', '/v1/messages', 'anthropic',"
+            " 'success', 'nvidia_nim', 5, 7)",
+            (time.time(),),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    store = RequestLogStore(db_path, max_rows=100)
+    try:
+        store.enqueue(_record("fresh", key_index=0, key_label="cccc…3333"))
+        store.close()
+
+        legacy = store.get_request("legacy")
+        assert legacy is not None
+        assert legacy["key_label"] is None
+
+        fresh = store.get_request("fresh")
+        assert fresh is not None
+        assert fresh["key_label"] == "cccc…3333"
+
+        indexes = _indexes(db_path)
+        assert "idx_requests_key" in indexes
+        # The pre-existing covering index lacked key_label, so it must be
+        # replaced rather than silently kept by CREATE INDEX IF NOT EXISTS.
+        assert "idx_requests_stats" not in indexes
+        assert "idx_requests_stats_v2" in indexes
+    finally:
+        store.close()
+
+
+def test_key_breakdown_labels_unattributed_rows(store: RequestLogStore) -> None:
+    store.enqueue(_record("r1"))
+    store.close()
+    by_key = {entry["key"] for entry in store.stats()["by_key"]}
+    assert by_key == {"(unknown)"}

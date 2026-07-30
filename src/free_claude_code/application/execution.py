@@ -13,6 +13,7 @@ from free_claude_code.core.anthropic import (
     anthropic_request_snapshot,
     get_token_count,
 )
+from free_claude_code.core.credential_attribution import record_credential
 from free_claude_code.core.trace import (
     close_stream_input,
     trace_event,
@@ -109,6 +110,10 @@ class ProviderExecutor:
         async def provider_body() -> AsyncIterator[str]:
             provider_stream: AsyncIterator[str] | None = None
             try:
+                # Baseline attribution for single-credential providers. A
+                # rotating provider overwrites this with the credential it
+                # actually picks for this request.
+                record_credential(0, provider.credential_label)
                 provider_stream = provider.stream_response(
                     routed.request,
                     input_tokens=input_tokens,

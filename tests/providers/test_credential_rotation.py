@@ -15,6 +15,7 @@ from free_claude_code.providers.credential_rotation import (
     CredentialRotationState,
     error_justifies_rotation,
 )
+from free_claude_code.providers.http import maybe_await_aclose
 from free_claude_code.providers.runtime.config import (
     build_provider_config,
     credential_rotation_policy,
@@ -310,6 +311,179 @@ async def test_rotating_provider_does_not_retry_after_output_started():
             chunks.append(chunk)  # noqa: PERF401 - incremental capture must keep partial chunks
     assert chunks == ["partial"]
     assert second.calls == 0
+
+
+@pytest.mark.asyncio
+async def test_single_policy_still_counts_usage():
+    """Regression: the ``single`` fast path used to skip usage bookkeeping."""
+    state = CredentialRotationState(3, "single")
+    for _ in range(4):
+        assert await state.acquire() == 0
+    metrics = state.get_metrics()
+    assert metrics[0]["request_count"] == 4
+    assert [m["request_count"] for m in metrics[1:]] == [0, 0]
+
+
+@pytest.mark.asyncio
+async def test_single_key_pool_counts_usage():
+    """Regression: a one-key pool reported zero requests under any policy."""
+    state = CredentialRotationState(1, "round_robin")
+    for _ in range(3):
+        assert await state.acquire() == 0
+    assert state.get_metrics()[0]["request_count"] == 3
+
+
+@pytest.mark.asyncio
+async def test_unrelated_failures_do_not_escalate_the_auth_lockout():
+    """Regression: transient errors used to inflate the auth lockout tier.
+
+    Two 5xx followed by a single 401 jumped straight to the 24-hour tier,
+    benching a healthy credential for a day after one blip.
+    """
+
+    class _AuthError(Exception):
+        status_code = 401
+
+    state = CredentialRotationState(2, "failover")
+    await state.report_failure(0, _RetryableError())
+    await state.report_failure(0, _RetryableError())
+    await state.report_failure(0, _AuthError())
+
+    metrics = state.get_metrics()[0]
+    assert metrics["state"] == "LOCKED_OUT"
+    # First auth failure => first tier (5 minutes), not the 24-hour tier.
+    assert 290.0 < metrics["lockout_remaining"] <= 300.0
+
+
+@pytest.mark.asyncio
+async def test_success_clears_the_auth_escalation():
+    class _AuthError(Exception):
+        status_code = 401
+
+    state = CredentialRotationState(1, "single")
+    await state.report_failure(0, _AuthError())
+    await state.report_success(0)
+    await state.report_failure(0, _AuthError())
+    metrics = state.get_metrics()[0]
+    assert 290.0 < metrics["lockout_remaining"] <= 300.0
+
+
+@pytest.mark.asyncio
+async def test_rate_limits_do_not_open_the_circuit():
+    """429 escalates the cooldown ladder but never trips the breaker."""
+    state = CredentialRotationState(2, "round_robin")
+    for _ in range(5):
+        await state.report_failure(0, _RetryableError())
+    metrics = state.get_metrics()[0]
+    assert metrics["state"] == "COOLDOWN"
+    assert metrics["consecutive_failures"] == 0
+
+
+@pytest.mark.asyncio
+async def test_abandoned_probe_is_released():
+    """Regression: an abandoned half-open probe benched a key permanently.
+
+    ``acquire`` reserves a half-open credential by setting ``is_probing``; if
+    the client disconnects, neither success nor failure is reported, so the
+    reservation used to stick and the credential was never selectable again.
+    """
+    state = CredentialRotationState(2, "round_robin")
+    await state.report_failure(0, _RetryableError())
+    assert await state.reset_key(0) is True
+    state.release_probe(0)
+    assert state.get_metrics()[0]["is_probing"] is False
+
+
+@pytest.mark.asyncio
+async def test_client_disconnect_does_not_bench_the_credential():
+    first = _FakeProvider(chunks=("a", "b", "c"))
+    second = _FakeProvider(chunks=("z",))
+    provider = _rotating([first, second], "round_robin")
+
+    stream = provider.stream_response(_request())
+    assert await stream.__anext__() == "a"
+    await maybe_await_aclose(stream)  # client went away mid-stream
+
+    metrics = provider.key_health()[0]
+    assert metrics["is_probing"] is False
+    assert metrics["state"] == "HEALTHY"
+
+
+@pytest.mark.asyncio
+async def test_mid_stream_failure_counts_against_the_credential():
+    """Regression: failures after the first chunk were never recorded."""
+    first = _FakeProvider(chunks=("partial",), fail_after_first=_RetryableError())
+    second = _FakeProvider(chunks=("ok",))
+    provider = _rotating([first, second], "round_robin")
+
+    with pytest.raises(_RetryableError):
+        async for _chunk in provider.stream_response(_request()):
+            pass
+
+    metrics = provider.key_health()[0]
+    assert metrics["failure_count"] == 1
+    assert metrics["state"] == "COOLDOWN"
+
+
+@pytest.mark.asyncio
+async def test_key_health_reports_index_and_masked_label():
+    providers = [_FakeProvider(chunks=("a",)), _FakeProvider(chunks=("b",))]
+    config = ProviderConfig(
+        api_key="alpha-secret-0001",
+        base_url="http://x",
+        api_keys=("alpha-secret-0001", "beta-secret-0002"),
+        credential_rotation="round_robin",
+    )
+    state = CredentialRotationState(2, "round_robin")
+    rotating = RotatingProvider(
+        config,
+        providers,
+        state,
+        key_labels=("alph…0001", "beta…0002"),
+    )
+
+    health = rotating.key_health()
+    assert [entry["index"] for entry in health] == [0, 1]
+    assert [entry["key_label"] for entry in health] == ["alph…0001", "beta…0002"]
+    # The raw credential must never appear in a health snapshot.
+    assert "alpha-secret-0001" not in repr(health)
+
+
+@pytest.mark.asyncio
+async def test_rotating_provider_records_the_credential_it_used():
+    from free_claude_code.core.credential_attribution import install_attribution
+
+    first = _FakeProvider(fail_before_first=_RetryableError())
+    second = _FakeProvider(chunks=("ok",))
+    config = ProviderConfig(
+        api_key="k1",
+        base_url="http://x",
+        api_keys=("k1", "k2"),
+        credential_rotation="failover",
+    )
+    state = CredentialRotationState(2, "failover")
+    provider = RotatingProvider(
+        config, [first, second], state, key_labels=("…key1", "…key2")
+    )
+
+    slot = install_attribution()
+    assert [c async for c in provider.stream_response(_request())] == ["ok"]
+    # After failover the credential that actually served the request wins.
+    assert slot.index == 1
+    assert slot.label == "…key2"
+
+
+def test_base_provider_exposes_a_masked_credential_label():
+    provider = _FakeProvider()
+    assert provider.credential_label == "…"
+    labelled = _FakeProvider()
+    labelled._config = ProviderConfig(api_key="abcdefghijklmnop", base_url="http://x")
+    assert labelled.credential_label == "abcd…mnop"
+
+
+def test_rotating_provider_has_no_single_credential_label():
+    provider = _rotating([_FakeProvider(), _FakeProvider()], "round_robin")
+    assert provider.credential_label is None
 
 
 def test_admin_manifest_exposes_rotation_select_for_nvidia_nim():

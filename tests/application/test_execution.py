@@ -19,6 +19,10 @@ class FakeProvider:
         self.stream_calls: list[dict[str, object]] = []
         self.stream_close_calls = 0
 
+    @property
+    def credential_label(self) -> str | None:
+        return None
+
     def preflight_stream(
         self,
         request: MessagesRequest,

@@ -37,6 +37,10 @@ class CanonicalFailureProvider:
         self.preflight_stream = MagicMock()
         self.stream_kwargs: list[dict[str, Any]] = []
 
+    @property
+    def credential_label(self) -> str | None:
+        return None
+
     async def stream_response(
         self,
         _request: object,

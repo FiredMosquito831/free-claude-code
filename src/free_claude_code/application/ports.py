@@ -14,6 +14,11 @@ from .model_metadata import ProviderModelInfo
 class ProviderPort(Protocol):
     """Minimal provider capability required to execute one request."""
 
+    @property
+    def credential_label(self) -> str | None:
+        """Masked label of the credential in use, or ``None`` if per-request."""
+        ...
+
     def preflight_stream(
         self,
         request: MessagesRequest,

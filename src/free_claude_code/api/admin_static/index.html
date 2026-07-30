@@ -146,6 +146,16 @@
                 <datalist id="reqModelOptions"></datalist>
               </label>
               <label>
+                Key
+                <input
+                  id="reqFilterKey"
+                  type="text"
+                  list="reqKeyOptions"
+                  placeholder="any"
+                />
+                <datalist id="reqKeyOptions"></datalist>
+              </label>
+              <label>
                 Search text
                 <input id="reqFilterSearch" type="text" placeholder="input or output contains…" />
               </label>
@@ -225,6 +235,10 @@
                 <div id="reqProviderBreakdown"></div>
               </section>
               <section class="analytics-panel">
+                <h4>Key performance</h4>
+                <div id="reqKeyBreakdown"></div>
+              </section>
+              <section class="analytics-panel">
                 <h4>Top errors</h4>
                 <div id="reqTopErrors"></div>
               </section>
@@ -236,6 +250,7 @@
                     <th>Time</th>
                     <th>Endpoint</th>
                     <th>Provider</th>
+                    <th>Key</th>
                     <th>Model</th>
                     <th>Status</th>
                     <th>Tokens</th>
