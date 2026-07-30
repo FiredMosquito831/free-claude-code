@@ -2,6 +2,8 @@
 
 from collections.abc import AsyncIterator
 
+import httpx
+import openai
 import pytest
 
 from free_claude_code.config.admin.manifest import FIELD_BY_KEY
@@ -9,12 +11,14 @@ from free_claude_code.config.credentials import parse_credential_keys
 from free_claude_code.config.provider_catalog import PROVIDER_CATALOG
 from free_claude_code.config.settings import Settings
 from free_claude_code.core.anthropic.models import Message, MessagesRequest
+from free_claude_code.core.failures import ExecutionFailure
 from free_claude_code.core.reasoning import DEFAULT_REASONING_POLICY, ReasoningPolicy
 from free_claude_code.providers.base import BaseProvider, ProviderConfig
 from free_claude_code.providers.credential_rotation import (
     CredentialRotationState,
     error_justifies_rotation,
 )
+from free_claude_code.providers.failure_policy import classify_provider_failure
 from free_claude_code.providers.http import maybe_await_aclose
 from free_claude_code.providers.runtime.config import (
     build_provider_config,
@@ -492,3 +496,48 @@ def test_admin_manifest_exposes_rotation_select_for_nvidia_nim():
     assert field.field_type == "select"
     assert set(field.options) == {"single", "round_robin", "least_used", "failover"}
     assert field.restart_required is True
+
+
+def _classified(status: int) -> ExecutionFailure:
+    """The failure shape a sub-provider actually raises for an upstream status."""
+    request = httpx.Request("POST", "https://upstream.invalid/v1/chat")
+    return classify_provider_failure(
+        openai.APIStatusError(
+            "upstream", response=httpx.Response(status, request=request), body=None
+        ),
+        provider_name="test",
+        read_timeout_s=60.0,
+        request_id="req_test",
+        mark_rate_limited=lambda *_args, **_kwargs: None,
+    )
+
+
+@pytest.mark.parametrize("status", [401, 403])
+def test_classified_auth_failures_justify_rotation(status: int) -> None:
+    """Regression: a rejected credential must fail over, not fail the request.
+
+    Providers classify their own failures before the rotating wrapper sees
+    them, so a 401 arrives as ExecutionFailure(retryable=False). Rotation used
+    to read that as "do not rotate", so a revoked or exhausted key failed the
+    request outright instead of trying a working one.
+    """
+    failure = _classified(status)
+    assert failure.retryable is False
+    assert error_justifies_rotation(failure) is True
+
+
+def test_classified_bad_request_still_does_not_rotate() -> None:
+    assert error_justifies_rotation(_classified(400)) is False
+
+
+@pytest.mark.asyncio
+async def test_rotating_provider_fails_over_a_rejected_credential():
+    """End-to-end: a 401 on key 0 must be served by key 1."""
+    first = _FakeProvider(fail_before_first=_classified(401))
+    second = _FakeProvider(chunks=("ok",))
+    provider = _rotating([first, second], "failover")
+
+    assert [c async for c in provider.stream_response(_request())] == ["ok"]
+    assert first.calls == 1
+    assert second.calls == 1
+    assert provider.key_health()[0]["state"] == "LOCKED_OUT"

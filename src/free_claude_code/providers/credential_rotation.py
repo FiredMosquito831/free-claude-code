@@ -24,6 +24,7 @@ from typing import Any
 import httpx
 import openai
 
+from free_claude_code.core.failures import ExecutionFailure
 from free_claude_code.providers.failure_policy import (
     retryable_transient_status,
     retryable_upstream_transport_error,
@@ -44,6 +45,9 @@ STATE_HALF_OPEN = "HALF_OPEN"
 STATE_LOCKED_OUT = "LOCKED_OUT"
 
 
+AUTH_STATUS_CODES = (401, 403)
+
+
 def error_justifies_rotation(error: BaseException) -> bool:
     """Return True when trying a different credential may resolve the failure.
 
@@ -53,10 +57,19 @@ def error_justifies_rotation(error: BaseException) -> bool:
     """
     if isinstance(error, openai.AuthenticationError):
         return True
-    if isinstance(error, httpx.HTTPStatusError) and error.response.status_code in (
-        401,
-        403,
+    if (
+        isinstance(error, httpx.HTTPStatusError)
+        and error.response.status_code in AUTH_STATUS_CODES
     ):
+        return True
+    # Providers classify their own SDK/HTTP failures before the wrapper sees
+    # them, so a rejected credential arrives as ExecutionFailure(retryable=
+    # False) rather than a raw SDK error. ``retryable`` there means "safe to
+    # retry the same credential", which a 401 never is -- but a *different*
+    # credential may well succeed, and that is exactly what rotation is for.
+    # Without this branch a revoked or exhausted key fails the request instead
+    # of failing over, defeating multi-key rotation in its main use case.
+    if isinstance(error, ExecutionFailure) and error.status_code in AUTH_STATUS_CODES:
         return True
     if retryable_transient_status(error) is not None:
         return True
