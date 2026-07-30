@@ -42,6 +42,10 @@ class FakeProvider:
             'event: message_stop\ndata: {"type":"message_stop"}\n\n',
         ]
 
+    @property
+    def credential_label(self) -> str | None:
+        return None
+
     def preflight_stream(
         self, request: MessagesRequest, *, reasoning: ReasoningPolicy
     ) -> None:

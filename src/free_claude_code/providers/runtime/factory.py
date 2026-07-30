@@ -4,6 +4,7 @@ import dataclasses
 from collections.abc import Callable
 
 from free_claude_code.application.errors import UnknownProviderError
+from free_claude_code.config.credentials import mask_key_label
 from free_claude_code.config.provider_catalog import (
     PROVIDER_CATALOG,
     ProviderDescriptor,
@@ -208,4 +209,5 @@ def create_provider(provider_id: str, settings: Settings) -> BaseProvider:
         for key in keys
     ]
     state = CredentialRotationState(len(providers), config.credential_rotation)
-    return RotatingProvider(config, providers, state)
+    labels = tuple(mask_key_label(key) for key in keys)
+    return RotatingProvider(config, providers, state, key_labels=labels)

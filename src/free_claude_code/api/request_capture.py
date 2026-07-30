@@ -17,6 +17,7 @@ from free_claude_code.application.routing import RoutedMessagesRequest
 from free_claude_code.config.settings import Settings
 from free_claude_code.core.anthropic import MessagesRequest
 from free_claude_code.core.async_iterators import try_close_async_iterator
+from free_claude_code.core.credential_attribution import install_attribution
 from free_claude_code.core.diagnostics import safe_exception_message
 from free_claude_code.core.failures import find_execution_failure
 from free_claude_code.core.request_log import (
@@ -56,6 +57,9 @@ class RequestCapture:
         self._tokens_out: int | None = None
         self._error: tuple[str | None, str | None] | None = None
         self._finalized = False
+        # The rotating provider writes the credential it picks into this slot
+        # from deep in the call stack; it is read back at finalize time.
+        self._credential = install_attribution()
         input_chars = len(input_text) if input_text else None
         self._record = RequestRecord(
             id=request_id,
@@ -217,6 +221,8 @@ class RequestCapture:
             record.output_sha256 = _sha256(output_text)
         if self._error is not None:
             record.error_kind, record.error_message = self._error
+        record.key_index = self._credential.index
+        record.key_label = self._credential.label
         self._store.enqueue(record)
 
 

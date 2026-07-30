@@ -57,6 +57,8 @@ _LIST_METADATA_COLUMNS = (
     "error_kind",
     "error_message",
     "headers",
+    "key_index",
+    "key_label",
 )
 
 _SCHEMA = """
@@ -85,13 +87,28 @@ CREATE TABLE IF NOT EXISTS requests (
     status TEXT NOT NULL,
     error_kind TEXT,
     error_message TEXT,
-    headers TEXT
+    headers TEXT,
+    key_index INTEGER,
+    key_label TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_requests_ts ON requests(ts_epoch);
 CREATE INDEX IF NOT EXISTS idx_requests_status ON requests(status);
 CREATE INDEX IF NOT EXISTS idx_requests_provider ON requests(provider);
 CREATE INDEX IF NOT EXISTS idx_requests_model ON requests(resolved_model);
 """
+
+# Columns added after the initial release. ``CREATE TABLE IF NOT EXISTS`` is a
+# no-op on an existing database, so each one needs an explicit ALTER TABLE.
+_ADDED_COLUMNS = (
+    ("key_index", "ALTER TABLE requests ADD COLUMN key_index INTEGER"),
+    ("key_label", "ALTER TABLE requests ADD COLUMN key_label TEXT"),
+)
+
+# Indexes over post-release columns, created only once those columns exist.
+# Keeping them out of ``_SCHEMA`` matters: that script runs before the ALTER
+# TABLE migration, so indexing ``key_label`` there would fail outright on a
+# database created by an earlier version.
+_ADDED_INDEXES = ("CREATE INDEX IF NOT EXISTS idx_requests_key ON requests(key_label)",)
 
 
 def default_request_log_path() -> Path:
@@ -136,6 +153,10 @@ class RequestRecord:
     error_kind: str | None = None
     error_message: str | None = None
     headers: dict[str, str] | None = None
+    # Which credential served this request: pool index plus a masked
+    # ``first4…last4`` label. The raw key is never stored.
+    key_index: int | None = None
+    key_label: str | None = None
 
     @property
     def ts_iso(self) -> str:
@@ -205,8 +226,29 @@ class RequestLogStore:
                 conn.isolation_level = previous
             with conn:
                 conn.executescript(_SCHEMA)
+                self._ensure_added_columns(conn)
         finally:
             conn.close()
+
+    @staticmethod
+    def _ensure_added_columns(conn: sqlite3.Connection) -> None:
+        """Add post-release columns to a database created by an older version."""
+        existing = {str(row[1]) for row in conn.execute("PRAGMA table_info(requests)")}
+        for column, alter_sql in _ADDED_COLUMNS:
+            if column in existing:
+                continue
+            try:
+                conn.execute(alter_sql)
+            except sqlite3.OperationalError:
+                # Another process may have won the migration race; only a
+                # genuinely missing column is an error.
+                columns = {
+                    str(row[1]) for row in conn.execute("PRAGMA table_info(requests)")
+                }
+                if column not in columns:
+                    raise
+        for index_sql in _ADDED_INDEXES:
+            conn.execute(index_sql)
 
     @staticmethod
     def _ensure_stats_index(conn: sqlite3.Connection) -> None:
@@ -219,10 +261,15 @@ class RequestLogStore:
         bodies entirely.
         """
         with contextlib.suppress(sqlite3.Error):
+            # Versioned name: ``CREATE INDEX IF NOT EXISTS`` would silently keep
+            # an older index built before ``key_label`` joined the column list,
+            # leaving the per-key aggregate without index-only coverage.
+            conn.execute("DROP INDEX IF EXISTS idx_requests_stats")
             conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_requests_stats ON requests("
+                "CREATE INDEX IF NOT EXISTS idx_requests_stats_v2 ON requests("
                 " ts_epoch, status, provider, resolved_model, endpoint,"
-                " requested_model, duration_ms, ttft_ms, tokens_in, tokens_out)"
+                " requested_model, key_label, duration_ms, ttft_ms,"
+                " tokens_in, tokens_out)"
             )
 
     @staticmethod
@@ -325,8 +372,9 @@ class RequestLogStore:
                         provider, resolved_model, stream, input_text, output_text,
                         input_sha256, output_sha256, input_chars, output_chars,
                         reasoning, params, tokens_in, tokens_out, ttft_ms,
-                        duration_ms, status, error_kind, error_message, headers
-                    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                        duration_ms, status, error_kind, error_message, headers,
+                        key_index, key_label
+                    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                     """,
                     rows,
                 )
@@ -366,6 +414,8 @@ class RequestLogStore:
             record.error_kind,
             cap_text(record.error_message, MAX_ERROR_CHARS),
             json.dumps(record.headers) if record.headers else None,
+            record.key_index,
+            record.key_label,
         )
 
     def close(self, *, timeout: float = 5.0) -> None:
@@ -389,6 +439,7 @@ class RequestLogStore:
         model: str | None = None,
         status: str | None = None,
         endpoint: str | None = None,
+        key: str | None = None,
         since: float | None = None,
         until: float | None = None,
         q: str | None = None,
@@ -398,6 +449,9 @@ class RequestLogStore:
         if provider:
             clauses.append("provider = ?")
             args.append(provider)
+        if key:
+            clauses.append("key_label = ?")
+            args.append(key)
         if model:
             clauses.append("(resolved_model = ? OR requested_model = ?)")
             args.extend([model, model])
@@ -429,6 +483,7 @@ class RequestLogStore:
         model: str | None = None,
         status: str | None = None,
         endpoint: str | None = None,
+        key: str | None = None,
         since: float | None = None,
         until: float | None = None,
         q: str | None = None,
@@ -440,6 +495,7 @@ class RequestLogStore:
             model=model,
             status=status,
             endpoint=endpoint,
+            key=key,
             since=since,
             until=until,
             q=q,
@@ -525,11 +581,12 @@ class RequestLogStore:
         model: str | None = None,
         status: str | None = None,
         endpoint: str | None = None,
+        key: str | None = None,
         since: float | None = None,
         until: float | None = None,
         q: str | None = None,
     ) -> dict[str, Any]:
-        cache_key = (provider, model, status, endpoint, since, until, q)
+        cache_key = (provider, model, status, endpoint, key, since, until, q)
         now = time.monotonic()
         with self._stats_lock:
             cached = self._stats_cache.get(cache_key)
@@ -540,6 +597,7 @@ class RequestLogStore:
             model=model,
             status=status,
             endpoint=endpoint,
+            key=key,
             since=since,
             until=until,
             q=q,
@@ -570,6 +628,7 @@ class RequestLogStore:
             ]
             by_provider = self._breakdown(conn, "provider", where, args)
             by_model = self._breakdown(conn, "resolved_model", where, args)
+            by_key = self._breakdown(conn, "key_label", where, args)
             top_errors = [
                 {"message": row[0], "count": row[1]}
                 for row in conn.execute(
@@ -598,6 +657,7 @@ class RequestLogStore:
             "avg_ttft_ms": _rounded(totals["avg_ttft_ms"]),
             "by_provider": by_provider,
             "by_model": by_model,
+            "by_key": by_key,
             "series": series,
             "top_errors": top_errors,
         }

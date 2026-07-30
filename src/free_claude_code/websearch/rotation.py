@@ -1,4 +1,4 @@
-"""API key parsing, masking, and in-memory rotation health (KeyPool).
+"""API key parsing and in-memory rotation health (KeyPool).
 
 KeyPool health semantics (in-memory only):
 
@@ -20,6 +20,17 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
 
+from free_claude_code.config.credentials import mask_key_label
+
+__all__ = [
+    "KeyHealth",
+    "KeyHealthState",
+    "KeyPool",
+    "default_rotation_policy",
+    "mask_key_label",
+    "parse_websearch_keys",
+]
+
 ROTATION_POLICIES: tuple[str, ...] = ("single", "round_robin", "least_used", "failover")
 DEFAULT_SINGLE_KEY_POLICY = "single"
 DEFAULT_MULTI_KEY_POLICY = "failover"
@@ -38,16 +49,6 @@ def parse_websearch_keys(raw: str | None) -> tuple[str, ...]:
     if not raw:
         return ()
     return tuple(part for part in (piece.strip() for piece in raw.split(",")) if part)
-
-
-def mask_key_label(key: str) -> str:
-    """Mask a key for logs/analytics: ``first4…last4`` (shorter keys stay tail-only)."""
-
-    if len(key) > 8:
-        return f"{key[:4]}…{key[-4:]}"
-    if len(key) > 4:
-        return f"…{key[-4:]}"
-    return "…" if key else ""
 
 
 def default_rotation_policy(key_count: int) -> str:

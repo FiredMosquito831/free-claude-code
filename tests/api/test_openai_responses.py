@@ -23,6 +23,10 @@ class FakeProvider:
         self.requests: list[Any] = []
         self.stream_kwargs: list[dict[str, Any]] = []
 
+    @property
+    def credential_label(self) -> str | None:
+        return None
+
     async def stream_response(self, request_data, **_kwargs):
         self.requests.append(request_data)
         self.stream_kwargs.append(_kwargs)

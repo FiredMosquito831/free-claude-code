@@ -80,6 +80,10 @@ class KeyHealth:
     request_count: int = 0
     failure_count: int = 0
     consecutive_failures: int = 0
+    # Auth failures escalate the lockout ladder on their own counter. Sharing
+    # ``consecutive_failures`` would let unrelated 5xx/transport errors inflate
+    # the tier, so a single 401 after two timeouts jumped straight to 24 hours.
+    auth_failures: int = 0
     tier: int = 0
     cooldown_until: float = 0.0
     lockout_until: float = 0.0
@@ -93,6 +97,7 @@ class KeyHealth:
             "request_count": self.request_count,
             "failure_count": self.failure_count,
             "consecutive_failures": self.consecutive_failures,
+            "auth_failures": self.auth_failures,
             "tier": self.tier,
             "cooldown_remaining": max(0.0, self.cooldown_until - now),
             "lockout_remaining": max(0.0, self.lockout_until - now),
@@ -148,11 +153,13 @@ class CredentialRotationState:
             now = time.monotonic()
             self._update_states(now)
 
-            if self._policy == "single" or self._key_count == 1:
-                return 0
-
             selected: int | None = None
-            if self._policy == "round_robin":
+            if self._policy == "single" or self._key_count == 1:
+                # Still falls through to the bookkeeping below: a single-key or
+                # ``single``-policy pool must report usage like any other, or
+                # per-key analytics stay empty for the default configuration.
+                selected = 0
+            elif self._policy == "round_robin":
                 for i in range(self._key_count):
                     index = (self._rr_index + i) % self._key_count
                     if self._selectable(self._health[index]):
@@ -183,6 +190,22 @@ class CredentialRotationState:
                 health.is_probing = True
             return selected
 
+    def release_probe(self, index: int) -> None:
+        """Clear a half-open probe reservation without judging the credential.
+
+        Used when a request neither succeeded nor failed -- a client disconnect
+        or cancellation mid-stream. ``acquire`` sets ``is_probing`` on a
+        half-open credential and only ``report_success``/``report_failure``
+        clear it, so an abandoned probe would bench that credential forever.
+
+        Deliberately synchronous: it is called from a ``finally`` block that can
+        run while ``GeneratorExit`` is propagating, where awaiting is unsafe. A
+        lone attribute write needs no lock under asyncio's single-threaded
+        scheduling because it contains no await point.
+        """
+        if 0 <= index < self._key_count:
+            self._health[index].is_probing = False
+
     async def report_success(self, index: int) -> None:
         """Mark a credential as healthy after a successful request."""
         async with self._lock:
@@ -190,6 +213,7 @@ class CredentialRotationState:
                 health = self._health[index]
                 health.state = STATE_HEALTHY
                 health.consecutive_failures = 0
+                health.auth_failures = 0
                 health.tier = 0
                 health.cooldown_until = 0.0
                 health.lockout_until = 0.0
@@ -215,13 +239,16 @@ class CredentialRotationState:
 
             if status in (401, 403):
                 health.consecutive_failures += 1
+                health.auth_failures += 1
                 tier_index = (
-                    min(health.consecutive_failures, len(AUTH_LOCKOUT_TIERS_SECONDS))
-                    - 1
+                    min(health.auth_failures, len(AUTH_LOCKOUT_TIERS_SECONDS)) - 1
                 )
                 health.state = STATE_LOCKED_OUT
                 health.lockout_until = now + AUTH_LOCKOUT_TIERS_SECONDS[tier_index]
             elif status == 429:
+                # A rate limit means the credential is throttled, not broken, so
+                # it escalates the cooldown ladder without counting toward the
+                # circuit-breaker threshold. Only genuine errors open a circuit.
                 health.tier = min(health.tier + 1, len(COOLDOWN_TIERS_SECONDS))
                 health.cooldown_until = now + COOLDOWN_TIERS_SECONDS[health.tier - 1]
                 health.state = STATE_COOLDOWN
@@ -251,6 +278,7 @@ class CredentialRotationState:
             health = self._health[index]
             health.state = STATE_HEALTHY
             health.consecutive_failures = 0
+            health.auth_failures = 0
             health.tier = 0
             health.cooldown_until = 0.0
             health.lockout_until = 0.0
@@ -265,6 +293,7 @@ class CredentialRotationState:
                 if health.state != STATE_HEALTHY:
                     health.state = STATE_HEALTHY
                     health.consecutive_failures = 0
+                    health.auth_failures = 0
                     health.tier = 0
                     health.cooldown_until = 0.0
                     health.lockout_until = 0.0

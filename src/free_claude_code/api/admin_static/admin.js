@@ -2818,18 +2818,21 @@ const reqState = {
   detailReturnFocus: null,
   providerOptions: new Set(),
   modelOptions: new Set(),
+  keyOptions: new Set(),
 };
 
 function reqFilters() {
   const params = new URLSearchParams();
   const provider = byId("reqFilterProvider").value.trim();
   const model = byId("reqFilterModel").value.trim();
+  const key = byId("reqFilterKey").value.trim();
   const status = byId("reqFilterStatus").value;
   const search = byId("reqFilterSearch").value.trim();
   const endpoint = byId("reqFilterEndpoint").value.trim();
   const windowSeconds = byId("reqFilterWindow").value;
   if (provider) params.set("provider", provider);
   if (model) params.set("model", model);
+  if (key) params.set("key", key);
   if (status) params.set("status", status);
   if (search) params.set("q", search);
   if (endpoint) params.set("endpoint", endpoint);
@@ -2860,6 +2863,7 @@ async function loadRequestsView() {
     byId("reqStatsCards").innerHTML = "";
     byId("reqTableBody").innerHTML = "";
     byId("reqProviderBreakdown").innerHTML = "";
+    byId("reqKeyBreakdown").innerHTML = "";
     byId("reqTopErrors").innerHTML = "";
     clearChart(byId("reqSeriesChart"));
     clearChart(byId("reqModelChart"));
@@ -2877,6 +2881,7 @@ async function loadRequestsView() {
   renderReqModelChart(stats.by_model || []);
   populateRequestFilterOptions(stats);
   renderRequestProviderBreakdown(stats.by_provider || []);
+  renderRequestKeyBreakdown(stats.by_key || []);
   renderRequestTopErrors(stats.top_errors || []);
   reqState.total = list.total || 0;
   renderRequestsTable(list.rows || []);
@@ -2900,6 +2905,7 @@ function populateRequestFilterOptions(stats) {
   };
   populate("reqProviderOptions", stats.by_provider || [], reqState.providerOptions);
   populate("reqModelOptions", stats.by_model || [], reqState.modelOptions);
+  populate("reqKeyOptions", stats.by_key || [], reqState.keyOptions);
 }
 
 function renderRequestStatsCards(stats) {
@@ -2956,6 +2962,30 @@ function renderRequestProviderBreakdown(rows) {
   );
 }
 
+function renderRequestKeyBreakdown(rows) {
+  const container = byId("reqKeyBreakdown");
+  container.innerHTML = "";
+  container.appendChild(
+    analyticsTable(
+      ["Key", "Requests", "Error rate", "Tokens", "Avg latency"],
+      rows.map((row) => {
+        const requests = Number(row.requests || 0);
+        const errors = Number(row.errors || 0);
+        return [
+          row.key || "unknown",
+          formatAnalyticsNumber(requests),
+          requests ? `${((errors / requests) * 100).toFixed(1)}%` : "0%",
+          formatAnalyticsNumber(
+            Number(row.tokens_in || 0) + Number(row.tokens_out || 0),
+          ),
+          row.avg_duration_ms != null ? `${row.avg_duration_ms} ms` : "—",
+        ];
+      }),
+      "No per-key data yet.",
+    ),
+  );
+}
+
 function renderRequestTopErrors(rows) {
   const container = byId("reqTopErrors");
   container.innerHTML = "";
@@ -2977,7 +3007,7 @@ function renderRequestsTable(rows) {
   if (rows.length === 0) {
     const tr = document.createElement("tr");
     const td = document.createElement("td");
-    td.colSpan = 9;
+    td.colSpan = 10;
     td.className = "analytics-empty";
     td.textContent = "No requests match the current filters.";
     tr.appendChild(td);
@@ -2991,6 +3021,7 @@ function renderRequestsTable(rows) {
       formatRequestTime(row),
       row.endpoint || "",
       row.provider || "",
+      row.key_label || "",
       row.resolved_model || row.requested_model || "",
       row.status,
       `${row.tokens_in ?? "—"}/${row.tokens_out ?? "—"}`,

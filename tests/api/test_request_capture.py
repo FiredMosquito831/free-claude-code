@@ -351,6 +351,10 @@ class _FakeProvider:
     def __init__(self, events: list[str]) -> None:
         self.events = events
 
+    @property
+    def credential_label(self) -> str | None:
+        return None
+
     def preflight_stream(self, request, *, reasoning) -> None:
         return None
 
@@ -422,3 +426,74 @@ async def test_messages_handler_end_to_end_capture() -> None:
     assert row["input_text"] == "hello"
     assert row["reasoning"] is not None
     assert row["params"]["max_tokens"] == 50
+
+
+class _RotatingFakeProvider(_FakeProvider):
+    """Stands in for RotatingProvider: picks a credential per request."""
+
+    def __init__(self, events: list[str], *, index: int, label: str) -> None:
+        super().__init__(events)
+        self._index = index
+        self._label = label
+
+    @property
+    def credential_label(self) -> str | None:
+        return None
+
+    async def stream_response(
+        self,
+        request,
+        input_tokens: int = 0,
+        *,
+        request_id: str | None = None,
+        reasoning,
+    ) -> AsyncIterator[str]:
+        from free_claude_code.core.credential_attribution import record_credential
+
+        record_credential(self._index, self._label)
+        for event in self.events:
+            yield event
+
+
+@pytest.mark.asyncio
+async def test_capture_records_the_credential_across_the_streaming_response() -> None:
+    """The credential picked deep in the provider must reach the stored row.
+
+    Exercises the whole chain: the capture installs the attribution slot, the
+    provider writes into it while the response streams (potentially in another
+    task), and finalize reads it back.
+    """
+    from free_claude_code.api.handlers import MessagesHandler
+
+    events = _events(
+        (
+            "message_start",
+            {"type": "message_start", "message": {"usage": {"input_tokens": 3}}},
+        ),
+        ("message_stop", {"type": "message_stop"}),
+    )
+    handler = MessagesHandler(
+        Settings(),
+        provider_resolver=lambda _: _RotatingFakeProvider(
+            events, index=2, label="abcd…wxyz"
+        ),
+    )
+    request = MessagesRequest(
+        model="nvidia_nim/test-model",
+        max_tokens=50,
+        stream=True,
+        messages=[Message(role="user", content="hello")],
+    )
+    response = await handler.create(request, request_id="req_key_attr")
+    assert isinstance(response, ManagedStreamingResponse)
+    async for _ in response.body_iterator:
+        pass
+    await response.aclose()
+
+    store = get_request_log_store()
+    assert store is not None
+    store.close()
+    row = store.get_request("req_key_attr")
+    assert row is not None
+    assert row["key_index"] == 2
+    assert row["key_label"] == "abcd…wxyz"
