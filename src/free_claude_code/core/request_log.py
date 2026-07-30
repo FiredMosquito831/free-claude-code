@@ -191,7 +191,18 @@ class RequestLogStore:
     def _init_db(self) -> None:
         conn = self._connect()
         try:
-            self._ensure_auto_vacuum(conn)
+            # A fresh database can adopt incremental auto-vacuum for free, but
+            # only if the pragma is applied outside a transaction and before the
+            # first table exists. Converting a populated database needs a full
+            # VACUUM, which the writer thread performs in the background
+            # instead (see ``_writer_loop``).
+            previous = conn.isolation_level
+            conn.isolation_level = None
+            try:
+                with contextlib.suppress(sqlite3.Error):
+                    conn.execute("PRAGMA auto_vacuum=INCREMENTAL")
+            finally:
+                conn.isolation_level = previous
             with conn:
                 conn.executescript(_SCHEMA)
         finally:
@@ -203,18 +214,25 @@ class RequestLogStore:
 
         Without this the database file only ever grows: ``prune`` frees pages
         onto the internal freelist but never returns them to the filesystem.
+
+        Converting an existing database requires a full VACUUM, which on a
+        multi-hundred-megabyte file takes many seconds. This must therefore run
+        on the writer thread, never on a request path.
         """
         try:
             mode = conn.execute("PRAGMA auto_vacuum").fetchone()[0]
             if int(mode) == 2:
                 return
             conn.execute("PRAGMA auto_vacuum=INCREMENTAL")
-            # Changing auto_vacuum on a populated database only takes effect
-            # after a full VACUUM, which also reclaims existing free pages.
             previous = conn.isolation_level
             conn.isolation_level = None
             try:
+                started = time.monotonic()
                 conn.execute("VACUUM")
+                logger.info(
+                    "Request log converted to incremental auto-vacuum in {:.1f}s",
+                    time.monotonic() - started,
+                )
             finally:
                 conn.isolation_level = previous
         except sqlite3.Error as exc:
@@ -244,6 +262,9 @@ class RequestLogStore:
         # batch re-runs the WAL/synchronous pragmas on every flush.
         conn = self._connect()
         try:
+            # Off the request path: a one-time conversion VACUUM on a large
+            # existing database can take tens of seconds.
+            self._ensure_auto_vacuum(conn)
             while not stopping:
                 try:
                     item = self._queue.get(timeout=_WRITER_POLL_SECONDS)

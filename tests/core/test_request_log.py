@@ -440,14 +440,57 @@ def test_read_paths_close_connections(store: RequestLogStore) -> None:
     assert after == before
 
 
-def test_auto_vacuum_is_incremental(tmp_path) -> None:
+def _auto_vacuum_mode(path) -> int:
+    conn = sqlite3.connect(path)
+    try:
+        return int(conn.execute("PRAGMA auto_vacuum").fetchone()[0])
+    finally:
+        conn.close()
+
+
+def test_auto_vacuum_becomes_incremental(tmp_path) -> None:
+    """The store must end up on incremental auto-vacuum.
+
+    A populated database is converted by the writer thread rather than during
+    construction, so poll instead of asserting immediately.
+    """
     store = RequestLogStore(tmp_path / "requests.db", max_rows=10)
     try:
-        with sqlite3.connect(store.db_path) as conn:
-            mode = conn.execute("PRAGMA auto_vacuum").fetchone()[0]
+        deadline = time.monotonic() + 10.0
+        while time.monotonic() < deadline:
+            if _auto_vacuum_mode(store.db_path) == 2:
+                break
+            time.sleep(0.05)
+        assert _auto_vacuum_mode(store.db_path) == 2
     finally:
         store.close()
-    assert int(mode) == 2
+
+
+def test_construction_does_not_block_on_vacuum(tmp_path) -> None:
+    """Converting a large database must not happen on the caller's thread."""
+    path = tmp_path / "requests.db"
+    seed = RequestLogStore(path, max_rows=50_000)
+    body = "x" * 20_000
+    for index in range(300):
+        seed.enqueue(_record(f"s{index}", input_text=body, output_text=body))
+    seed.close()
+    # Force the legacy (non-incremental) layout the conversion has to fix.
+    conn = sqlite3.connect(path)
+    try:
+        conn.isolation_level = None
+        conn.execute("PRAGMA auto_vacuum=NONE")
+        conn.execute("VACUUM")
+    finally:
+        conn.close()
+    assert _auto_vacuum_mode(path) == 0
+
+    started = time.perf_counter()
+    store = RequestLogStore(path, max_rows=50_000)
+    construction_seconds = time.perf_counter() - started
+    try:
+        assert construction_seconds < 1.0
+    finally:
+        store.close()
 
 
 def test_prune_reclaims_file_space(tmp_path) -> None:
