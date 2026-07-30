@@ -715,7 +715,10 @@ async def list_request_log(
             "offset": offset,
         }
     _validate_request_log_status(status)
-    rows, total = store.list_requests(
+    # SQLite work is synchronous; run it off the event loop so analytics
+    # queries cannot stall proxy traffic.
+    rows, total = await asyncio.to_thread(
+        store.list_requests,
         limit=limit,
         offset=offset,
         provider=provider,
@@ -754,7 +757,8 @@ async def request_log_stats(
     if store is None:
         return {"enabled": False}
     _validate_request_log_status(status)
-    result = store.stats(
+    result = await asyncio.to_thread(
+        store.stats,
         provider=provider,
         model=model,
         status=status,
@@ -777,7 +781,11 @@ async def get_request_log_entry(
     """Return one request log row with full (uncapped) bodies."""
     require_loopback_admin(request)
     store = _request_log_store_or_none(settings)
-    row = store.get_request(request_id) if store is not None else None
+    row = (
+        await asyncio.to_thread(store.get_request, request_id)
+        if store is not None
+        else None
+    )
     if row is None:
         raise HTTPException(status_code=404, detail="Request log entry not found")
     return row
@@ -791,5 +799,5 @@ async def clear_request_log(
     """Delete every persisted request log row."""
     require_loopback_admin(request)
     store = _request_log_store_or_none(settings)
-    cleared = store.clear() if store is not None else 0
+    cleared = await asyncio.to_thread(store.clear) if store is not None else 0
     return {"cleared": cleared}

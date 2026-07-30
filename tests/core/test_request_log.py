@@ -1,5 +1,7 @@
 """Unit tests for the SQLite request log store."""
 
+import gc
+import sqlite3
 import time
 from typing import Any
 
@@ -7,6 +9,8 @@ import pytest
 
 from free_claude_code.core.request_log import (
     LIST_BODY_PREVIEW_CHARS,
+    MAX_ERROR_CHARS,
+    MAX_TEXT_CHARS,
     RequestLogStore,
     RequestRecord,
     get_request_log_store,
@@ -393,6 +397,170 @@ def test_error_message_capped(store: RequestLogStore) -> None:
     row = store.get_request("r1")
     assert row is not None
     assert len(row["error_message"]) == 2000
+
+
+def _live_connection_count() -> int:
+    return sum(1 for obj in gc.get_objects() if isinstance(obj, sqlite3.Connection))
+
+
+def test_enqueue_caps_bodies_before_queueing(store: RequestLogStore) -> None:
+    """Oversized bodies must be capped before the record reaches the queue."""
+    record = _record(
+        "r1",
+        input_text="i" * (MAX_TEXT_CHARS + 500),
+        output_text="o" * (MAX_TEXT_CHARS + 500),
+        status="error",
+        error_message="e" * (MAX_ERROR_CHARS + 500),
+    )
+    store.enqueue(record)
+    # ``enqueue`` caps in place, so the queued object itself is already bounded
+    # rather than holding the full body until the writer flushes it.
+    assert record.input_text is not None
+    assert record.output_text is not None
+    assert record.error_message is not None
+    assert len(record.input_text) == MAX_TEXT_CHARS
+    assert len(record.output_text) == MAX_TEXT_CHARS
+    assert len(record.error_message) == MAX_ERROR_CHARS
+
+
+def test_read_paths_close_connections(store: RequestLogStore) -> None:
+    """Read paths must not accumulate connections between GC passes."""
+    store.enqueue(_record("r1"))
+    store.close()
+    gc.collect()
+    gc.disable()
+    try:
+        before = _live_connection_count()
+        for _ in range(25):
+            store.list_requests()
+            store.get_request("r1")
+        after = _live_connection_count()
+    finally:
+        gc.enable()
+    assert after == before
+
+
+def _auto_vacuum_mode(path) -> int:
+    conn = sqlite3.connect(path)
+    try:
+        return int(conn.execute("PRAGMA auto_vacuum").fetchone()[0])
+    finally:
+        conn.close()
+
+
+def test_auto_vacuum_becomes_incremental(tmp_path) -> None:
+    """The store must end up on incremental auto-vacuum.
+
+    A populated database is converted by the writer thread rather than during
+    construction, so poll instead of asserting immediately.
+    """
+    store = RequestLogStore(tmp_path / "requests.db", max_rows=10)
+    try:
+        deadline = time.monotonic() + 10.0
+        while time.monotonic() < deadline:
+            if _auto_vacuum_mode(store.db_path) == 2:
+                break
+            time.sleep(0.05)
+        assert _auto_vacuum_mode(store.db_path) == 2
+    finally:
+        store.close()
+
+
+def test_stats_covering_index_is_created(tmp_path) -> None:
+    """Aggregates must be able to run index-only, without touching bodies."""
+    store = RequestLogStore(tmp_path / "requests.db", max_rows=10)
+    try:
+        deadline = time.monotonic() + 10.0
+        plan: list[str] = []
+        while time.monotonic() < deadline:
+            conn = sqlite3.connect(store.db_path)
+            try:
+                names = {
+                    row[0]
+                    for row in conn.execute(
+                        "SELECT name FROM sqlite_master WHERE type='index'"
+                    )
+                }
+                if "idx_requests_stats" in names:
+                    plan = [
+                        str(row[3])
+                        for row in conn.execute(
+                            "EXPLAIN QUERY PLAN SELECT COUNT(*),"
+                            " AVG(duration_ms) FROM requests"
+                        )
+                    ]
+                    break
+            finally:
+                conn.close()
+            time.sleep(0.05)
+        assert plan, "covering index was never created"
+        assert any("idx_requests_stats" in step for step in plan), plan
+    finally:
+        store.close()
+
+
+def test_construction_does_not_block_on_vacuum(tmp_path) -> None:
+    """Converting a large database must not happen on the caller's thread."""
+    path = tmp_path / "requests.db"
+    seed = RequestLogStore(path, max_rows=50_000)
+    body = "x" * 20_000
+    for index in range(300):
+        seed.enqueue(_record(f"s{index}", input_text=body, output_text=body))
+    seed.close()
+    # Force the legacy (non-incremental) layout the conversion has to fix.
+    conn = sqlite3.connect(path)
+    try:
+        conn.isolation_level = None
+        conn.execute("PRAGMA auto_vacuum=NONE")
+        conn.execute("VACUUM")
+    finally:
+        conn.close()
+    assert _auto_vacuum_mode(path) == 0
+
+    started = time.perf_counter()
+    store = RequestLogStore(path, max_rows=50_000)
+    construction_seconds = time.perf_counter() - started
+    try:
+        assert construction_seconds < 1.0
+    finally:
+        store.close()
+
+
+def test_prune_reclaims_file_space(tmp_path) -> None:
+    """Repeated insert/prune cycles must not grow the file without bound."""
+    store = RequestLogStore(tmp_path / "requests.db", max_rows=10)
+    try:
+        body = "x" * 10_000
+        sizes = []
+        for cycle in range(4):
+            for index in range(40):
+                store.enqueue(
+                    _record(f"c{cycle}-{index}", input_text=body, output_text=body)
+                )
+            store.prune()
+            sizes.append(store.db_path.stat().st_size)
+    finally:
+        store.close()
+    # Later cycles must not keep ratcheting the file upward.
+    assert sizes[-1] <= sizes[0] * 2
+
+
+def test_stats_are_cached_within_ttl(store: RequestLogStore) -> None:
+    store.enqueue(_record("r1"))
+    store.close()
+    first = store.stats()
+    assert first["total"] == 1
+    with sqlite3.connect(store.db_path) as conn:
+        conn.execute(
+            "INSERT INTO requests (id, ts_epoch, ts_iso, endpoint, protocol, status)"
+            " VALUES ('r2', ?, '2024-01-01T00:00:00+00:00', '/v1/messages',"
+            " 'anthropic', 'success')",
+            (time.time(),),
+        )
+    assert store.stats()["total"] == 1  # served from the short-lived cache
+    # Mutating a returned payload must not corrupt the cached copy.
+    store.stats()["enabled"] = True
+    assert "enabled" not in store.stats()
 
 
 def test_shared_store_registry(tmp_path) -> None:
