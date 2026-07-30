@@ -12,7 +12,7 @@ FCC_WHEEL_URL = (
     "https://github.com/FiredMosquito831/free-claude-code/releases/download/"
     f"v{FCC_VERSION}/{FCC_WHEEL_NAME}"
 )
-FCC_WHEEL_SHA256 = "679565810225215ae3c045cc5c8ef43e4fa53676179ddb1583a25412e811b770"
+FCC_WHEEL_SHA256 = "2974e7120f57e458eb8b147631d82eeef9cc7f8200726769d73372716aebb2d6"
 
 
 def _repo_root() -> Path:
