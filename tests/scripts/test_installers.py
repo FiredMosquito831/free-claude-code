@@ -263,14 +263,14 @@ chmod +x "$HOME/.local/bin/uv"
     _write_executable(fixtures / "uv-command.sh", _posix_uv_command("0.11.28"))
     _write_executable(
         fixtures / "fcc-command.sh",
-        """#!/bin/sh
-name=${0##*/}
+        f"""#!/bin/sh
+name=${{0##*/}}
 echo "$name:$*" >> "$CALL_LOG"
 if [ "$FAIL_STEP" = "fcc-verify" ]; then
     exit 36
 fi
-if [ "$name" = "fcc-server" ] && [ "${1:-}" = "--version" ]; then
-    echo "free-claude-code 4.13.0"
+if [ "$name" = "fcc-server" ] && [ "${{1:-}}" = "--version" ]; then
+    echo "free-claude-code {FCC_VERSION}"
 fi
 """,
     )
@@ -642,11 +642,11 @@ def powershell_harness(
     (fixtures / "pi-command.cmd").write_text(_batch_client("pi"), encoding="utf-8")
     (fixtures / "uv-command.cmd").write_text(_batch_uv("0.11.28"), encoding="utf-8")
     (fixtures / "fcc-command.cmd").write_text(
-        """@echo off
+        f"""@echo off
 for %%I in ("%~f0") do set "FCC_NAME=%%~nI"
 echo %FCC_NAME%:%*>>"%CALL_LOG%"
 if "%FAIL_STEP%"=="fcc-verify" exit /b 55
-if "%FCC_NAME%"=="fcc-server" if "%1"=="--version" echo free-claude-code 4.13.0
+if "%FCC_NAME%"=="fcc-server" if "%1"=="--version" echo free-claude-code {FCC_VERSION}
 exit /b 0
 """,
         encoding="utf-8",
