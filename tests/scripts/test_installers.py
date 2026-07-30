@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-FCC_VERSION = "4.13.0"
+FCC_VERSION = "4.14.2"
 FCC_WHEEL_NAME = f"free_claude_code-{FCC_VERSION}-py3-none-any.whl"
 FCC_WHEEL_URL = (
     "https://github.com/FiredMosquito831/free-claude-code/releases/download/"
