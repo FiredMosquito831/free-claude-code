@@ -9,9 +9,10 @@ Route owners may emit one correlated :class:`SearchRouteOutcome` through
 import importlib
 import os
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from urllib.parse import urlsplit, urlunsplit
 
 from loguru import logger
 
@@ -178,6 +179,9 @@ class SearchOutcome:
     cost_usd: float | None
     route_id: str | None = None
     attempt_number: int = 1
+    input_payload: Mapping[str, object] | None = None
+    output_payload: Mapping[str, object] | None = None
+    provider_config: Mapping[str, object] | None = None
 
 
 SearchRecorder = Callable[[SearchOutcome], None]
@@ -217,11 +221,19 @@ async def search(
     recorder: SearchRecorder | None = None,
     route_id: str | None = None,
     attempt_number: int = 1,
+    route_context: Mapping[str, object] | None = None,
 ) -> WebSearchResponse:
     """Run ``provider.search`` and optionally record the outcome via ``recorder``."""
 
     ts_epoch = time.time()
     started = time.perf_counter()
+    input_payload = _search_input_payload(
+        query,
+        max_results=max_results,
+        allowed_domains=allowed_domains,
+        blocked_domains=blocked_domains,
+    )
+    provider_config = _provider_config_snapshot(provider, route_context)
     try:
         response = await provider.search(
             query,
@@ -254,6 +266,9 @@ async def search(
                 cost_usd=None,
                 route_id=route_id,
                 attempt_number=attempt_number,
+                input_payload=input_payload,
+                output_payload=_error_output_payload(error),
+                provider_config=provider_config,
             ),
         )
         raise
@@ -274,6 +289,9 @@ async def search(
             cost_usd=response.cost_usd,
             route_id=route_id,
             attempt_number=attempt_number,
+            input_payload=input_payload,
+            output_payload=_response_output_payload(response),
+            provider_config=provider_config,
         ),
     )
     return response
@@ -289,6 +307,7 @@ async def search_with_logging(
     recorder: SearchRecorder | None = None,
     route_id: str | None = None,
     attempt_number: int = 1,
+    route_context: Mapping[str, object] | None = None,
 ) -> WebSearchResponse:
     """Search with analytics recording; defaults to the shared attempt recorder."""
 
@@ -301,6 +320,7 @@ async def search_with_logging(
         recorder=recorder if recorder is not None else _default_recorder(),
         route_id=route_id,
         attempt_number=attempt_number,
+        route_context=route_context,
     )
 
 
@@ -364,6 +384,88 @@ def _elapsed_ms(started: float) -> float:
 
 def _iso(ts_epoch: float) -> str:
     return datetime.fromtimestamp(ts_epoch, tz=UTC).isoformat()
+
+
+def _search_input_payload(
+    query: str,
+    *,
+    max_results: int,
+    allowed_domains: tuple[str, ...],
+    blocked_domains: tuple[str, ...],
+) -> dict[str, object]:
+    return {
+        "query": query,
+        "max_results": max_results,
+        "allowed_domains": list(allowed_domains),
+        "blocked_domains": list(blocked_domains),
+    }
+
+
+def _response_output_payload(response: WebSearchResponse) -> dict[str, object]:
+    return {
+        "provider": response.provider,
+        "query": response.query,
+        "answer": response.answer,
+        "results": [
+            {
+                "title": item.title,
+                "url": item.url,
+                "snippet": item.snippet,
+                "content": item.content,
+                "published": item.published,
+            }
+            for item in response.results
+        ],
+        "result_count": len(response.results),
+        "key_index": response.key_index,
+        "cost_usd": response.cost_usd,
+    }
+
+
+def _error_output_payload(error: BaseException) -> dict[str, object]:
+    return {
+        "error": {
+            "kind": error.kind if isinstance(error, WebSearchError) else "internal",
+            "type": type(error).__name__,
+            "message": str(error)[:_ERROR_MESSAGE_LOG_CHARS],
+        }
+    }
+
+
+def _provider_config_snapshot(
+    provider: BaseWebSearchProvider,
+    route_context: Mapping[str, object] | None,
+) -> dict[str, object]:
+    config = provider.config
+    snapshot: dict[str, object] = {
+        "provider_id": provider.provider_id,
+        "credential_rotation": config.credential_rotation,
+        "credential_count": len(config.api_keys),
+        "base_url": _safe_config_url(config.base_url),
+        "proxy": _safe_config_url(config.proxy),
+        "http_timeout_seconds": config.http_timeout,
+        "supports_domain_filters": provider.SUPPORTS_DOMAINS,
+        "options": dict(config.options),
+    }
+    if route_context:
+        snapshot["route"] = dict(route_context)
+    return snapshot
+
+
+def _safe_config_url(value: str | None) -> str | None:
+    """Keep endpoint identity while removing credentials, query, and fragment."""
+
+    if not value:
+        return None
+    try:
+        parsed = urlsplit(value)
+        host = parsed.hostname or ""
+        port = f":{parsed.port}" if parsed.port is not None else ""
+    except ValueError:
+        return "[configured]"
+    if not parsed.scheme or not host:
+        return "[configured]"
+    return urlunsplit((parsed.scheme, f"{host}{port}", parsed.path, "", ""))
 
 
 def _descriptor_keys(

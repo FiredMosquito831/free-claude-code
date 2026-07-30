@@ -325,11 +325,11 @@
                   </select>
                 </label>
                 <label>
-                  Search query
+                  Search input/output
                   <input
                     id="webSearchFilterQuery"
                     type="text"
-                    placeholder="query contains…"
+                    placeholder="query or captured output contains…"
                   />
                 </label>
                 <label>
@@ -375,6 +375,51 @@
               </div>
               <div id="webSearchAnalytics" class="analytics-body"></div>
             </section>
+            <div
+              id="webSearchDetailModal"
+              class="requests-modal"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="webSearchDetailTitle"
+              hidden
+            >
+              <div class="requests-modal-card websearch-detail-card">
+                <div class="requests-modal-header">
+                  <h3 id="webSearchDetailTitle">Web search detail</h3>
+                  <button
+                    id="webSearchDetailClose"
+                    class="secondary-button"
+                    type="button"
+                  >
+                    Close
+                  </button>
+                </div>
+                <dl
+                  id="webSearchDetailMeta"
+                  class="requests-detail-meta"
+                ></dl>
+                <h4>Effective provider configuration</h4>
+                <pre
+                  id="webSearchDetailConfig"
+                  class="requests-detail-body"
+                ></pre>
+                <h4>Tool input</h4>
+                <pre
+                  id="webSearchDetailInput"
+                  class="requests-detail-body"
+                ></pre>
+                <h4>Provider response summary</h4>
+                <div
+                  id="webSearchDetailSummary"
+                  class="websearch-result-summary"
+                ></div>
+                <h4>Normalized provider output</h4>
+                <pre
+                  id="webSearchDetailOutput"
+                  class="requests-detail-body"
+                ></pre>
+              </div>
+            </div>
           </section>
         </div>
       </main>

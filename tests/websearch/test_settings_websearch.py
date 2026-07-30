@@ -24,6 +24,8 @@ class TestWebSearchSettings:
         assert settings.searxng_base_url is None
         assert settings.websearch_log_enabled is True
         assert settings.websearch_log_max_rows == 50000
+        assert settings.websearch_log_capture_content is True
+        assert settings.websearch_log_content_max_chars == 50000
 
     def test_credential_envs_load(self, monkeypatch) -> None:
         settings = _settings(
@@ -104,6 +106,17 @@ class TestWebSearchSettings:
             monkeypatch,
             WEBSEARCH_LOG_ENABLED="false",
             WEBSEARCH_LOG_MAX_ROWS="100",
+            WEBSEARCH_LOG_CAPTURE_CONTENT="false",
+            WEBSEARCH_LOG_CONTENT_MAX_CHARS="1234",
         )
         assert settings.websearch_log_enabled is False
         assert settings.websearch_log_max_rows == 100
+        assert settings.websearch_log_capture_content is False
+        assert settings.websearch_log_content_max_chars == 1234
+
+    def test_content_cap_rejects_unsafe_tiny_values(self, monkeypatch) -> None:
+        monkeypatch.setitem(Settings.model_config, "env_file", ())
+        monkeypatch.setenv("WEBSEARCH_LOG_CONTENT_MAX_CHARS", "511")
+
+        with pytest.raises(ValidationError, match="WEBSEARCH_LOG_CONTENT_MAX_CHARS"):
+            Settings()

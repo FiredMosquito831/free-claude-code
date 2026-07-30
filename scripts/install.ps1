@@ -13,10 +13,10 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
 
-$FccVersion = "4.12.0"
+$FccVersion = "4.13.0"
 $FccWheelName = "free_claude_code-$FccVersion-py3-none-any.whl"
 $FccWheelUrl = "https://github.com/FiredMosquito831/free-claude-code/releases/download/v$FccVersion/$FccWheelName"
-$FccWheelSha256 = "012b5e42e1f9bbef031845625d67568a79f7dcd0aba91fc5702151f5cebf7255"
+$FccWheelSha256 = "679565810225215ae3c045cc5c8ef43e4fa53676179ddb1583a25412e811b770"
 $PythonVersion = "3.14.0"
 $MinUvVersion = "0.11.0"
 $ClaudeInstallUrl = "https://claude.ai/install.ps1"

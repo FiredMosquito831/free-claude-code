@@ -12,6 +12,7 @@ const state = {
   webSearchAnalyticsPageKey: "",
   webSearchAnalyticsLoadId: 0,
   webSearchLastRoute: null,
+  webSearchDetailReturnFocus: null,
   customProviders: [],
   editingCustomProviderId: null,
 };
@@ -1735,7 +1736,11 @@ function analyticsTable(headers, rows, emptyText) {
     const tr = document.createElement("tr");
     cells.forEach((cell) => {
       const td = document.createElement("td");
-      td.textContent = cell;
+      if (cell instanceof Node) {
+        td.appendChild(cell);
+      } else {
+        td.textContent = cell;
+      }
       tr.appendChild(td);
     });
     tbody.appendChild(tr);
@@ -2085,6 +2090,7 @@ function renderWebSearchAnalytics(
     entry.status || "—",
     entry.error_kind || "—",
     formatAnalyticsCost(entry.cost_usd),
+    webSearchDetailButton(entry),
   ]);
   container.appendChild(
     analyticsBlock(
@@ -2102,6 +2108,7 @@ function renderWebSearchAnalytics(
           "Status",
           "Error",
           "Cost",
+          "Details",
         ],
         requestRows,
         requests ? "No recent provider attempts." : "Recent attempts unavailable.",
@@ -2120,8 +2127,193 @@ function renderWebSearchAnalytics(
   footer.textContent =
     `Series bucket: ${periodLabel || period}; bucket boundaries use UTC. ` +
     "Route metrics count one user search; provider tables and recent rows count attempts. " +
-    "Queries are stored locally and truncated to 256 characters.";
+    "Queries are stored locally and truncated to 256 characters. " +
+    (stats?.capture_content
+      ? `Full normalized I/O is captured up to ${formatAnalyticsNumber(
+          stats.max_content_chars,
+        )} characters per payload.`
+      : "Search I/O capture is disabled; only lengths and SHA-256 hashes are retained.");
   container.appendChild(footer);
+}
+
+function webSearchDetailButton(entry) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "secondary-button req-detail-button";
+  button.textContent = "View";
+  button.setAttribute(
+    "aria-label",
+    `View web search attempt ${entry.id || entry.attempt_number || ""}`.trim(),
+  );
+  button.addEventListener("click", () =>
+    openWebSearchDetail(entry.id).catch((error) =>
+      showMessage(`Could not load web search detail: ${error.message}`, "error"),
+    ),
+  );
+  return button;
+}
+
+function prettyJson(value) {
+  return value == null ? "" : JSON.stringify(value, null, 2);
+}
+
+function capturedPayloadText(row, field) {
+  const payload = row[field];
+  if (payload != null) return prettyJson(payload);
+  const chars = row[`${field}_chars`];
+  const hash = row[`${field}_sha256`];
+  if (chars == null && !hash) return "(not available for this historical record)";
+  return [
+    "(content not captured)",
+    chars != null ? `Characters: ${chars}` : "",
+    hash ? `SHA-256: ${hash}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+function appendWebSearchDetailMeta(meta, fields) {
+  meta.innerHTML = "";
+  fields.forEach(([label, value]) => {
+    if (value == null || value === "") return;
+    const dt = document.createElement("dt");
+    dt.textContent = label;
+    const dd = document.createElement("dd");
+    dd.textContent = value;
+    meta.append(dt, dd);
+  });
+}
+
+function renderWebSearchResponseSummary(output) {
+  const container = byId("webSearchDetailSummary");
+  container.innerHTML = "";
+  if (!output || output._truncated) {
+    container.textContent = output?._truncated
+      ? "The stored output is truncated; inspect the preview and SHA-256 below."
+      : "No captured provider response is available.";
+    return;
+  }
+  if (output.error) {
+    const error = document.createElement("div");
+    error.className = "analytics-warning";
+    error.textContent = `${output.error.kind || "error"}: ${
+      output.error.message || output.error.type || "Provider attempt failed"
+    }`;
+    container.appendChild(error);
+    return;
+  }
+  if (output.answer) {
+    const answer = document.createElement("div");
+    answer.className = "websearch-result-answer";
+    const title = document.createElement("strong");
+    title.textContent = "Provider answer / rich summary";
+    const text = document.createElement("p");
+    text.textContent = output.answer;
+    answer.append(title, text);
+    container.appendChild(answer);
+  }
+  const results = Array.isArray(output.results) ? output.results : [];
+  results.forEach((result, index) => {
+    const item = document.createElement("article");
+    item.className = "websearch-result-item";
+    const title = document.createElement("strong");
+    title.textContent = `${index + 1}. ${result.title || "Untitled result"}`;
+    item.appendChild(title);
+    if (result.url && /^https?:\/\//i.test(result.url)) {
+      const link = document.createElement("a");
+      link.href = result.url;
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+      link.textContent = result.url;
+      item.appendChild(link);
+    } else if (result.url) {
+      const url = document.createElement("small");
+      url.textContent = result.url;
+      item.appendChild(url);
+    }
+    if (result.published) {
+      const published = document.createElement("small");
+      published.textContent = `Published: ${result.published}`;
+      item.appendChild(published);
+    }
+    if (result.snippet) {
+      const snippet = document.createElement("p");
+      snippet.textContent = result.snippet;
+      item.appendChild(snippet);
+    }
+    if (result.content && result.content !== result.snippet) {
+      const content = document.createElement("p");
+      content.textContent = result.content;
+      item.appendChild(content);
+    }
+    container.appendChild(item);
+  });
+  if (!output.answer && results.length === 0) {
+    container.textContent = "The provider returned no results or answer.";
+  }
+}
+
+async function openWebSearchDetail(requestId) {
+  state.webSearchDetailReturnFocus = document.activeElement;
+  const row = await api(`/admin/api/websearch/requests/${requestId}`);
+  byId("webSearchDetailTitle").textContent =
+    `Web search ${String(row.route_id || "route").slice(0, 8)} · attempt ${
+      row.attempt_number
+    }`;
+  appendWebSearchDetailMeta(byId("webSearchDetailMeta"), [
+    ["Time", formatRequestTime(row)],
+    ["Route ID", row.route_id],
+    ["Attempt", row.attempt_number],
+    ["Provider", row.provider],
+    ["Credential", row.key_label || "keyless"],
+    ["Status", row.status],
+    ["Results", row.results_count],
+    ["Latency", row.duration_ms != null ? `${Math.round(row.duration_ms)} ms` : "—"],
+    ["Cost", formatAnalyticsCost(row.cost_usd)],
+    ["Error", row.error_kind ? `${row.error_kind}: ${row.error_message || ""}` : ""],
+    ["Input characters", row.input_chars],
+    ["Output characters", row.output_chars],
+    ["Input SHA-256", row.input_sha256],
+    ["Output SHA-256", row.output_sha256],
+  ]);
+  byId("webSearchDetailConfig").textContent =
+    prettyJson(row.provider_config) || "(configuration unavailable)";
+  byId("webSearchDetailInput").textContent = capturedPayloadText(row, "input");
+  byId("webSearchDetailOutput").textContent = capturedPayloadText(row, "output");
+  renderWebSearchResponseSummary(row.output);
+  byId("webSearchDetailModal").hidden = false;
+  byId("webSearchDetailClose").focus();
+}
+
+function closeWebSearchDetail() {
+  byId("webSearchDetailModal").hidden = true;
+  if (state.webSearchDetailReturnFocus instanceof HTMLElement) {
+    state.webSearchDetailReturnFocus.focus();
+  }
+  state.webSearchDetailReturnFocus = null;
+}
+
+function trapWebSearchDetailFocus(event) {
+  const modal = byId("webSearchDetailModal");
+  if (event.key !== "Tab" || modal.hidden) return;
+  const focusable = Array.from(
+    modal.querySelectorAll(
+      'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+    ),
+  ).filter((element) => element instanceof HTMLElement && !element.hidden);
+  if (focusable.length === 0) {
+    event.preventDefault();
+    return;
+  }
+  const first = focusable[0];
+  const last = focusable[focusable.length - 1];
+  if (event.shiftKey && document.activeElement === first) {
+    event.preventDefault();
+    last.focus();
+  } else if (!event.shiftKey && document.activeElement === last) {
+    event.preventDefault();
+    first.focus();
+  }
 }
 
 function webSearchAnalyticsParams({ includePeriod = false, limit = null } = {}) {
@@ -2549,6 +2741,7 @@ function downloadJson(filename, value) {
 
 async function exportWebSearchAnalytics() {
   const params = webSearchAnalyticsParams({ limit: 500 });
+  params.set("include_content", "true");
   const page = await api(`/admin/api/websearch/requests?${params}`);
   downloadJson(
     `fcc-websearch-${new Date().toISOString().replace(/[:.]/g, "-")}.json`,
@@ -2591,6 +2784,16 @@ byId("webSearchExportButton").addEventListener("click", () =>
 byId("webSearchClearButton").addEventListener("click", () =>
   clearWebSearchAnalytics().catch((error) => showMessage(error.message, "error")),
 );
+byId("webSearchDetailClose").addEventListener("click", closeWebSearchDetail);
+byId("webSearchDetailModal").addEventListener("click", (event) => {
+  if (event.target === byId("webSearchDetailModal")) closeWebSearchDetail();
+});
+document.addEventListener("keydown", (event) => {
+  trapWebSearchDetailFocus(event);
+  if (event.key === "Escape" && !byId("webSearchDetailModal").hidden) {
+    closeWebSearchDetail();
+  }
+});
 document.addEventListener("pointerdown", (event) => {
   state.modelComboboxes.forEach((combobox) => {
     if (combobox.isOpen && !combobox.element.contains(event.target)) combobox.close();

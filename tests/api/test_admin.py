@@ -201,6 +201,11 @@ def test_admin_static_exposes_professional_observability_controls():
         "webSearchExportButton",
         "webSearchClearButton",
         "webSearchRouteSummary",
+        "webSearchDetailModal",
+        "webSearchDetailConfig",
+        "webSearchDetailInput",
+        "webSearchDetailSummary",
+        "webSearchDetailOutput",
     ):
         assert f'id="{control_id}"' in html
     assert 'label: "Analytics"' in script
@@ -219,6 +224,11 @@ def test_admin_static_exposes_professional_observability_controls():
     assert "renderWebSearchObservedRoute" in script
     assert "webSearchAnalyticsStatsKey" in script
     assert "Showing the last successful" in script
+    assert "openWebSearchDetail" in script
+    assert "renderWebSearchResponseSummary" in script
+    assert 'params.set("include_content", "true")' in script
+    assert "Full normalized I/O is captured" in script
+    assert "trapWebSearchDetailFocus" in script
     assert "bucket boundaries use UTC" in script
     assert "trapRequestDetailFocus" in script
     assert "View request" in script
@@ -231,6 +241,7 @@ def test_admin_static_exposes_professional_observability_controls():
     assert ".route-summary" in styles
     assert ".requests-breakdowns" in styles
     assert ".table-scroll" in styles
+    assert ".websearch-result-summary" in styles
 
 
 def test_admin_page_no_longer_renders_generated_env_panel(monkeypatch, tmp_path):

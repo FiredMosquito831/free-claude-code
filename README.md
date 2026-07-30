@@ -68,16 +68,16 @@ Everything is configured through the same `.env` file (see [.env.example](.env.e
 macOS/Linux:
 
 ```bash
-curl -fsSL "https://raw.githubusercontent.com/FiredMosquito831/free-claude-code/v4.12.0/scripts/install.sh" | sh
+curl -fsSL "https://raw.githubusercontent.com/FiredMosquito831/free-claude-code/v4.13.0/scripts/install.sh" | sh
 ```
 
 Windows PowerShell:
 
 ```powershell
-& ([scriptblock]::Create((irm "https://raw.githubusercontent.com/FiredMosquito831/free-claude-code/v4.12.0/scripts/install.ps1")))
+& ([scriptblock]::Create((irm "https://raw.githubusercontent.com/FiredMosquito831/free-claude-code/v4.13.0/scripts/install.ps1")))
 ```
 
-These commands are pinned to the verified `v4.12.0` fork release. Use the command published by a newer reviewed release when you choose to update. You can review the installers before running them: [install.sh](scripts/install.sh) and [install.ps1](scripts/install.ps1).
+These commands are pinned to the verified `v4.13.0` fork release. Use the command published by a newer reviewed release when you choose to update. You can review the installers before running them: [install.sh](scripts/install.sh) and [install.ps1](scripts/install.ps1).
 
 ### 2. Start The Server
 
@@ -390,14 +390,18 @@ WEBSEARCH_DIGEST_ANSWER=true   # include the provider answer lead
 
 ### Web search analytics
 
-Every logical search and each provider attempt are recorded by a non-blocking background writer in `~/.fcc/logs/websearch.db`. Route records include a correlation ID, primary and terminal providers, the attempted chain, fallback use, final status, end-to-end latency, results, and known cost; attempt records retain provider, key label, query (256 chars), result count, duration, status, and error details. Legacy scraper outcomes are included as terminal route results.
+Every logical search and each provider attempt are recorded by a non-blocking background writer in `~/.fcc/logs/websearch.db`. Route records include a correlation ID, primary and terminal providers, the attempted chain, fallback use, final status, end-to-end latency, results, and known cost. Attempt records additionally retain the complete normalized tool input and provider output: full query and domain parameters, provider answer/rich summary, every result's title/URL/snippet/full content/publication date, result count and cost. A redacted snapshot preserves the effective provider, route/fallback policy, base URL, proxy endpoint without credentials, timeout, rotation policy, credential count, capabilities, and advanced options used for that attempt. Legacy scraper outcomes use the same detail shape.
 
-The Admin UI keeps the two levels explicit: top cards and the main trend chart report logical searches, route success/fallback rate, average attempts, and end-to-end latency, while provider/key tables and recent rows report individual attempts. It also provides independent time-range and UTC bucket controls (hour/day/ISO week/month), case-insensitive provider/status/query filtering, terminal-provider outcomes, route and attempt errors, known spend, JSON export, dropped-writer telemetry, and stale-data warnings. Existing pre-4.12 attempt history remains visible, but logical-route metrics begin with 4.12:
+The Admin UI keeps the two levels explicit: top cards and the main trend chart report logical searches, route success/fallback rate, average attempts, and end-to-end latency, while provider/key tables and recent rows report individual attempts. Each recent row has an accessible **View** dialog with effective configuration, tool input, a readable answer/result summary, and the complete normalized output JSON. Filtering searches captured input/output as well as query previews, and JSON export includes the captured detail payloads. Existing pre-4.12 attempt history remains visible, but logical-route metrics begin with 4.12:
 
 ```bash
 WEBSEARCH_LOG_ENABLED=true
 WEBSEARCH_LOG_MAX_ROWS=50000   # retention cap; oldest rows pruned
+WEBSEARCH_LOG_CAPTURE_CONTENT=true      # false keeps lengths + SHA-256 only
+WEBSEARCH_LOG_CONTENT_MAX_CHARS=50000   # cap per input/output JSON payload
 ```
+
+Oversized payloads are stored as valid JSON truncation envelopes containing the original length, SHA-256, and a bounded preview. API keys are never copied into configuration snapshots, secret-looking object fields are redacted, and proxy/userinfo credentials are removed. Search content still commonly includes private queries, result URLs, and page text; disable `WEBSEARCH_LOG_CAPTURE_CONTENT` or the entire log for sensitive work.
 
 <a id="admin-dashboard"></a>
 
@@ -407,7 +411,7 @@ The Admin UI (`http://127.0.0.1:8082/admin`, local-only) is the control center f
 
 - **Providers** — API keys, model catalog, **Validate** / **Apply**, per-provider **Test**, and **Manage keys** for multi-key rotation state (per-key health/usage, key reset).
 - **Model Config** — the `MODEL` picker, model-tier routing (`MODEL_FABLE` / `MODEL_OPUS` / `MODEL_SONNET` / `MODEL_HAIKU`), and reasoning control.
-- **Web Search** — configured and last-observed route summaries, strict/fallback policy, provider cards, key health, advanced options, and separate route/attempt analytics.
+- **Web Search** — configured and last-observed route summaries, strict/fallback policy, provider cards, key health, advanced options, separate route/attempt analytics, and full captured input/output drill-down.
 - **Analytics** — the full model-request observability dashboard (see below).
 - **Messaging** — Discord/Telegram bot and voice-note settings.
 
@@ -602,32 +606,32 @@ macOS/Linux:
 
 ```bash
 # NVIDIA NIM transcription
-curl -fsSL "https://raw.githubusercontent.com/FiredMosquito831/free-claude-code/v4.12.0/scripts/install.sh" | sh -s -- --voice-nim
+curl -fsSL "https://raw.githubusercontent.com/FiredMosquito831/free-claude-code/v4.13.0/scripts/install.sh" | sh -s -- --voice-nim
 
 # Local Whisper on CPU or CUDA
-curl -fsSL "https://raw.githubusercontent.com/FiredMosquito831/free-claude-code/v4.12.0/scripts/install.sh" | sh -s -- --voice-local
+curl -fsSL "https://raw.githubusercontent.com/FiredMosquito831/free-claude-code/v4.13.0/scripts/install.sh" | sh -s -- --voice-local
 
 # Both backends
-curl -fsSL "https://raw.githubusercontent.com/FiredMosquito831/free-claude-code/v4.12.0/scripts/install.sh" | sh -s -- --voice-all
+curl -fsSL "https://raw.githubusercontent.com/FiredMosquito831/free-claude-code/v4.13.0/scripts/install.sh" | sh -s -- --voice-all
 
 # Local Whisper with the CUDA 13.0 PyTorch backend
-curl -fsSL "https://raw.githubusercontent.com/FiredMosquito831/free-claude-code/v4.12.0/scripts/install.sh" | sh -s -- --voice-local --torch-backend cu130
+curl -fsSL "https://raw.githubusercontent.com/FiredMosquito831/free-claude-code/v4.13.0/scripts/install.sh" | sh -s -- --voice-local --torch-backend cu130
 ```
 
 Windows PowerShell:
 
 ```powershell
 # NVIDIA NIM transcription
-& ([scriptblock]::Create((irm "https://raw.githubusercontent.com/FiredMosquito831/free-claude-code/v4.12.0/scripts/install.ps1"))) -VoiceNim
+& ([scriptblock]::Create((irm "https://raw.githubusercontent.com/FiredMosquito831/free-claude-code/v4.13.0/scripts/install.ps1"))) -VoiceNim
 
 # Local Whisper on CPU or CUDA
-& ([scriptblock]::Create((irm "https://raw.githubusercontent.com/FiredMosquito831/free-claude-code/v4.12.0/scripts/install.ps1"))) -VoiceLocal
+& ([scriptblock]::Create((irm "https://raw.githubusercontent.com/FiredMosquito831/free-claude-code/v4.13.0/scripts/install.ps1"))) -VoiceLocal
 
 # Both backends
-& ([scriptblock]::Create((irm "https://raw.githubusercontent.com/FiredMosquito831/free-claude-code/v4.12.0/scripts/install.ps1"))) -VoiceAll
+& ([scriptblock]::Create((irm "https://raw.githubusercontent.com/FiredMosquito831/free-claude-code/v4.13.0/scripts/install.ps1"))) -VoiceAll
 
 # Local Whisper with the CUDA 13.0 PyTorch backend
-& ([scriptblock]::Create((irm "https://raw.githubusercontent.com/FiredMosquito831/free-claude-code/v4.12.0/scripts/install.ps1"))) -VoiceLocal -TorchBackend cu130
+& ([scriptblock]::Create((irm "https://raw.githubusercontent.com/FiredMosquito831/free-claude-code/v4.13.0/scripts/install.ps1"))) -VoiceLocal -TorchBackend cu130
 ```
 
 Restart `fcc-server`. In **Admin UI → Messaging → Voice**, enable voice notes, select `cpu`, `cuda`, or `nvidia_nim`, and choose the Whisper model. Local gated models need `HUGGINGFACE_API_KEY`; NVIDIA NIM transcription needs `NVIDIA_NIM_API_KEY`.

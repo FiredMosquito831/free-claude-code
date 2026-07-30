@@ -1464,6 +1464,44 @@ textarea:focus-visible,
   font-size: 12px;
 }
 
+.websearch-detail-card {
+  width: min(980px, 94vw);
+}
+
+.websearch-result-summary {
+  display: grid;
+  gap: 10px;
+}
+
+.websearch-result-answer,
+.websearch-result-item {
+  padding: 12px;
+  border: 1px solid var(--border, #333);
+  border-radius: 8px;
+  background: var(--panel, #1b1b1b);
+}
+
+.websearch-result-answer strong,
+.websearch-result-item strong {
+  display: block;
+  margin-bottom: 5px;
+}
+
+.websearch-result-item a {
+  display: block;
+  margin-bottom: 6px;
+  overflow-wrap: anywhere;
+}
+
+.websearch-result-item p {
+  margin: 5px 0 0;
+  white-space: pre-wrap;
+}
+
+.websearch-result-item small {
+  color: var(--muted, #888);
+}
+
 @media (max-width: 760px) {
   .requests-breakdowns {
     grid-template-columns: 1fr;

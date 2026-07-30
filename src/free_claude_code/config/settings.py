@@ -299,6 +299,16 @@ class Settings(BaseSettings):
     websearch_log_max_rows: int = Field(
         default=50000, validation_alias="WEBSEARCH_LOG_MAX_ROWS"
     )
+    # Persist complete normalized provider inputs/outputs for Admin drill-down.
+    # Disable for hashes/lengths only when searches may contain sensitive content.
+    websearch_log_capture_content: bool = Field(
+        default=True, validation_alias="WEBSEARCH_LOG_CAPTURE_CONTENT"
+    )
+    websearch_log_content_max_chars: int = Field(
+        default=50000,
+        ge=512,
+        validation_alias="WEBSEARCH_LOG_CONTENT_MAX_CHARS",
+    )
     # Rich digest for the proxy-fulfilled web_search text block: per-result
     # excerpt character cap and the optional provider answer lead.
     websearch_digest_chars: int = Field(

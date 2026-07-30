@@ -35,9 +35,60 @@ def websearch_field_specs() -> tuple[dict[str, Any], ...]:
     return (
         _provider_select_spec(),
         _fallback_policy_spec(),
+        *_analytics_field_specs(),
         _searxng_base_url_spec(),
         *_credential_field_specs(),
         *_advanced_option_field_specs(),
+    )
+
+
+def _analytics_field_specs() -> tuple[dict[str, Any], ...]:
+    return (
+        {
+            "key": "WEBSEARCH_LOG_ENABLED",
+            "label": "Web Search Analytics",
+            "section_id": "websearch",
+            "field_type": "boolean",
+            "settings_attr": "websearch_log_enabled",
+            "default": "true",
+            "description": "Store local route and provider-attempt telemetry.",
+        },
+        {
+            "key": "WEBSEARCH_LOG_CAPTURE_CONTENT",
+            "label": "Capture Search Input and Output",
+            "section_id": "websearch",
+            "field_type": "boolean",
+            "settings_attr": "websearch_log_capture_content",
+            "default": "true",
+            "restart_required": True,
+            "description": (
+                "Store complete normalized provider input/output for drill-down. "
+                "Disable to retain only lengths and SHA-256 hashes."
+            ),
+        },
+        {
+            "key": "WEBSEARCH_LOG_CONTENT_MAX_CHARS",
+            "label": "Search I/O Character Cap",
+            "section_id": "websearch",
+            "field_type": "number",
+            "settings_attr": "websearch_log_content_max_chars",
+            "default": "50000",
+            "restart_required": True,
+            "description": (
+                "Maximum stored characters for each input/output JSON payload "
+                "(minimum 512); larger payloads retain a bounded preview and hash."
+            ),
+        },
+        {
+            "key": "WEBSEARCH_LOG_MAX_ROWS",
+            "label": "Search Analytics Retention",
+            "section_id": "websearch",
+            "field_type": "number",
+            "settings_attr": "websearch_log_max_rows",
+            "default": "50000",
+            "restart_required": True,
+            "description": "Maximum retained provider-attempt and route rows.",
+        },
     )
 
 
