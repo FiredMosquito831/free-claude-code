@@ -9,16 +9,26 @@ verification included.
 Upgrading never restarts the server. A running process keeps serving the code
 it already imported, so the caller is told a restart is required and chooses
 when to take the downtime.
+
+Windows cannot replace the environment underneath a running process: the
+interpreter and its loaded DLLs are held open, so ``uv tool install --force``
+fails partway through removing the old environment and leaves it broken. There
+the install is therefore *deferred* -- the verified wheel is staged and a
+detached helper installs it once this process exits. POSIX unlinks open files
+happily, so it keeps installing in place.
 """
 
 import asyncio
 import hashlib
+import json
+import os
 import shutil
 import subprocess
 import sys
 import tempfile
 import time
 import tomllib
+from contextlib import ExitStack, suppress
 from dataclasses import dataclass, field
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as installed_version
@@ -28,6 +38,8 @@ from typing import Any
 import httpx
 from loguru import logger
 
+from free_claude_code.config.paths import config_dir_path
+
 PACKAGE_NAME = "free-claude-code"
 # Kept in step with the URLs in scripts/install.sh and scripts/install.ps1.
 RELEASE_REPO = "FiredMosquito831/free-claude-code"
@@ -36,6 +48,12 @@ _CACHE_TTL_SECONDS = 6 * 3600.0
 _HTTP_TIMEOUT_SECONDS = 10.0
 _UPGRADE_TIMEOUT_SECONDS = 900.0
 _WHEEL_SUFFIX = ".whl"
+_WINDOWS = os.name == "nt"
+_STAGE_DIRNAME = "updates"
+_PENDING_RESULT_FILENAME = "pending-upgrade.json"
+# Bound on how long the helper waits for this process to exit before giving up,
+# so a server left running forever does not leave a helper resident forever.
+_HELPER_WAIT_SECONDS = 3600
 
 
 def current_version() -> str:
@@ -90,6 +108,9 @@ class ReleaseStatus:
     published_at: str | None = None
     checked_at: float | None = None
     restart_required: bool = False
+    staged_install: bool = False
+    # Outcome of a deferred (Windows) install that ran after a shutdown.
+    pending_upgrade: dict[str, Any] | None = None
     error: str | None = None
 
     def as_dict(self) -> dict[str, Any]:
@@ -103,6 +124,8 @@ class ReleaseStatus:
             "published_at": self.published_at,
             "checked_at": self.checked_at,
             "restart_required": self.restart_required,
+            "staged_install": self.staged_install,
+            "pending_upgrade": self.pending_upgrade,
             "error": self.error,
         }
 
@@ -134,6 +157,8 @@ class _ReleaseCache:
         self._checked_at: float | None = None
         self._error: str | None = None
         self.restart_required = False
+        # True when the install was staged for shutdown rather than applied.
+        self.staged_install = False
 
     async def get(
         self, *, force: bool
@@ -190,6 +215,8 @@ async def get_release_status(*, force: bool = False) -> ReleaseStatus:
         checked_at=checked_at,
         error=error,
         restart_required=_CACHE.restart_required,
+        staged_install=_CACHE.staged_install,
+        pending_upgrade=pending_upgrade_result(),
     )
     if payload is None:
         return status
@@ -265,6 +292,163 @@ def _sha256_of(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _stage_dir() -> Path:
+    return config_dir_path() / _STAGE_DIRNAME
+
+
+def pending_upgrade_result() -> dict[str, Any] | None:
+    """Outcome written by a deferred (Windows) upgrade, if one has finished.
+
+    Read on status so a deferred install that failed after this process exited
+    is still reported instead of vanishing.
+    """
+
+    path = _stage_dir() / _PENDING_RESULT_FILENAME
+    try:
+        raw = path.read_text(encoding="utf-8")
+    except OSError:
+        return None
+    try:
+        parsed = json.loads(raw)
+    except ValueError:
+        return None
+    return parsed if isinstance(parsed, dict) else None
+
+
+def clear_pending_upgrade_result() -> None:
+    """Drop a consumed deferred-upgrade outcome."""
+
+    with suppress(OSError):
+        (_stage_dir() / _PENDING_RESULT_FILENAME).unlink()
+
+
+def _powershell_literal(value: str) -> str:
+    """Quote a value for a PowerShell single-quoted string."""
+
+    return "'" + value.replace("'", "''") + "'"
+
+
+def _deferred_helper_script(
+    *,
+    uv_executable: str,
+    command: list[str],
+    result_path: Path,
+    stage_dir: Path,
+) -> str:
+    """PowerShell that waits for this process to exit, then installs.
+
+    Written as PowerShell rather than Python because the only interpreter we
+    can rely on is the one inside the environment being replaced -- using it
+    would hold the very directory uv needs to delete.
+    """
+
+    quoted_args = ", ".join(_powershell_literal(arg) for arg in command[1:])
+    return f"""$ErrorActionPreference = 'Stop'
+$parent = {os.getpid()}
+$deadline = (Get-Date).AddSeconds({_HELPER_WAIT_SECONDS})
+while ((Get-Date) -lt $deadline) {{
+    if (-not (Get-Process -Id $parent -ErrorAction SilentlyContinue)) {{ break }}
+    Start-Sleep -Milliseconds 500
+}}
+if (Get-Process -Id $parent -ErrorAction SilentlyContinue) {{
+    $result = @{{ ok = $false; message = 'Timed out waiting for the server to stop.' }}
+    $result | ConvertTo-Json | Set-Content -Path {_powershell_literal(str(result_path))} -Encoding utf8
+    exit 1
+}}
+# Give Windows a moment to release the handles the exiting process held.
+Start-Sleep -Seconds 2
+$output = & {_powershell_literal(uv_executable)} {quoted_args} 2>&1 | Out-String
+$ok = $LASTEXITCODE -eq 0
+$result = @{{
+    ok = $ok
+    exit_code = $LASTEXITCODE
+    message = if ($ok) {{ 'Deferred install completed.' }} else {{ 'Deferred install failed.' }}
+    output = $output
+}}
+$result | ConvertTo-Json | Set-Content -Path {_powershell_literal(str(result_path))} -Encoding utf8
+if ($ok) {{ Remove-Item -Path {_powershell_literal(str(stage_dir / "wheel"))} -Recurse -Force -ErrorAction SilentlyContinue }}
+"""
+
+
+def _spawn_deferred_upgrade(
+    *,
+    uv_executable: str,
+    command: list[str],
+    tag: str,
+    log: list[str],
+) -> UpgradeResult:
+    """Hand the install to a detached helper that runs after we exit."""
+
+    powershell = shutil.which("powershell") or shutil.which("pwsh")
+    if powershell is None:
+        return UpgradeResult(
+            ok=False,
+            message=(
+                "PowerShell was not found, so the update cannot be staged. "
+                "Stop the server and re-run the install command instead."
+            ),
+            log=log,
+        )
+    stage_dir = _stage_dir()
+    result_path = stage_dir / _PENDING_RESULT_FILENAME
+    with suppress(OSError):
+        result_path.unlink()
+    script_path = stage_dir / "apply-upgrade.ps1"
+    try:
+        script_path.write_text(
+            _deferred_helper_script(
+                uv_executable=uv_executable,
+                command=command,
+                result_path=result_path,
+                stage_dir=stage_dir,
+            ),
+            encoding="utf-8",
+        )
+    except OSError as exc:
+        return UpgradeResult(
+            ok=False, message=f"Could not stage the update: {exc!s}", log=log
+        )
+
+    # DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP: the helper must outlive us,
+    # and must not die with the console this server was started from.
+    creation_flags = 0x00000008 | 0x00000200
+    try:
+        subprocess.Popen(
+            [
+                powershell,
+                "-NoProfile",
+                "-NonInteractive",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+                str(script_path),
+            ],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            creationflags=creation_flags,
+            close_fds=True,
+        )
+    except (OSError, ValueError) as exc:
+        return UpgradeResult(
+            ok=False, message=f"Could not start the update helper: {exc!s}", log=log
+        )
+
+    log.append("staged for install after shutdown (Windows)")
+    _CACHE.restart_required = True
+    _CACHE.staged_install = True
+    return UpgradeResult(
+        ok=True,
+        message=(
+            f"{tag or 'The latest release'} is verified and staged. Windows cannot "
+            "replace the environment while the server is running, so stop "
+            "fcc-server to finish installing, then start it again."
+        ),
+        installed_version=tag or None,
+        log=log,
+    )
+
+
 def upgrade_to_latest(payload: dict[str, Any]) -> UpgradeResult:
     """Download, verify, and install the wheel from ``payload``.
 
@@ -289,8 +473,17 @@ def upgrade_to_latest(payload: dict[str, Any]) -> UpgradeResult:
     expected_digest = str(asset.get("digest") or "").removeprefix("sha256:").lower()
     tag = str(payload.get("tag_name") or "").lstrip("vV")
 
-    with tempfile.TemporaryDirectory(prefix="fcc-upgrade-") as directory:
-        wheel_path = Path(directory) / str(asset.get("name"))
+    with ExitStack() as stack:
+        if _WINDOWS:
+            wheel_dir = _stage_dir() / "wheel"
+            with suppress(OSError):
+                shutil.rmtree(wheel_dir)
+            wheel_dir.mkdir(parents=True, exist_ok=True)
+        else:
+            wheel_dir = Path(
+                stack.enter_context(tempfile.TemporaryDirectory(prefix="fcc-upgrade-"))
+            )
+        wheel_path = wheel_dir / str(asset.get("name"))
         try:
             with httpx.stream(
                 "GET",
@@ -339,6 +532,13 @@ def upgrade_to_latest(payload: dict[str, Any]) -> UpgradeResult:
             python,
             spec,
         ]
+        if _WINDOWS:
+            return _spawn_deferred_upgrade(
+                uv_executable=uv_executable,
+                command=command,
+                tag=tag,
+                log=log,
+            )
         try:
             # Fixed argv, never a shell string, so the release metadata cannot
             # inject arguments.
