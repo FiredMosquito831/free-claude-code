@@ -1,10 +1,10 @@
 #!/bin/sh
 set -eu
 
-FCC_VERSION="4.15.0"
+FCC_VERSION="4.16.0"
 FCC_WHEEL_NAME="free_claude_code-${FCC_VERSION}-py3-none-any.whl"
 FCC_WHEEL_URL="https://github.com/FiredMosquito831/free-claude-code/releases/download/v${FCC_VERSION}/${FCC_WHEEL_NAME}"
-FCC_WHEEL_SHA256="89f13aab7087997f9a9f4c6efd3f0b4e9264d7bb38e2e9bb833945c01bd68112"
+FCC_WHEEL_SHA256="7010d83916a2ac49c1a1b2e984bdb435355038f1926ef51cdce5a3249fae3b33"
 PYTHON_VERSION="3.14.0"
 MIN_UV_VERSION="0.11.0"
 CLAUDE_INSTALL_URL="https://claude.ai/install.sh"
@@ -13,6 +13,8 @@ PI_INSTALL_URL="https://pi.dev/install.sh"
 UV_INSTALL_URL="https://astral.sh/uv/install.sh"
 
 dry_run=0
+skip_agents=0
+failed_agents=""
 voice_nim=0
 voice_local=0
 voice_all=0
@@ -25,9 +27,12 @@ show_usage() {
     cat <<'USAGE'
 Usage: install.sh [options]
 
-Installs Claude Code, Codex, and Pi if missing, ensures a compatible uv, and installs or updates Free Claude Code.
+Installs or updates Free Claude Code, then installs the Claude Code, Codex, and
+Pi coding agents if they are missing. A coding agent that fails to install is
+reported as a warning; Free Claude Code itself still installs.
 
 Options:
+  --skip-agents            Install only Free Claude Code, not the coding agents.
   --voice-nim              Install NVIDIA NIM voice transcription support.
   --voice-local            Install local Whisper voice transcription support.
   --voice-all              Install all voice transcription backends.
@@ -40,6 +45,27 @@ USAGE
 fail() {
     printf 'error: %s\n' "$*" >&2
     exit 1
+}
+
+# Install one coding agent without letting its failure abort the run.
+#
+# The agents are convenience launchers around third-party CLIs; none of them is
+# required for the proxy to work. Installing them in a subshell means a missing
+# npm, an offline mirror, or a PATH quirk downgrades to a warning instead of
+# aborting before Free Claude Code itself is installed.
+optional_agent() {
+    agent_label=$1
+    agent_function=$2
+    if [ "$skip_agents" -eq 1 ]; then
+        printf 'Skipping %s (--skip-agents).\n' "$agent_label"
+        return 0
+    fi
+    if ( "$agent_function" ); then
+        return 0
+    fi
+    failed_agents="$failed_agents$agent_label "
+    printf 'warning: %s could not be installed. Free Claude Code does not need it; continuing.\n' \
+        "$agent_label" >&2
 }
 
 step() {
@@ -382,6 +408,9 @@ parse_args() {
                 torch_backend=${1#*=}
                 [ -n "$torch_backend" ] || fail "--torch-backend requires a non-empty value."
                 ;;
+            --skip-agents)
+                skip_agents=1
+                ;;
             --dry-run)
                 dry_run=1
                 ;;
@@ -521,15 +550,10 @@ require_command bash
 require_command sh
 require_command mktemp
 
-step "Ensuring Claude Code is installed"
-ensure_claude
-
-step "Ensuring Codex is installed"
-ensure_codex
-
-step "Ensuring Pi is installed"
-ensure_pi
-
+# uv and Free Claude Code come first: they are what this script exists to
+# install, and neither depends on the coding agents. The agents are installed
+# afterwards so a failure in one of them can no longer prevent Free Claude Code
+# from being installed at all.
 step "Ensuring uv $MIN_UV_VERSION or newer is installed"
 ensure_uv
 
@@ -539,11 +563,27 @@ install_free_claude_code
 step "Configuring PATH and verifying Free Claude Code"
 configure_and_verify_free_claude_code
 
+step "Ensuring Claude Code is installed"
+optional_agent "Claude Code" ensure_claude
+
+step "Ensuring Codex is installed"
+optional_agent "Codex" ensure_codex
+
+step "Ensuring Pi is installed"
+optional_agent "Pi" ensure_pi
+
 if [ "$dry_run" -eq 1 ]; then
     printf '\nDry run complete. No changes were made.\n'
 else
     printf '\nFree Claude Code is installed and verified. Start the proxy with: fcc-server\n'
-    printf 'Run Claude Code with: fcc-claude\n'
-    printf 'Run Codex with: fcc-codex\n'
-    printf 'Run Pi with: fcc-pi\n'
+    if [ -n "$failed_agents" ]; then
+        printf '\nThese coding agents were not installed: %s\n' "$failed_agents"
+        printf 'Free Claude Code works without them. Install them yourself and re-run\n'
+        printf 'this script, or use the agents you already have against the proxy at\n'
+        printf 'http://127.0.0.1:8082 (see the README "Connect Your Client" section).\n'
+    else
+        printf 'Run Claude Code with: fcc-claude\n'
+        printf 'Run Codex with: fcc-codex\n'
+        printf 'Run Pi with: fcc-pi\n'
+    fi
 fi

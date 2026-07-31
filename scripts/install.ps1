@@ -1,4 +1,5 @@
 param(
+    [switch] $SkipAgents,
     [switch] $VoiceNim,
     [switch] $VoiceLocal,
     [switch] $VoiceAll,
@@ -13,10 +14,10 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
 
-$FccVersion = "4.15.0"
+$FccVersion = "4.16.0"
 $FccWheelName = "free_claude_code-$FccVersion-py3-none-any.whl"
 $FccWheelUrl = "https://github.com/FiredMosquito831/free-claude-code/releases/download/v$FccVersion/$FccWheelName"
-$FccWheelSha256 = "89f13aab7087997f9a9f4c6efd3f0b4e9264d7bb38e2e9bb833945c01bd68112"
+$FccWheelSha256 = "7010d83916a2ac49c1a1b2e984bdb435355038f1926ef51cdce5a3249fae3b33"
 $PythonVersion = "3.14.0"
 $MinUvVersion = "0.11.0"
 $ClaudeInstallUrl = "https://claude.ai/install.ps1"
@@ -28,9 +29,12 @@ function Show-Usage {
     @"
 Usage: install.ps1 [options]
 
-Installs Claude Code, Codex, and Pi if missing, ensures a compatible uv, and installs or updates Free Claude Code.
+Installs or updates Free Claude Code, then installs the Claude Code, Codex, and
+Pi coding agents if they are missing. A coding agent that fails to install is
+reported as a warning; Free Claude Code itself still installs.
 
 Options:
+  -SkipAgents            Install only Free Claude Code, not the coding agents.
   -VoiceNim              Install NVIDIA NIM voice transcription support.
   -VoiceLocal            Install local Whisper voice transcription support.
   -VoiceAll              Install all voice transcription backends.
@@ -316,6 +320,33 @@ function Ensure-Codex {
     Confirm-Application -CommandName "codex" -DisplayName "Codex"
 }
 
+$script:FailedAgents = @()
+
+function Invoke-OptionalAgent {
+    param(
+        [Parameter(Mandatory = $true)] [string] $Label,
+        [Parameter(Mandatory = $true)] [scriptblock] $Action
+    )
+
+    # The coding agents are convenience launchers around third-party CLIs; none
+    # of them is required for the proxy to work. Catching here means a missing
+    # npm, an offline mirror, or a PATH quirk downgrades to a warning instead of
+    # aborting before Free Claude Code itself is installed.
+    if ($SkipAgents) {
+        Write-Host "Skipping $Label (-SkipAgents)."
+        return
+    }
+
+    try {
+        & $Action
+    }
+    catch {
+        $script:FailedAgents += $Label
+        Write-Warning "$Label could not be installed: $($_.Exception.Message)"
+        Write-Warning "Free Claude Code does not need it; continuing."
+    }
+}
+
 function Ensure-Pi {
     $existingPi = Get-ApplicationCommand "pi"
     if ($existingPi -and ($DryRun -or (Test-PiApplication $existingPi))) {
@@ -584,15 +615,10 @@ if ((-not [string]::IsNullOrWhiteSpace($TorchBackend)) -and (-not ($VoiceLocal -
 
 Add-KnownBinDirectories
 
-Write-Step "Ensuring Claude Code is installed"
-Ensure-ClaudeCode
-
-Write-Step "Ensuring Codex is installed"
-Ensure-Codex
-
-Write-Step "Ensuring Pi is installed"
-Ensure-Pi
-
+# uv and Free Claude Code come first: they are what this script exists to
+# install, and neither depends on the coding agents. The agents are installed
+# afterwards so a failure in one of them can no longer prevent Free Claude Code
+# from being installed at all.
 Write-Step "Ensuring uv $MinUvVersion or newer is installed"
 Ensure-Uv
 
@@ -602,13 +628,31 @@ Install-FreeClaudeCode
 Write-Step "Configuring PATH and verifying Free Claude Code"
 Configure-AndConfirmFreeClaudeCode
 
+Write-Step "Ensuring Claude Code is installed"
+Invoke-OptionalAgent -Label "Claude Code" -Action { Ensure-ClaudeCode }
+
+Write-Step "Ensuring Codex is installed"
+Invoke-OptionalAgent -Label "Codex" -Action { Ensure-Codex }
+
+Write-Step "Ensuring Pi is installed"
+Invoke-OptionalAgent -Label "Pi" -Action { Ensure-Pi }
+
 Write-Host ""
 if ($DryRun) {
     Write-Host "Dry run complete. No changes were made."
 }
 else {
     Write-Host "Free Claude Code is installed and verified. Start the proxy with: fcc-server"
-    Write-Host "Run Claude Code with: fcc-claude"
-    Write-Host "Run Codex with: fcc-codex"
-    Write-Host "Run Pi with: fcc-pi"
+    if ($script:FailedAgents.Count -gt 0) {
+        Write-Host ""
+        Write-Host "These coding agents were not installed: $($script:FailedAgents -join ', ')"
+        Write-Host "Free Claude Code works without them. Install them yourself and re-run"
+        Write-Host "this script, or use the agents you already have against the proxy at"
+        Write-Host "http://127.0.0.1:8082 (see the README ""Connect Your Client"" section)."
+    }
+    else {
+        Write-Host "Run Claude Code with: fcc-claude"
+        Write-Host "Run Codex with: fcc-codex"
+        Write-Host "Run Pi with: fcc-pi"
+    }
 }

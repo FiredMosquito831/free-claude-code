@@ -66,21 +66,74 @@ Everything is configured through the same `.env` file (see [.env.example](.env.e
 
 ### 1. Install Or Update
 
-macOS/Linux:
+**Pick one environment and stay in it.** On Windows you can install either in **PowerShell** or in **WSL** — both work, but install in the one where you'll actually run your coding agent. Installing in both is the most common way to end up confused, because you get two separate configs (`C:\Users\<you>\.fcc` and `~/.fcc` inside WSL) and only one of them is the one your server is reading.
 
-```bash
-curl -fsSL "https://raw.githubusercontent.com/FiredMosquito831/free-claude-code/v4.15.0/scripts/install.sh" | sh
-```
+> Not sure? If you already do your development inside WSL, install in WSL. Otherwise use PowerShell.
 
-Windows PowerShell:
+<details open>
+<summary><b>Windows (PowerShell)</b></summary>
+
+Open **Windows PowerShell** (no admin rights needed) and run:
 
 ```powershell
-& ([scriptblock]::Create((irm "https://raw.githubusercontent.com/FiredMosquito831/free-claude-code/v4.15.0/scripts/install.ps1")))
+& ([scriptblock]::Create((irm "https://raw.githubusercontent.com/FiredMosquito831/free-claude-code/v4.16.0/scripts/install.ps1")))
 ```
 
-Both commands are pinned to the verified `v4.15.0` release and refuse to install if the downloaded wheel's SHA-256 does not match the one baked into the script. They also install Claude Code, Codex, Pi, and a compatible `uv` if those are missing. You can review the installers before running them: [install.sh](scripts/install.sh) and [install.ps1](scripts/install.ps1).
+If PowerShell blocks the script, run it for this session only:
 
-Already installed? You no longer need to re-run these by hand — the Admin UI tells you when a new release is out and can install it for you. See [Version & Updates](#version--updates).
+```powershell
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+```
+
+</details>
+
+<details open>
+<summary><b>WSL, Linux, or macOS</b></summary>
+
+Open your shell (in WSL, open the **Ubuntu** terminal — not PowerShell) and run:
+
+```bash
+curl -fsSL "https://raw.githubusercontent.com/FiredMosquito831/free-claude-code/v4.16.0/scripts/install.sh" | sh
+```
+
+</details>
+
+**Then close and reopen your terminal.** The installer adds `~/.local/bin` to your `PATH`, and an already-open shell won't see it. This is the single most common reason `fcc-server` appears "not found" straight after a successful install.
+
+Verify it worked:
+
+```bash
+fcc-server --version
+```
+
+#### What the installer actually does
+
+1. Installs `uv` (the Python tool runner) if it's missing or too old.
+2. Downloads the Free Claude Code wheel for the pinned release and **verifies its SHA-256** — a mismatch aborts the install rather than running unverified code.
+3. Installs Free Claude Code and puts `fcc-server`, `fcc-claude`, `fcc-codex`, and `fcc-pi` on your `PATH`.
+4. **Then** installs the Claude Code, Codex, and Pi CLIs if they're missing.
+
+Step 4 is last on purpose. Those three are separate third-party tools and **Free Claude Code does not need any of them to run**. If one fails to install — no `npm` for Pi, a network hiccup, an unusual `PATH` — you get a warning like:
+
+```text
+warning: Pi could not be installed. Free Claude Code does not need it; continuing.
+```
+
+…and the install still finishes successfully. The summary at the end lists anything that was skipped.
+
+To skip the coding agents entirely (useful if you already have them, or on a locked-down machine):
+
+```bash
+sh install.sh --skip-agents        # PowerShell: -SkipAgents
+```
+
+Want to see what it would do without changing anything? Add `--dry-run` (PowerShell: `-DryRun`).
+
+You can review both installers before running them: [install.sh](scripts/install.sh) and [install.ps1](scripts/install.ps1).
+
+#### Updating later
+
+You don't need to re-run the install command. The Admin UI shows your version, announces new releases, and installs them for you — see [Version & Updates](#version--updates). Re-running the install command does the same thing.
 
 ### 2. Start The Server
 
@@ -141,6 +194,23 @@ fcc-codex exec "hello"
 ```
 
 `fcc-pi` registers FCC only for that Pi process; your existing Pi settings, sessions, credentials, and extensions remain unchanged.
+
+<a id="install-troubleshooting"></a>
+
+### Install Troubleshooting
+
+| Symptom | Cause and fix |
+| --- | --- |
+| `fcc-server: command not found` right after installing | Your shell's `PATH` is stale. **Close and reopen the terminal.** If it persists, check that `~/.local/bin` (Windows: `%USERPROFILE%\.local\bin`) is on `PATH`. |
+| The install stopped partway with an error about `claude`, `codex`, or `pi` | You're on a release older than v4.16.0, where a failing coding agent aborted the whole install. Re-run with the current command above — those failures are now warnings. |
+| `Pi could not be installed` | Pi installs through `npm`. Either install Node.js/npm and re-run, or ignore it — nothing else needs Pi. Use `--skip-agents` to stop trying. |
+| `FCC release wheel checksum mismatch; refusing to install` | The download was corrupted or incomplete. Re-run the command. This check is deliberate: it will not install a wheel it can't verify. |
+| PowerShell refuses to run the script | `Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass`, then re-run. This only affects the current window. |
+| Admin UI won't open, or settings don't seem to apply | You probably installed in **both** PowerShell and WSL and are editing one config while the server reads the other. Run `fcc-server --version` in each and pick one environment. |
+| Server starts but the browser can't reach it | Use the exact URL from the startup log. In WSL, `http://127.0.0.1:8082/admin` works from a Windows browser via WSL's localhost forwarding. |
+| `address already in use` on startup | A server is already running on that port. Stop it first, or set `PORT` to something else. |
+
+Still stuck? Run the installer with `--dry-run` (PowerShell: `-DryRun`) and share the output — it prints every command it would run without changing anything.
 
 ## Connect Claude Code (CLI & Desktop)
 
@@ -677,32 +747,32 @@ macOS/Linux:
 
 ```bash
 # NVIDIA NIM transcription
-curl -fsSL "https://raw.githubusercontent.com/FiredMosquito831/free-claude-code/v4.15.0/scripts/install.sh" | sh -s -- --voice-nim
+curl -fsSL "https://raw.githubusercontent.com/FiredMosquito831/free-claude-code/v4.16.0/scripts/install.sh" | sh -s -- --voice-nim
 
 # Local Whisper on CPU or CUDA
-curl -fsSL "https://raw.githubusercontent.com/FiredMosquito831/free-claude-code/v4.15.0/scripts/install.sh" | sh -s -- --voice-local
+curl -fsSL "https://raw.githubusercontent.com/FiredMosquito831/free-claude-code/v4.16.0/scripts/install.sh" | sh -s -- --voice-local
 
 # Both backends
-curl -fsSL "https://raw.githubusercontent.com/FiredMosquito831/free-claude-code/v4.15.0/scripts/install.sh" | sh -s -- --voice-all
+curl -fsSL "https://raw.githubusercontent.com/FiredMosquito831/free-claude-code/v4.16.0/scripts/install.sh" | sh -s -- --voice-all
 
 # Local Whisper with the CUDA 13.0 PyTorch backend
-curl -fsSL "https://raw.githubusercontent.com/FiredMosquito831/free-claude-code/v4.15.0/scripts/install.sh" | sh -s -- --voice-local --torch-backend cu130
+curl -fsSL "https://raw.githubusercontent.com/FiredMosquito831/free-claude-code/v4.16.0/scripts/install.sh" | sh -s -- --voice-local --torch-backend cu130
 ```
 
 Windows PowerShell:
 
 ```powershell
 # NVIDIA NIM transcription
-& ([scriptblock]::Create((irm "https://raw.githubusercontent.com/FiredMosquito831/free-claude-code/v4.15.0/scripts/install.ps1"))) -VoiceNim
+& ([scriptblock]::Create((irm "https://raw.githubusercontent.com/FiredMosquito831/free-claude-code/v4.16.0/scripts/install.ps1"))) -VoiceNim
 
 # Local Whisper on CPU or CUDA
-& ([scriptblock]::Create((irm "https://raw.githubusercontent.com/FiredMosquito831/free-claude-code/v4.15.0/scripts/install.ps1"))) -VoiceLocal
+& ([scriptblock]::Create((irm "https://raw.githubusercontent.com/FiredMosquito831/free-claude-code/v4.16.0/scripts/install.ps1"))) -VoiceLocal
 
 # Both backends
-& ([scriptblock]::Create((irm "https://raw.githubusercontent.com/FiredMosquito831/free-claude-code/v4.15.0/scripts/install.ps1"))) -VoiceAll
+& ([scriptblock]::Create((irm "https://raw.githubusercontent.com/FiredMosquito831/free-claude-code/v4.16.0/scripts/install.ps1"))) -VoiceAll
 
 # Local Whisper with the CUDA 13.0 PyTorch backend
-& ([scriptblock]::Create((irm "https://raw.githubusercontent.com/FiredMosquito831/free-claude-code/v4.15.0/scripts/install.ps1"))) -VoiceLocal -TorchBackend cu130
+& ([scriptblock]::Create((irm "https://raw.githubusercontent.com/FiredMosquito831/free-claude-code/v4.16.0/scripts/install.ps1"))) -VoiceLocal -TorchBackend cu130
 ```
 
 Restart `fcc-server`. In **Admin UI → Messaging → Voice**, enable voice notes, select `cpu`, `cuda`, or `nvidia_nim`, and choose the Whisper model. Local gated models need `HUGGINGFACE_API_KEY`; NVIDIA NIM transcription needs `NVIDIA_NIM_API_KEY`.

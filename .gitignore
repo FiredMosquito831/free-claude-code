@@ -17,3 +17,6 @@ llama_cache
 .vscode
 # Local PowerShell analysis cache
 Microsoft/
+
+# Local working notes (practices, lessons, open items)
+WORKING-NOTES.md
