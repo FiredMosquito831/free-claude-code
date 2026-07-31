@@ -6,13 +6,13 @@ from pathlib import Path
 
 import pytest
 
-FCC_VERSION = "4.14.2"
+FCC_VERSION = "4.15.0"
 FCC_WHEEL_NAME = f"free_claude_code-{FCC_VERSION}-py3-none-any.whl"
 FCC_WHEEL_URL = (
     "https://github.com/FiredMosquito831/free-claude-code/releases/download/"
     f"v{FCC_VERSION}/{FCC_WHEEL_NAME}"
 )
-FCC_WHEEL_SHA256 = "2974e7120f57e458eb8b147631d82eeef9cc7f8200726769d73372716aebb2d6"
+FCC_WHEEL_SHA256 = "89f13aab7087997f9a9f4c6efd3f0b4e9264d7bb38e2e9bb833945c01bd68112"
 
 
 def _repo_root() -> Path:

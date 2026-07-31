@@ -1569,3 +1569,117 @@ textarea:focus-visible,
   gap: 12px;
   align-items: flex-end;
 }
+
+/* Version indicator, update banners, and version panel */
+.version-indicator {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: -12px;
+  padding: 0 2px;
+  color: var(--muted);
+  font-size: 11px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+.version-indicator .version-update-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: var(--radius-full);
+  background: var(--accent);
+  box-shadow: var(--glow-accent);
+}
+
+.version-banners {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 24px;
+}
+
+.version-banners:empty {
+  display: none;
+  margin-bottom: 0;
+}
+
+.version-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px 20px;
+  border: 1px solid var(--accent-border);
+  border-radius: var(--radius-lg);
+  background: var(--accent-muted);
+  box-shadow: var(--shadow-sm);
+}
+
+.version-banner.restart-required {
+  border-color: var(--warn-border);
+  background: var(--warn-bg);
+}
+
+.version-banner-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.version-banner-title {
+  color: var(--text-strong);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.version-banner-detail {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.version-banner-detail a {
+  color: var(--accent);
+}
+
+.version-banner-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.version-details {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 16px;
+}
+
+.version-details dl {
+  margin: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.version-details dt {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.version-details dd {
+  margin: 0;
+  color: var(--text-strong);
+  font-size: 14px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+.version-details .version-error {
+  color: var(--warn);
+}
+
+.version-upgrade-log {
+  margin-top: 16px;
+  max-height: 180px;
+}

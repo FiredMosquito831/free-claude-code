@@ -17,6 +17,7 @@
             <p>Server Control</p>
           </div>
         </div>
+        <div id="versionIndicator" class="version-indicator" aria-live="polite"></div>
         <nav id="sectionNav" class="section-nav" aria-label="Admin views"></nav>
       </aside>
 
@@ -27,8 +28,28 @@
           </div>
         </header>
 
+        <div id="versionBanners" class="version-banners" aria-live="polite"></div>
+
         <div id="adminViews" class="admin-views">
           <section id="view-providers" class="admin-view active" data-view="providers">
+            <section class="settings-section" id="versionPanel" aria-label="Version and updates">
+              <div class="section-heading">
+                <div>
+                  <h3>Version</h3>
+                  <p>Check for updates and upgrade the server in place.</p>
+                </div>
+                <div class="observability-actions">
+                  <button id="versionCheckButton" class="secondary-button" type="button">
+                    Check for updates
+                  </button>
+                  <button id="versionUpdateButton" class="primary-button" type="button" disabled>
+                    Update now
+                  </button>
+                </div>
+              </div>
+              <div id="versionDetails" class="version-details"></div>
+              <pre id="versionUpgradeLog" class="requests-detail-body version-upgrade-log" hidden></pre>
+            </section>
             <section class="provider-strip" aria-label="Provider status">
               <div class="strip-header">
                 <h3>Providers</h3>
