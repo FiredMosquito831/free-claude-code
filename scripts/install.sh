@@ -1,20 +1,20 @@
 #!/bin/sh
 set -eu
 
-FCC_VERSION="4.17.0"
-FCC_WHEEL_NAME="free_claude_code-${FCC_VERSION}-py3-none-any.whl"
-FCC_WHEEL_URL="https://github.com/FiredMosquito831/free-claude-code/releases/download/v${FCC_VERSION}/${FCC_WHEEL_NAME}"
-FCC_WHEEL_SHA256="91aaec9d83e2e931dbad653e74faa3c106acd6f8bd30a21a7985d77d870aef8b"
+FCC_REPO="FiredMosquito831/free-claude-code"
+FCC_LATEST_RELEASE_URL="https://api.github.com/repos/${FCC_REPO}/releases/latest"
 PYTHON_VERSION="3.14.0"
 MIN_UV_VERSION="0.11.0"
-CLAUDE_INSTALL_URL="https://claude.ai/install.sh"
-CODEX_INSTALL_URL="https://chatgpt.com/codex/install.sh"
-PI_INSTALL_URL="https://pi.dev/install.sh"
 UV_INSTALL_URL="https://astral.sh/uv/install.sh"
 
+# Resolved from the release feed at run time (or from --version).
+FCC_VERSION=""
+FCC_WHEEL_NAME=""
+FCC_WHEEL_URL=""
+FCC_WHEEL_SHA256=""
+
 dry_run=0
-skip_agents=0
-failed_agents=""
+requested_version=""
 voice_nim=0
 voice_local=0
 voice_all=0
@@ -27,12 +27,13 @@ show_usage() {
     cat <<'USAGE'
 Usage: install.sh [options]
 
-Installs or updates Free Claude Code, then installs the Claude Code, Codex, and
-Pi coding agents if they are missing. A coding agent that fails to install is
-reported as a warning; Free Claude Code itself still installs.
+Installs or updates Free Claude Code to the latest published release.
+
+Installs a compatible uv if one is missing. It does not install Claude Code,
+Codex, or Pi -- install whichever of those you use yourself.
 
 Options:
-  --skip-agents            Install only Free Claude Code, not the coding agents.
+  --version VALUE          Install this exact release instead of the latest.
   --voice-nim              Install NVIDIA NIM voice transcription support.
   --voice-local            Install local Whisper voice transcription support.
   --voice-all              Install all voice transcription backends.
@@ -45,27 +46,6 @@ USAGE
 fail() {
     printf 'error: %s\n' "$*" >&2
     exit 1
-}
-
-# Install one coding agent without letting its failure abort the run.
-#
-# The agents are convenience launchers around third-party CLIs; none of them is
-# required for the proxy to work. Installing them in a subshell means a missing
-# npm, an offline mirror, or a PATH quirk downgrades to a warning instead of
-# aborting before Free Claude Code itself is installed.
-optional_agent() {
-    agent_label=$1
-    agent_function=$2
-    if [ "$skip_agents" -eq 1 ]; then
-        printf 'Skipping %s (--skip-agents).\n' "$agent_label"
-        return 0
-    fi
-    if ( "$agent_function" ); then
-        return 0
-    fi
-    failed_agents="$failed_agents$agent_label "
-    printf 'warning: %s could not be installed. Free Claude Code does not need it; continuing.\n' \
-        "$agent_label" >&2
 }
 
 step() {
@@ -137,24 +117,10 @@ add_known_bin_directories() {
     if [ -n "${HOME:-}" ]; then
         add_path_entry "$HOME/.local/bin"
         add_path_entry "$HOME/.cargo/bin"
-        add_path_entry "${XDG_DATA_HOME:-$HOME/.local/share}/pi-node/current/bin"
     fi
 
     export PATH
     hash -r 2>/dev/null || true
-}
-
-add_pi_bin_directories() {
-    [ "$dry_run" -eq 0 ] || return 0
-    add_known_bin_directories
-    if command -v npm >/dev/null 2>&1; then
-        pi_npm_prefix=$(npm prefix -g 2>/dev/null || npm config get prefix 2>/dev/null || true)
-        if [ -n "$pi_npm_prefix" ]; then
-            add_path_entry "$pi_npm_prefix/bin"
-            export PATH
-            hash -r 2>/dev/null || true
-        fi
-    fi
 }
 
 require_command() {
@@ -233,130 +199,6 @@ verify_command() {
     run "$command_path" --version
 }
 
-pi_command_is_compatible() {
-    pi_command_path=$(command -v pi 2>/dev/null) || return 1
-    pi_help=$("$pi_command_path" --help 2>/dev/null) || return 1
-    case "$pi_help" in
-        *--extension*) ;;
-        *) return 1 ;;
-    esac
-    case "$pi_help" in
-        *--models*) return 0 ;;
-        *) return 1 ;;
-    esac
-}
-
-verify_pi_command() {
-    if [ "$dry_run" -eq 1 ]; then
-        printf '+ pi --help (verify --extension and --models support)\n'
-        print_command pi --version
-        return 0
-    fi
-
-    pi_command_path=$(command -v pi 2>/dev/null) || fail "Pi was installed, but 'pi' is not available on PATH."
-    pi_command_is_compatible || fail "The 'pi' command at $pi_command_path is not a compatible Pi Coding Agent."
-    run "$pi_command_path" --version
-}
-
-ensure_claude() {
-    if command -v claude >/dev/null 2>&1; then
-        printf 'Claude Code already found on PATH; verifying it.\n'
-    else
-        download_and_run "$CLAUDE_INSTALL_URL" bash "Claude Code"
-        add_known_bin_directories
-    fi
-
-    verify_command claude "Claude Code"
-}
-
-ensure_codex() {
-    if command -v codex >/dev/null 2>&1; then
-        printf 'Codex already found on PATH; verifying it.\n'
-    else
-        download_and_run "$CODEX_INSTALL_URL" sh "Codex" 1
-        add_known_bin_directories
-    fi
-
-    verify_command codex "Codex"
-}
-
-ensure_pi() {
-    if [ "$dry_run" -eq 1 ] && command -v pi >/dev/null 2>&1; then
-        printf 'Pi already found on PATH; verifying it.\n'
-    elif pi_command_is_compatible; then
-        printf 'Pi already found on PATH; verifying it.\n'
-    else
-        if existing_pi_path=$(command -v pi 2>/dev/null); then
-            printf "The existing 'pi' command at %s is not Pi Coding Agent; installing Pi.\n" "$existing_pi_path"
-        fi
-        download_and_run "$PI_INSTALL_URL" sh "Pi"
-        add_pi_bin_directories
-    fi
-
-    verify_pi_command
-}
-
-current_uv_version() {
-    if output=$(uv --version); then
-        :
-    else
-        return 1
-    fi
-
-    case "$output" in
-        uv\ *) version=${output#uv } ;;
-        *) version=$output ;;
-    esac
-    version=${version%% *}
-
-    case "$version" in
-        [0-9]*.[0-9]*.[0-9]*) printf '%s\n' "$version" ;;
-        *) return 1 ;;
-    esac
-}
-
-version_ge() {
-    current=${1%%[-+]*}
-    minimum=${2%%[-+]*}
-
-    old_ifs=$IFS
-    IFS=.
-    set -- $current
-    current_major=${1:-0}
-    current_minor=${2:-0}
-    current_patch=${3:-0}
-    set -- $minimum
-    minimum_major=${1:-0}
-    minimum_minor=${2:-0}
-    minimum_patch=${3:-0}
-    IFS=$old_ifs
-
-    case "$current_major$current_minor$current_patch$minimum_major$minimum_minor$minimum_patch" in
-        *[!0-9]*) return 1 ;;
-    esac
-
-    [ "$current_major" -gt "$minimum_major" ] && return 0
-    [ "$current_major" -lt "$minimum_major" ] && return 1
-    [ "$current_minor" -gt "$minimum_minor" ] && return 0
-    [ "$current_minor" -lt "$minimum_minor" ] && return 1
-    [ "$current_patch" -ge "$minimum_patch" ]
-}
-
-verify_uv() {
-    if [ "$dry_run" -eq 1 ]; then
-        print_command uv --version
-        return 0
-    fi
-
-    command -v uv >/dev/null 2>&1 || fail "uv was installed, but it is not available on PATH."
-    version=$(current_uv_version) || fail "uv is present, but 'uv --version' did not return a valid version."
-    if ! version_ge "$version" "$MIN_UV_VERSION"; then
-        fail "uv $MIN_UV_VERSION or newer is required; found uv $version after installation."
-    fi
-
-    printf 'Verified uv %s.\n' "$version"
-}
-
 ensure_uv() {
     if [ "$dry_run" -eq 1 ]; then
         if command -v uv >/dev/null 2>&1; then
@@ -408,8 +250,16 @@ parse_args() {
                 torch_backend=${1#*=}
                 [ -n "$torch_backend" ] || fail "--torch-backend requires a non-empty value."
                 ;;
-            --skip-agents)
-                skip_agents=1
+            --version)
+                shift
+                [ "$#" -gt 0 ] || fail "--version requires a value."
+                requested_version=${1#v}
+                [ -n "$requested_version" ] || fail "--version requires a value."
+                ;;
+            --version=*)
+                requested_version=${1#*=}
+                requested_version=${requested_version#v}
+                [ -n "$requested_version" ] || fail "--version requires a value."
                 ;;
             --dry-run)
                 dry_run=1
@@ -438,10 +288,38 @@ validate_args() {
     fi
 }
 
+resolve_release() {
+    if [ -n "$requested_version" ]; then
+        FCC_VERSION=$requested_version
+    else
+        # Read even during a dry run: it is a GET that changes nothing, and it
+        # is the only way to report the version that would actually install.
+        print_command curl -fsSL "$FCC_LATEST_RELEASE_URL"
+        release_json=$(curl -fsSL -H "Accept: application/vnd.github+json" "$FCC_LATEST_RELEASE_URL" 2>/dev/null) ||
+            fail "Could not reach the release feed to find the latest version."
+        FCC_VERSION=$(printf '%s\n' "$release_json" |
+            grep -m1 '"tag_name"' |
+            sed -e 's/.*"tag_name"[[:space:]]*:[[:space:]]*"//' -e 's/".*//' -e 's/^v//')
+        [ -n "$FCC_VERSION" ] ||
+            fail "Could not read the latest release version from the release feed."
+        # GitHub publishes a sha256 digest per asset, so the download is still
+        # verified even though no checksum is pinned in this script.
+        FCC_WHEEL_SHA256=$(printf '%s\n' "$release_json" |
+            grep -m1 '"digest"' |
+            sed -e 's/.*sha256://' -e 's/".*//')
+    fi
+    FCC_WHEEL_NAME="free_claude_code-${FCC_VERSION}-py3-none-any.whl"
+    FCC_WHEEL_URL="https://github.com/${FCC_REPO}/releases/download/v${FCC_VERSION}/${FCC_WHEEL_NAME}"
+}
+
 download_verified_release_wheel() {
     if [ "$dry_run" -eq 1 ]; then
         print_command curl -fsSL "$FCC_WHEEL_URL" -o "<temporary-wheel>"
-        printf '+ verify SHA-256 %s for <temporary-wheel>\n' "$FCC_WHEEL_SHA256"
+        if [ -n "$FCC_WHEEL_SHA256" ]; then
+            printf '+ verify SHA-256 %s for <temporary-wheel>\n' "$FCC_WHEEL_SHA256"
+        else
+            printf '+ verify the SHA-256 published for this release\n'
+        fi
         release_wheel_path="<verified-release-wheel>"
         return 0
     fi
@@ -451,7 +329,7 @@ download_verified_release_wheel() {
     release_wheel_path="$temporary_directory/$FCC_WHEEL_NAME"
     print_command curl -fsSL "$FCC_WHEEL_URL" -o "$release_wheel_path"
     if ! curl -fsSL "$FCC_WHEEL_URL" -o "$release_wheel_path"; then
-        fail "Could not download the pinned FCC v$FCC_VERSION release wheel."
+        fail "Could not download the FCC v$FCC_VERSION release wheel."
     fi
     [ -s "$release_wheel_path" ] ||
         fail "The downloaded FCC release wheel was empty."
@@ -491,6 +369,7 @@ package_spec() {
 }
 
 install_free_claude_code() {
+    resolve_release
     download_verified_release_wheel
     package_url="file://$release_wheel_path"
     spec=$(package_spec "$package_url")
@@ -550,10 +429,6 @@ require_command bash
 require_command sh
 require_command mktemp
 
-# uv and Free Claude Code come first: they are what this script exists to
-# install, and neither depends on the coding agents. The agents are installed
-# afterwards so a failure in one of them can no longer prevent Free Claude Code
-# from being installed at all.
 step "Ensuring uv $MIN_UV_VERSION or newer is installed"
 ensure_uv
 
@@ -563,27 +438,11 @@ install_free_claude_code
 step "Configuring PATH and verifying Free Claude Code"
 configure_and_verify_free_claude_code
 
-step "Ensuring Claude Code is installed"
-optional_agent "Claude Code" ensure_claude
-
-step "Ensuring Codex is installed"
-optional_agent "Codex" ensure_codex
-
-step "Ensuring Pi is installed"
-optional_agent "Pi" ensure_pi
-
 if [ "$dry_run" -eq 1 ]; then
     printf '\nDry run complete. No changes were made.\n'
 else
-    printf '\nFree Claude Code is installed and verified. Start the proxy with: fcc-server\n'
-    if [ -n "$failed_agents" ]; then
-        printf '\nThese coding agents were not installed: %s\n' "$failed_agents"
-        printf 'Free Claude Code works without them. Install them yourself and re-run\n'
-        printf 'this script, or use the agents you already have against the proxy at\n'
-        printf 'http://127.0.0.1:8082 (see the README "Connect Your Client" section).\n'
-    else
-        printf 'Run Claude Code with: fcc-claude\n'
-        printf 'Run Codex with: fcc-codex\n'
-        printf 'Run Pi with: fcc-pi\n'
-    fi
+    printf '\nFree Claude Code %s is installed and verified.\n' "$FCC_VERSION"
+    printf 'Start the proxy with: fcc-server\n'
+    printf '\nIf you use Claude Code, Codex, or Pi, launch them through the proxy\n'
+    printf 'with fcc-claude, fcc-codex, or fcc-pi.\n'
 fi

@@ -6,13 +6,31 @@ from pathlib import Path
 
 import pytest
 
-FCC_VERSION = "4.17.0"
+FCC_VERSION = "9.9.9"
 FCC_WHEEL_NAME = f"free_claude_code-{FCC_VERSION}-py3-none-any.whl"
 FCC_WHEEL_URL = (
     "https://github.com/FiredMosquito831/free-claude-code/releases/download/"
     f"v{FCC_VERSION}/{FCC_WHEEL_NAME}"
 )
 FCC_WHEEL_SHA256 = "91aaec9d83e2e931dbad653e74faa3c106acd6f8bd30a21a7985d77d870aef8b"
+FCC_LATEST_RELEASE_URL = (
+    "https://api.github.com/repos/FiredMosquito831/free-claude-code/releases/latest"
+)
+
+# Mirrors the shape the installers parse: the first "tag_name" line and the
+# first "digest" line each on their own line.
+RELEASE_FEED_JSON = f"""{{
+  "tag_name": "v{FCC_VERSION}",
+  "name": "v{FCC_VERSION}",
+  "assets": [
+    {{
+      "name": "{FCC_WHEEL_NAME}",
+      "digest": "sha256:{FCC_WHEEL_SHA256}",
+      "browser_download_url": "{FCC_WHEEL_URL}"
+    }}
+  ]
+}}
+"""
 
 
 def _repo_root() -> Path:
@@ -122,17 +140,6 @@ class PosixHarness:
     log: Path
     env: dict[str, str]
 
-    def add_client(self, name: str) -> None:
-        _write_executable(self.bin_dir / name, _posix_command(name))
-
-    def add_unrelated_pi(self) -> None:
-        _write_executable(self.bin_dir / "pi", _posix_command("unrelated-pi"))
-
-    def add_npm_prefix(self, prefix: Path) -> None:
-        prefix.mkdir(parents=True)
-        self.env["FAKE_NPM_PREFIX"] = str(prefix)
-        _write_executable(self.bin_dir / "npm", _posix_npm_command())
-
     def add_uv(self, version: str) -> None:
         _write_executable(self.bin_dir / "uv", _posix_uv_command(version))
 
@@ -185,14 +192,17 @@ while [ "$#" -gt 0 ]; do
 done
 echo "download:$url" >> "$CALL_LOG"
 case "$url:$FAIL_STEP" in
-    *claude.ai*:claude-download|*chatgpt.com*:codex-download|*pi.dev*:pi-download|*astral.sh*:uv-download|*github.com/FiredMosquito831*:fcc-download)
+    *astral.sh*:uv-download|*github.com/FiredMosquito831*:fcc-download)
         exit 41
         ;;
 esac
 case "$url" in
-    *claude.ai*) source="$FAKE_FIXTURES/claude-installer.sh" ;;
-    *chatgpt.com*) source="$FAKE_FIXTURES/codex-installer.sh" ;;
-    *pi.dev*) source="$FAKE_FIXTURES/pi-installer.sh" ;;
+    *api.github.com*)
+        cat "$FAKE_FIXTURES/release-feed.json"
+        exit 0
+        ;;
+esac
+case "$url" in
     *astral.sh*) source="$FAKE_FIXTURES/uv-installer.sh" ;;
     *github.com/FiredMosquito831*) source="$FAKE_FIXTURES/release-wheel.whl" ;;
     *) exit 42 ;;
@@ -212,41 +222,7 @@ fi
 """,
     )
     (fixtures / "release-wheel.whl").write_bytes(b"test release wheel")
-    _write_executable(
-        fixtures / "claude-installer.sh",
-        """#!/bin/sh
-echo "claude-install" >> "$CALL_LOG"
-[ "$FAIL_STEP" = "claude-install" ] && exit 21
-mkdir -p "$HOME/.local/bin"
-cp "$FAKE_FIXTURES/claude-command.sh" "$HOME/.local/bin/claude"
-chmod +x "$HOME/.local/bin/claude"
-""",
-    )
-    _write_executable(
-        fixtures / "codex-installer.sh",
-        """#!/bin/sh
-echo "codex-install:$CODEX_NON_INTERACTIVE" >> "$CALL_LOG"
-[ "$FAIL_STEP" = "codex-install" ] && exit 22
-mkdir -p "$HOME/.local/bin"
-cp "$FAKE_FIXTURES/codex-command.sh" "$HOME/.local/bin/codex"
-chmod +x "$HOME/.local/bin/codex"
-""",
-    )
-    _write_executable(
-        fixtures / "pi-installer.sh",
-        """#!/bin/sh
-echo "pi-install" >> "$CALL_LOG"
-[ "$FAIL_STEP" = "pi-install" ] && exit 24
-if [ -n "${FAKE_NPM_PREFIX:-}" ]; then
-    pi_bin="$FAKE_NPM_PREFIX/bin"
-else
-    pi_bin="$HOME/.local/bin"
-fi
-mkdir -p "$pi_bin"
-cp "$FAKE_FIXTURES/pi-command.sh" "$pi_bin/pi"
-chmod +x "$pi_bin/pi"
-""",
-    )
+    (fixtures / "release-feed.json").write_text(RELEASE_FEED_JSON, encoding="utf-8")
     _write_executable(
         fixtures / "uv-installer.sh",
         """#!/bin/sh
@@ -296,9 +272,6 @@ def test_install_sh_fresh_install_is_verified(posix_harness: PosixHarness) -> No
     assert result.returncode == 0, result.stderr
     assert "Free Claude Code is installed and verified." in result.stdout
     calls = posix_harness.calls()
-    assert calls.index("claude-install") < calls.index("claude:--version")
-    assert calls.index("codex-install:1") < calls.index("codex:--version")
-    assert calls.index("pi-install") < calls.index("pi:--version")
     assert calls.index("uv-install") < calls.index("uv:--version")
     assert any(
         call.startswith(
@@ -311,63 +284,16 @@ def test_install_sh_fresh_install_is_verified(posix_harness: PosixHarness) -> No
     assert f"download:{FCC_WHEEL_URL}" in calls
     assert any(call.startswith("sha256sum:") for call in calls)
     assert not any(call.startswith("git:") for call in calls)
-    # Free Claude Code is fully installed and verified before any coding agent
-    # is touched, so an agent failure can never leave the proxy uninstalled.
-    assert calls.index("fcc-server:--version") < calls.index("claude-install"), calls
-
-
-def test_install_sh_preserves_valid_existing_tools(
-    posix_harness: PosixHarness,
-) -> None:
-    posix_harness.add_client("claude")
-    posix_harness.add_client("codex")
-    posix_harness.add_client("pi")
-    posix_harness.add_uv("0.11.7")
-
-    result = posix_harness.run()
-
-    assert result.returncode == 0, result.stderr
-    downloads = [call for call in posix_harness.calls() if call.startswith("download:")]
-    assert downloads == [f"download:{FCC_WHEEL_URL}"]
-    assert "leaving it unchanged" in result.stdout
-
-
-def test_install_sh_replaces_unrelated_pi_command(
-    posix_harness: PosixHarness,
-) -> None:
-    posix_harness.add_client("claude")
-    posix_harness.add_client("codex")
-    posix_harness.add_unrelated_pi()
-    posix_harness.add_uv("0.11.7")
-
-    result = posix_harness.run()
-
-    assert result.returncode == 0, result.stderr
-    assert "is not Pi Coding Agent; installing Pi" in result.stdout
-    assert "pi-install" in posix_harness.calls()
-
-
-def test_install_sh_discovers_custom_pi_npm_prefix(
-    posix_harness: PosixHarness,
-) -> None:
-    posix_harness.add_client("claude")
-    posix_harness.add_client("codex")
-    posix_harness.add_npm_prefix(posix_harness.root / "custom-npm")
-    posix_harness.add_uv("0.11.7")
-
-    result = posix_harness.run()
-
-    assert result.returncode == 0, result.stderr
-    calls = posix_harness.calls()
-    assert "npm:prefix -g" in calls
-    assert "pi:--help" in calls
-    assert "pi:--version" in calls
+    # The version comes from the release feed, not a pin baked into the script.
+    assert f"download:{FCC_LATEST_RELEASE_URL}" in calls
+    assert not any(
+        host in call
+        for call in calls
+        for host in ("claude.ai", "chatgpt.com", "pi.dev")
+    ), calls
 
 
 def test_install_sh_replaces_obsolete_uv(posix_harness: PosixHarness) -> None:
-    posix_harness.add_client("claude")
-    posix_harness.add_client("codex")
-    posix_harness.add_client("pi")
     posix_harness.add_uv("0.5.9")
 
     result = posix_harness.run()
@@ -413,36 +339,6 @@ def test_install_sh_stops_without_success_on_each_failure(
         assert not any(forbidden in call for call in posix_harness.calls())
 
 
-@pytest.mark.parametrize(
-    "failure",
-    [
-        "claude-download",
-        "claude-install",
-        "claude-verify",
-        "codex-download",
-        "codex-install",
-        "codex-verify",
-        "pi-download",
-        "pi-install",
-        "pi-verify",
-    ],
-)
-def test_install_sh_survives_any_agent_failure(
-    posix_harness: PosixHarness,
-    failure: str,
-) -> None:
-    """No coding-agent failure may stop Free Claude Code from installing.
-
-    Every one of these previously aborted the run before the proxy was
-    installed, which is the bug this contract exists to prevent.
-    """
-    result = posix_harness.run(fail_step=failure)
-
-    assert result.returncode == 0, result.stderr
-    assert "Free Claude Code is installed and verified." in result.stdout
-    assert any("github.com/FiredMosquito831" in call for call in posix_harness.calls())
-
-
 def test_install_sh_dry_run_never_executes_commands(
     posix_harness: PosixHarness,
 ) -> None:
@@ -454,56 +350,9 @@ def test_install_sh_dry_run_never_executes_commands(
     assert "Free Claude Code is installed and verified." not in result.stdout
 
 
-def test_install_sh_warns_about_a_broken_client_but_still_installs_fcc(
-    posix_harness: PosixHarness,
-) -> None:
-    """A coding agent is optional; its failure must not block the proxy.
-
-    The agent is still never replaced silently -- an unrelated ``claude`` on
-    PATH is left alone -- but Free Claude Code now installs regardless.
-    """
-    posix_harness.add_client("claude")
-
-    result = posix_harness.run(fail_step="claude-verify")
-
-    assert result.returncode == 0, result.stderr
-    assert "Free Claude Code is installed and verified." in result.stdout
-    assert "Claude Code" in result.stdout
-    assert any("github.com/FiredMosquito831" in call for call in posix_harness.calls())
-
-
-def test_install_sh_skips_agents_on_request(posix_harness: PosixHarness) -> None:
-    result = posix_harness.run("--skip-agents")
-
-    assert result.returncode == 0, result.stderr
-    assert "Skipping Claude Code" in result.stdout
-    assert "Skipping Codex" in result.stdout
-    assert "Skipping Pi" in result.stdout
-    assert "Free Claude Code is installed and verified." in result.stdout
-    assert not any("claude.ai" in call for call in posix_harness.calls())
-
-
-def test_install_sh_installs_fcc_before_the_optional_agents(
-    posix_harness: PosixHarness,
-) -> None:
-    """Ordering is the guarantee: the wheel lands before any agent is touched."""
-    result = posix_harness.run()
-
-    assert result.returncode == 0, result.stderr
-    calls = posix_harness.calls()
-    wheel = next(
-        i for i, call in enumerate(calls) if "github.com/FiredMosquito831" in call
-    )
-    agent = next((i for i, call in enumerate(calls) if "claude.ai" in call), len(calls))
-    assert wheel < agent, calls
-
-
 def test_install_sh_rejects_unparseable_existing_uv(
     posix_harness: PosixHarness,
 ) -> None:
-    posix_harness.add_client("claude")
-    posix_harness.add_client("codex")
-    posix_harness.add_client("pi")
     posix_harness.add_uv("not-a-version")
 
     result = posix_harness.run()
@@ -695,6 +544,7 @@ exit /b 0
         encoding="utf-8",
     )
     (fixtures / "release-wheel.whl").write_bytes(b"test release wheel")
+    (fixtures / "release-feed.json").write_text(RELEASE_FEED_JSON, encoding="utf-8")
     (fixtures / "claude-installer.ps1").write_text(
         r"""if ($env:FAIL_STEP -eq "claude-install") { exit 61 }
 $bin = Join-Path $env:USERPROFILE ".local\bin"
@@ -738,28 +588,19 @@ Add-Content -LiteralPath $env:CALL_LOG -Value "uv-install"
 $ErrorActionPreference = "Stop"
 function Invoke-RestMethod {
     [CmdletBinding()]
-    param([string] $Uri, [string] $OutFile)
+    param([string] $Uri, [string] $OutFile, [hashtable] $Headers)
 
     Add-Content -LiteralPath $env:CALL_LOG -Value "download:$Uri"
+    if ($Uri.Contains("api.github.com")) {
+        return (Get-Content -LiteralPath (Join-Path $env:FAKE_FIXTURES "release-feed.json") -Raw | ConvertFrom-Json)
+    }
     if (
-        ($env:FAIL_STEP -eq "claude-download" -and $Uri.Contains("claude.ai")) -or
-        ($env:FAIL_STEP -eq "codex-download" -and $Uri.Contains("chatgpt.com")) -or
-        ($env:FAIL_STEP -eq "pi-download" -and $Uri.Contains("pi.dev")) -or
         ($env:FAIL_STEP -eq "uv-download" -and $Uri.Contains("astral.sh")) -or
         ($env:FAIL_STEP -eq "fcc-download" -and $Uri.Contains("github.com/FiredMosquito831"))
     ) {
         throw "simulated download failure"
     }
-    if ($Uri.Contains("claude.ai")) {
-        $source = Join-Path $env:FAKE_FIXTURES "claude-installer.ps1"
-    }
-    elseif ($Uri.Contains("chatgpt.com")) {
-        $source = Join-Path $env:FAKE_FIXTURES "codex-installer.ps1"
-    }
-    elseif ($Uri.Contains("pi.dev")) {
-        $source = Join-Path $env:FAKE_FIXTURES "pi-installer.ps1"
-    }
-    elseif ($Uri.Contains("astral.sh")) {
+    if ($Uri.Contains("astral.sh")) {
         $source = Join-Path $env:FAKE_FIXTURES "uv-installer.ps1"
     }
     elseif ($Uri.Contains("github.com/FiredMosquito831")) {
@@ -820,9 +661,6 @@ def test_install_ps1_fresh_install_is_verified(
     assert result.returncode == 0, result.stderr
     assert "Free Claude Code is installed and verified." in result.stdout
     calls = powershell_harness.calls()
-    assert calls.index("claude-install") < calls.index("claude:--version")
-    assert calls.index("codex-install:1") < calls.index("codex:--version")
-    assert calls.index("pi-install") < calls.index("pi:--version")
     assert calls.index("uv-install") < calls.index("uv:--version")
     assert any(
         call.startswith(
@@ -835,67 +673,18 @@ def test_install_ps1_fresh_install_is_verified(
     assert f"download:{FCC_WHEEL_URL}" in calls
     assert any(call.startswith("sha256:") for call in calls)
     assert not any(call.startswith("git:") for call in calls)
-    # Free Claude Code is fully installed and verified before any coding agent
-    # is touched, so an agent failure can never leave the proxy uninstalled.
-    assert calls.index("fcc-server:--version") < calls.index("claude-install"), calls
-
-
-def test_install_ps1_preserves_valid_existing_tools(
-    powershell_harness: PowerShellHarness,
-) -> None:
-    powershell_harness.add_client("claude")
-    powershell_harness.add_client("codex")
-    powershell_harness.add_client("pi")
-    powershell_harness.add_uv("0.11.7")
-
-    result = powershell_harness.run()
-
-    assert result.returncode == 0, result.stderr
-    downloads = [
-        call for call in powershell_harness.calls() if call.startswith("download:")
-    ]
-    assert downloads == [f"download:{FCC_WHEEL_URL}"]
-    assert "leaving it unchanged" in result.stdout
-
-
-def test_install_ps1_replaces_unrelated_pi_command(
-    powershell_harness: PowerShellHarness,
-) -> None:
-    powershell_harness.add_client("claude")
-    powershell_harness.add_client("codex")
-    powershell_harness.add_unrelated_pi()
-    powershell_harness.add_uv("0.11.7")
-
-    result = powershell_harness.run()
-
-    assert result.returncode == 0, result.stderr
-    assert "is not Pi Coding Agent; installing Pi" in result.stdout
-    assert "pi-install" in powershell_harness.calls()
-
-
-def test_install_ps1_discovers_custom_pi_npm_prefix(
-    powershell_harness: PowerShellHarness,
-) -> None:
-    powershell_harness.add_client("claude")
-    powershell_harness.add_client("codex")
-    powershell_harness.add_npm_prefix(powershell_harness.root / "custom-npm")
-    powershell_harness.add_uv("0.11.7")
-
-    result = powershell_harness.run()
-
-    assert result.returncode == 0, result.stderr
-    calls = powershell_harness.calls()
-    assert "npm:prefix -g" in calls
-    assert "pi:--help" in calls
-    assert "pi:--version" in calls
+    # The version comes from the release feed, not a pin baked into the script.
+    assert f"download:{FCC_LATEST_RELEASE_URL}" in calls
+    assert not any(
+        host in call
+        for call in calls
+        for host in ("claude.ai", "chatgpt.com", "pi.dev")
+    ), calls
 
 
 def test_install_ps1_replaces_obsolete_uv(
     powershell_harness: PowerShellHarness,
 ) -> None:
-    powershell_harness.add_client("claude")
-    powershell_harness.add_client("codex")
-    powershell_harness.add_client("pi")
     powershell_harness.add_uv("0.5.9")
 
     result = powershell_harness.run()
@@ -941,30 +730,6 @@ def test_install_ps1_stops_without_success_on_each_failure(
         assert not any(forbidden in call for call in powershell_harness.calls())
 
 
-@pytest.mark.parametrize(
-    "failure",
-    [
-        "claude-download",
-        "claude-install",
-        "claude-verify",
-        "codex-download",
-        "codex-install",
-        "codex-verify",
-        "pi-download",
-        "pi-install",
-        "pi-verify",
-    ],
-)
-def test_install_ps1_survives_any_agent_failure(
-    powershell_harness: PowerShellHarness,
-    failure: str,
-) -> None:
-    result = powershell_harness.run(fail_step=failure)
-
-    assert result.returncode == 0, result.stderr
-    assert "Free Claude Code is installed and verified." in result.stdout
-
-
 def test_install_ps1_dry_run_never_executes_commands(
     powershell_harness: PowerShellHarness,
 ) -> None:
@@ -991,37 +756,9 @@ def test_install_ps1_dry_run_never_executes_commands(
     assert "Free Claude Code is installed and verified." not in result.stdout
 
 
-def test_install_ps1_warns_about_a_broken_client_but_still_installs_fcc(
-    powershell_harness: PowerShellHarness,
-) -> None:
-    powershell_harness.add_client("claude")
-
-    result = powershell_harness.run(fail_step="claude-verify")
-
-    assert result.returncode == 0, result.stderr
-    assert "Free Claude Code is installed and verified." in result.stdout
-    assert any(
-        "github.com/FiredMosquito831" in call for call in powershell_harness.calls()
-    )
-
-
-def test_install_ps1_skips_agents_on_request(
-    powershell_harness: PowerShellHarness,
-) -> None:
-    result = powershell_harness.run("-SkipAgents")
-
-    assert result.returncode == 0, result.stderr
-    assert "Skipping Claude Code" in result.stdout
-    assert "Skipping Pi" in result.stdout
-    assert "Free Claude Code is installed and verified." in result.stdout
-
-
 def test_install_ps1_rejects_unparseable_existing_uv(
     powershell_harness: PowerShellHarness,
 ) -> None:
-    powershell_harness.add_client("claude")
-    powershell_harness.add_client("codex")
-    powershell_harness.add_client("pi")
     powershell_harness.add_uv("not-a-version")
 
     result = powershell_harness.run()
