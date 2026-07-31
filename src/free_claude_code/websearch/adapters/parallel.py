@@ -1,7 +1,10 @@
-"""Parallel Search adapter (POST api.parallel.ai/v1beta/search, beta).
+"""Parallel Search adapter (POST api.parallel.ai/v1/search).
 
-Snippets are the provider's token-compressed ``excerpts`` joined per result;
-the beta opt-in header is required by the API.
+Snippets are the provider's token-compressed ``excerpts`` joined per result.
+v1 nests source/excerpt tuning under ``advanced_settings`` and takes
+``mode``/``max_chars_total`` at the top level; the older ``/v1beta/search``
+used a different ``mode`` vocabulary (``fast``/``one-shot``/``agentic``) that
+did not match the values this catalog exposes.
 """
 
 from typing import Any, ClassVar
@@ -17,12 +20,11 @@ from ..options import option_int
 from .http import build_async_client, request_json
 
 _SNIPPET_CHARS = 1000
-_BETA_HEADER = "search-excerpt-2025-10-10"
 
 
 class ParallelWebSearchProvider(BaseWebSearchProvider):
     PROVIDER_ID: ClassVar[str] = "parallel"
-    SUPPORTS_DOMAINS: ClassVar[bool] = False
+    SUPPORTS_DOMAINS: ClassVar[bool] = True
 
     def __init__(self, config: WebSearchProviderConfig) -> None:
         super().__init__(config)
@@ -45,22 +47,32 @@ class ParallelWebSearchProvider(BaseWebSearchProvider):
         payload: dict[str, Any] = {
             "objective": query,
             "search_queries": [query],
-            "max_results": max_results,
         }
         if mode := options.get("PARALLEL_MODE", ""):
             payload["mode"] = mode
+        if (total_chars := option_int(options.get("PARALLEL_TOTAL_CHARS"))) is not None:
+            payload["max_chars_total"] = total_chars
+        advanced: dict[str, Any] = {"max_results": max_results}
         if (
             excerpt_chars := option_int(options.get("PARALLEL_EXCERPT_CHARS"))
         ) is not None:
-            payload["excerpts"] = {"max_chars_per_result": excerpt_chars}
-        if (total_chars := option_int(options.get("PARALLEL_TOTAL_CHARS"))) is not None:
-            payload["max_chars_total"] = total_chars
+            advanced["excerpt_settings"] = {"max_chars_per_result": excerpt_chars}
+        source_policy: dict[str, Any] = {}
+        if allowed_domains:
+            source_policy["include_domains"] = list(allowed_domains)
+        if blocked_domains:
+            source_policy["exclude_domains"] = list(blocked_domains)
+        if source_policy:
+            advanced["source_policy"] = source_policy
+        if location := options.get("PARALLEL_LOCATION", ""):
+            advanced["location"] = location
+        payload["advanced_settings"] = advanced
         data = await request_json(
             self._require_client(),
             self.provider_id,
             "POST",
-            f"{self._base_url}/v1beta/search",
-            headers={"x-api-key": key, "parallel-beta": _BETA_HEADER},
+            f"{self._base_url}/v1/search",
+            headers={"x-api-key": key},
             json_body=payload,
         )
         rows = data.get("results", []) if isinstance(data, dict) else []

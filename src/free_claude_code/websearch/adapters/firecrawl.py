@@ -45,9 +45,18 @@ class FirecrawlWebSearchProvider(BaseWebSearchProvider):
         sources = self._sources()
         payload: dict[str, Any] = {
             "query": query,
-            "limit": max_results,
+            # ``limit`` is per source type upstream, so asking for
+            # ``max_results`` from each of N sources fetches (and bills)
+            # N times what the caller can use.
+            "limit": max(1, -(-max_results // max(1, len(sources)))),
             "sources": sources,
         }
+        if country := options.get("FIRECRAWL_COUNTRY", ""):
+            payload["country"] = country
+        if categories := options.get("FIRECRAWL_CATEGORIES", ""):
+            payload["categories"] = [
+                entry.strip() for entry in categories.split(",") if entry.strip()
+            ]
         if scrape_format := options.get("FIRECRAWL_SCRAPE_FORMAT", ""):
             payload["scrapeOptions"] = {"formats": [{"type": scrape_format}]}
         if tbs := options.get("FIRECRAWL_TBS", ""):

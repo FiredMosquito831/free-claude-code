@@ -17,6 +17,8 @@ from free_claude_code.core.websearch.models import (
 from ..base import BaseWebSearchProvider, WebSearchProviderConfig
 from .http import build_async_client, request_json
 
+_SNIPPET_CHARS = 1000
+
 
 class LinkupWebSearchProvider(BaseWebSearchProvider):
     PROVIDER_ID: ClassVar[str] = "linkup"
@@ -45,7 +47,14 @@ class LinkupWebSearchProvider(BaseWebSearchProvider):
             "q": query,
             "depth": options.get("LINKUP_DEPTH", "") or "standard",
             "outputType": output_type,
+            # Without this the API returns its own default set and we pay for
+            # results only to discard them in the client-side slice below.
+            "maxResults": max_results,
         }
+        if from_date := options.get("LINKUP_FROM_DATE", ""):
+            payload["fromDate"] = from_date
+        if to_date := options.get("LINKUP_TO_DATE", ""):
+            payload["toDate"] = to_date
         if allowed_domains:
             payload["includeDomains"] = list(allowed_domains)
         if blocked_domains:
@@ -73,12 +82,16 @@ class LinkupWebSearchProvider(BaseWebSearchProvider):
             url = _text(row.get("url"))
             if not url:
                 continue
+            text = _text(row.get(snippet_field))
             items.append(
                 WebSearchResultItem(
                     title=_text(row.get("name")),
                     url=url,
-                    snippet=_text(row.get(snippet_field)),
-                    content=None,
+                    snippet=text[:_SNIPPET_CHARS],
+                    # searchResults returns the full extracted page text in
+                    # ``content``; keep it so the digest can use the fuller
+                    # form rather than only the truncated snippet.
+                    content=text if snippet_field == "content" and text else None,
                     published=None,
                 )
             )

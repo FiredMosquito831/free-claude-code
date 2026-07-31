@@ -61,6 +61,8 @@ class BraveWebSearchProvider(BaseWebSearchProvider):
             params["country"] = country
         if search_lang := options.get("BRAVE_SEARCH_LANG", ""):
             params["search_lang"] = search_lang
+        if safesearch := options.get("BRAVE_SAFESEARCH", ""):
+            params["safesearch"] = safesearch
         data = await request_json(
             self._require_client(),
             self.provider_id,

@@ -123,6 +123,10 @@ _EXPECTED_ADVANCED_ENVS: dict[str, tuple[str, ...]] = {
         "EXA_USER_LOCATION",
     ),
     "tavily": (
+        "TAVILY_CHUNKS_PER_SOURCE",
+        "TAVILY_COUNTRY",
+        "TAVILY_START_DATE",
+        "TAVILY_END_DATE",
         "TAVILY_SEARCH_DEPTH",
         "TAVILY_TOPIC",
         "TAVILY_TIME_RANGE",
@@ -130,6 +134,7 @@ _EXPECTED_ADVANCED_ENVS: dict[str, tuple[str, ...]] = {
         "TAVILY_INCLUDE_RAW_CONTENT",
     ),
     "brave": (
+        "BRAVE_SAFESEARCH",
         "BRAVE_SEARCH_MODE",
         "BRAVE_EXTRA_SNIPPETS",
         "BRAVE_FRESHNESS",
@@ -138,6 +143,7 @@ _EXPECTED_ADVANCED_ENVS: dict[str, tuple[str, ...]] = {
         "BRAVE_LLM_MAX_TOKENS",
     ),
     "searxng": (
+        "SEARXNG_SAFESEARCH",
         "SEARXNG_ENGINES",
         "SEARXNG_CATEGORIES",
         "SEARXNG_TIME_RANGE",
@@ -146,29 +152,44 @@ _EXPECTED_ADVANCED_ENVS: dict[str, tuple[str, ...]] = {
     "jina": ("JINA_MAX_TOKENS", "JINA_SITE", "JINA_GL"),
     "serper": ("SERPER_GL", "SERPER_HL", "SERPER_TBS", "SERPER_RICH_BLOCKS"),
     "firecrawl": (
+        "FIRECRAWL_COUNTRY",
+        "FIRECRAWL_CATEGORIES",
         "FIRECRAWL_SOURCES",
         "FIRECRAWL_SCRAPE_FORMAT",
         "FIRECRAWL_TBS",
         "FIRECRAWL_LOCATION",
     ),
-    "linkup": ("LINKUP_DEPTH", "LINKUP_OUTPUT_TYPE"),
+    "linkup": (
+        "LINKUP_FROM_DATE",
+        "LINKUP_TO_DATE",
+        "LINKUP_DEPTH",
+        "LINKUP_OUTPUT_TYPE",
+    ),
     "perplexity": (
         "PERPLEXITY_SEARCH_RECENCY",
         "PERPLEXITY_CONTEXT_SIZE",
         "PERPLEXITY_MAX_TOKENS_PER_PAGE",
     ),
     "parallel": (
+        "PARALLEL_LOCATION",
         "PARALLEL_MODE",
         "PARALLEL_EXCERPT_CHARS",
         "PARALLEL_TOTAL_CHARS",
     ),
     "searchapi": (
+        "SEARCHAPI_SAFE",
         "SEARCHAPI_ENGINE",
         "SEARCHAPI_TIME_PERIOD",
         "SEARCHAPI_GL",
         "SEARCHAPI_HL",
     ),
-    "serpapi": ("SERPAPI_ENGINE", "SERPAPI_TBS", "SERPAPI_GL", "SERPAPI_HL"),
+    "serpapi": (
+        "SERPAPI_SAFE",
+        "SERPAPI_ENGINE",
+        "SERPAPI_TBS",
+        "SERPAPI_GL",
+        "SERPAPI_HL",
+    ),
 }
 
 _FIELD_TYPES = frozenset({"select", "text", "number", "boolean"})

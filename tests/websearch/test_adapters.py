@@ -179,6 +179,7 @@ CASES: tuple[AdapterCase, ...] = (
         },
         path="/v1/search",
         auth_header=_BEARER,
+        content="S",
     ),
     AdapterCase(
         "perplexity",
@@ -210,7 +211,7 @@ CASES: tuple[AdapterCase, ...] = (
                 }
             ]
         },
-        path="/v1beta/search",
+        path="/v1/search",
         auth_header=("x-api-key", TEST_KEY),
         snippet="e1\n\ne2",
         published="2026-01-02",
@@ -400,7 +401,9 @@ class TestRequestBodyDetails:
         assert body["search_domain_filter"] == ["-b.com", "-c.com"]
 
     @pytest.mark.asyncio
-    async def test_parallel_beta_header_and_objective(self) -> None:
+    async def test_parallel_targets_v1_and_nests_advanced_settings(self) -> None:
+        """v1 takes max_results under advanced_settings and needs no beta header."""
+
         provider = ParallelWebSearchProvider(build_config())
         requests = attach_mock_client(
             provider, lambda request: json_response({"results": []})
@@ -409,11 +412,12 @@ class TestRequestBodyDetails:
             await provider.search("find docs", max_results=4)
         finally:
             await provider.close()
-        assert requests[0].headers["parallel-beta"] == "search-excerpt-2025-10-10"
+        assert requests[0].url.path.endswith("/v1/search")
+        assert "parallel-beta" not in requests[0].headers
         body = request_json_body(requests[0])
         assert body["objective"] == "find docs"
         assert body["search_queries"] == ["find docs"]
-        assert body["max_results"] == 4
+        assert body["advanced_settings"]["max_results"] == 4
 
     @pytest.mark.asyncio
     async def test_jina_accept_header_and_query_in_path(self) -> None:
