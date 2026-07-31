@@ -311,11 +311,9 @@ def test_install_sh_fresh_install_is_verified(posix_harness: PosixHarness) -> No
     assert f"download:{FCC_WHEEL_URL}" in calls
     assert any(call.startswith("sha256sum:") for call in calls)
     assert not any(call.startswith("git:") for call in calls)
-    assert calls[-3:] == [
-        "uv:tool update-shell",
-        "uv:tool dir --bin",
-        "fcc-server:--version",
-    ]
+    # Free Claude Code is fully installed and verified before any coding agent
+    # is touched, so an agent failure can never leave the proxy uninstalled.
+    assert calls.index("fcc-server:--version") < calls.index("claude-install"), calls
 
 
 def test_install_sh_preserves_valid_existing_tools(
@@ -382,15 +380,6 @@ def test_install_sh_replaces_obsolete_uv(posix_harness: PosixHarness) -> None:
 @pytest.mark.parametrize(
     "failure",
     [
-        "claude-download",
-        "claude-install",
-        "claude-verify",
-        "codex-download",
-        "codex-install",
-        "codex-verify",
-        "pi-download",
-        "pi-install",
-        "pi-verify",
         "uv-download",
         "uv-install",
         "uv-verify",
@@ -411,15 +400,6 @@ def test_install_sh_stops_without_success_on_each_failure(
     assert result.returncode != 0
     assert "Free Claude Code is installed and verified." not in result.stdout
     forbidden = {
-        "claude-download": "claude-install",
-        "claude-install": "claude:--version",
-        "claude-verify": "chatgpt.com",
-        "codex-download": "codex-install",
-        "codex-install": "codex:--version",
-        "codex-verify": "pi.dev",
-        "pi-download": "pi-install",
-        "pi-install": "pi:--version",
-        "pi-verify": "astral.sh",
         "uv-download": "uv-install",
         "uv-install": "uv:--version",
         "uv-verify": "uv:tool install",
@@ -431,6 +411,36 @@ def test_install_sh_stops_without_success_on_each_failure(
     }.get(failure)
     if forbidden is not None:
         assert not any(forbidden in call for call in posix_harness.calls())
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [
+        "claude-download",
+        "claude-install",
+        "claude-verify",
+        "codex-download",
+        "codex-install",
+        "codex-verify",
+        "pi-download",
+        "pi-install",
+        "pi-verify",
+    ],
+)
+def test_install_sh_survives_any_agent_failure(
+    posix_harness: PosixHarness,
+    failure: str,
+) -> None:
+    """No coding-agent failure may stop Free Claude Code from installing.
+
+    Every one of these previously aborted the run before the proxy was
+    installed, which is the bug this contract exists to prevent.
+    """
+    result = posix_harness.run(fail_step=failure)
+
+    assert result.returncode == 0, result.stderr
+    assert "Free Claude Code is installed and verified." in result.stdout
+    assert any("github.com/FiredMosquito831" in call for call in posix_harness.calls())
 
 
 def test_install_sh_dry_run_never_executes_commands(
@@ -825,11 +835,9 @@ def test_install_ps1_fresh_install_is_verified(
     assert f"download:{FCC_WHEEL_URL}" in calls
     assert any(call.startswith("sha256:") for call in calls)
     assert not any(call.startswith("git:") for call in calls)
-    assert calls[-3:] == [
-        "uv:tool update-shell",
-        "uv:tool dir --bin",
-        "fcc-server:--version",
-    ]
+    # Free Claude Code is fully installed and verified before any coding agent
+    # is touched, so an agent failure can never leave the proxy uninstalled.
+    assert calls.index("fcc-server:--version") < calls.index("claude-install"), calls
 
 
 def test_install_ps1_preserves_valid_existing_tools(
@@ -900,15 +908,6 @@ def test_install_ps1_replaces_obsolete_uv(
 @pytest.mark.parametrize(
     "failure",
     [
-        "claude-download",
-        "claude-install",
-        "claude-verify",
-        "codex-download",
-        "codex-install",
-        "codex-verify",
-        "pi-download",
-        "pi-install",
-        "pi-verify",
         "uv-download",
         "uv-install",
         "uv-verify",
@@ -929,15 +928,6 @@ def test_install_ps1_stops_without_success_on_each_failure(
     assert result.returncode != 0
     assert "Free Claude Code is installed and verified." not in result.stdout
     forbidden = {
-        "claude-download": "claude-install",
-        "claude-install": "claude:--version",
-        "claude-verify": "chatgpt.com",
-        "codex-download": "codex-install",
-        "codex-install": "codex:--version",
-        "codex-verify": "pi.dev",
-        "pi-download": "pi-install",
-        "pi-install": "pi:--version",
-        "pi-verify": "astral.sh",
         "uv-download": "uv-install",
         "uv-install": "uv:--version",
         "uv-verify": "uv:tool install",
@@ -949,6 +939,30 @@ def test_install_ps1_stops_without_success_on_each_failure(
     }.get(failure)
     if forbidden is not None:
         assert not any(forbidden in call for call in powershell_harness.calls())
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [
+        "claude-download",
+        "claude-install",
+        "claude-verify",
+        "codex-download",
+        "codex-install",
+        "codex-verify",
+        "pi-download",
+        "pi-install",
+        "pi-verify",
+    ],
+)
+def test_install_ps1_survives_any_agent_failure(
+    powershell_harness: PowerShellHarness,
+    failure: str,
+) -> None:
+    result = powershell_harness.run(fail_step=failure)
+
+    assert result.returncode == 0, result.stderr
+    assert "Free Claude Code is installed and verified." in result.stdout
 
 
 def test_install_ps1_dry_run_never_executes_commands(
