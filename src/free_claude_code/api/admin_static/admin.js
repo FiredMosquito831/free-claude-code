@@ -2776,6 +2776,27 @@ function renderVersionBanners() {
   const info = state.versionInfo;
   if (!info || info.error) return;
 
+  // A deferred install (Windows) reports its outcome only after the server
+  // that staged it has exited, so surface it on the next start.
+  if (info.pending_upgrade && info.pending_upgrade.ok === false) {
+    const banner = document.createElement("div");
+    banner.className = "version-banner restart-required";
+    const body = document.createElement("div");
+    body.className = "version-banner-body";
+    const title = document.createElement("div");
+    title.className = "version-banner-title";
+    title.textContent = "The staged update did not install";
+    const detail = document.createElement("div");
+    detail.className = "version-banner-detail";
+    detail.textContent = `${
+      info.pending_upgrade.message || "The update helper reported a failure."
+    } Your current version is still intact — re-run the install command to update.`;
+    body.append(title, detail);
+    banner.appendChild(body);
+    container.appendChild(banner);
+    return;
+  }
+
   if (info.restart_required) {
     const banner = document.createElement("div");
     banner.className = "version-banner restart-required";
@@ -2783,12 +2804,16 @@ function renderVersionBanners() {
     body.className = "version-banner-body";
     const title = document.createElement("div");
     title.className = "version-banner-title";
-    title.textContent = "Update installed — restart the server to apply";
+    title.textContent = info.staged_install
+      ? "Update staged — stop the server to finish installing"
+      : "Update installed — restart the server to apply";
     const detail = document.createElement("div");
     detail.className = "version-banner-detail";
-    detail.textContent = info.installed_version
-      ? `Installed v${info.installed_version}.`
-      : "The new version is installed.";
+    detail.textContent = info.staged_install
+      ? "Windows cannot replace the environment while the server is running. Stop fcc-server; the update installs automatically, then start it again."
+      : info.installed_version
+        ? `Installed v${info.installed_version}.`
+        : "The new version is installed.";
     body.append(title, detail);
     banner.appendChild(body);
     container.appendChild(banner);

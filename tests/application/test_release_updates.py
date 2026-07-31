@@ -1,8 +1,10 @@
 """Tests for version reporting and the dashboard-triggered upgrade."""
 
 import hashlib
+import os
 import subprocess
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -182,6 +184,7 @@ def test_upgrade_refuses_a_wheel_whose_checksum_does_not_match(monkeypatch) -> N
 
 
 def test_upgrade_installs_a_verified_wheel(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(release_updates, "_WINDOWS", False)
     body = b"wheel-bytes"
     digest = hashlib.sha256(body).hexdigest()
     monkeypatch.setattr(release_updates.shutil, "which", lambda _n: "/usr/bin/uv")
@@ -209,6 +212,7 @@ def test_upgrade_installs_a_verified_wheel(monkeypatch, tmp_path) -> None:
 
 def test_upgrade_preserves_installed_extras(monkeypatch) -> None:
     """A reinstall must not silently drop voice support."""
+    monkeypatch.setattr(release_updates, "_WINDOWS", False)
     body = b"wheel-bytes"
     digest = hashlib.sha256(body).hexdigest()
     monkeypatch.setattr(release_updates.shutil, "which", lambda _n: "/usr/bin/uv")
@@ -230,6 +234,7 @@ def test_upgrade_preserves_installed_extras(monkeypatch) -> None:
 
 
 def test_upgrade_reports_a_failing_install_command(monkeypatch) -> None:
+    monkeypatch.setattr(release_updates, "_WINDOWS", False)
     body = b"wheel-bytes"
     digest = hashlib.sha256(body).hexdigest()
     monkeypatch.setattr(release_updates.shutil, "which", lambda _n: "/usr/bin/uv")
@@ -367,3 +372,123 @@ def test_release_notes_are_bounded() -> None:
     assert trimmed is not None
     assert len(trimmed) < 10_000
     assert trimmed.endswith("…")
+
+
+def _stub_stream(body: bytes):
+    """Minimal stand-in for httpx.stream yielding a fixed body."""
+
+    class _Response:
+        def raise_for_status(self):
+            return None
+
+        def iter_bytes(self):
+            yield body
+
+    class _Ctx:
+        def __enter__(self):
+            return _Response()
+
+        def __exit__(self, *exc):
+            return False
+
+    def _stream(*args, **kwargs):
+        return _Ctx()
+
+    return _stream
+
+
+# ------------------------------------------------- deferred Windows upgrade
+
+
+def test_deferred_helper_script_waits_then_installs(tmp_path) -> None:
+    """The helper must not run uv until this process is gone.
+
+    Installing in place on Windows deletes the environment the running
+    interpreter lives in, which fails partway and leaves it unusable.
+    """
+
+    script = release_updates._deferred_helper_script(
+        uv_executable=r"C:\tools\uv.exe",
+        command=[r"C:\tools\uv.exe", "tool", "install", "--force", "pkg"],
+        result_path=tmp_path / "result.json",
+        stage_dir=tmp_path,
+    )
+    assert f"$parent = {os.getpid()}" in script
+    # The wait loop must precede the install, not follow it.
+    assert script.index("Get-Process -Id $parent") < script.index("tool")
+    assert "'tool', 'install', '--force', 'pkg'" in script
+    assert str(tmp_path / "result.json") in script
+
+
+def test_deferred_helper_script_quotes_hostile_arguments(tmp_path) -> None:
+    """Release metadata reaches the wheel name; it must not break out."""
+
+    script = release_updates._deferred_helper_script(
+        uv_executable="uv",
+        command=["uv", "tool", "install", "it's; rm -rf /"],
+        result_path=tmp_path / "r.json",
+        stage_dir=tmp_path,
+    )
+    assert "'it''s; rm -rf /'" in script
+
+
+def test_upgrade_stages_instead_of_installing_on_windows(monkeypatch, tmp_path) -> None:
+    """On Windows the install is handed to a helper, never run in place."""
+
+    monkeypatch.setattr(release_updates, "_WINDOWS", True)
+    monkeypatch.setattr(release_updates, "_stage_dir", lambda: tmp_path)
+    monkeypatch.setattr(release_updates.shutil, "which", lambda name: f"/bin/{name}")
+    monkeypatch.setattr(
+        release_updates, "_installed_extras_and_python", lambda: ((), "3.14")
+    )
+
+    def _boom(*args, **kwargs):
+        raise AssertionError("uv must not run while the server is alive")
+
+    monkeypatch.setattr(release_updates.subprocess, "run", _boom)
+    spawned: dict[str, Any] = {}
+    monkeypatch.setattr(
+        release_updates.subprocess,
+        "Popen",
+        lambda argv, **kwargs: spawned.update(argv=argv, kwargs=kwargs),
+    )
+
+    wheel = tmp_path / "src.whl"
+    wheel.write_bytes(b"wheel-bytes")
+    payload = _release("v9.9.9", name="src.whl")
+    monkeypatch.setattr(
+        release_updates.httpx, "stream", _stub_stream(wheel.read_bytes())
+    )
+
+    result = release_updates.upgrade_to_latest(payload)
+
+    assert result.ok is True
+    assert "stop" in result.message.lower()
+    assert spawned, "expected a detached helper to be spawned"
+    # Detached + new process group so it outlives this server and its console.
+    kwargs = spawned["kwargs"]
+    assert kwargs["creationflags"] == (0x00000008 | 0x00000200)
+
+
+def test_pending_upgrade_result_reports_a_failed_deferred_install(
+    monkeypatch, tmp_path
+) -> None:
+    monkeypatch.setattr(release_updates, "_stage_dir", lambda: tmp_path)
+    (tmp_path / release_updates._PENDING_RESULT_FILENAME).write_text(
+        '{"ok": false, "message": "Deferred install failed."}', encoding="utf-8"
+    )
+    assert release_updates.pending_upgrade_result() == {
+        "ok": False,
+        "message": "Deferred install failed.",
+    }
+
+
+def test_pending_upgrade_result_tolerates_missing_or_corrupt_file(
+    monkeypatch, tmp_path
+) -> None:
+    monkeypatch.setattr(release_updates, "_stage_dir", lambda: tmp_path)
+    assert release_updates.pending_upgrade_result() is None
+    (tmp_path / release_updates._PENDING_RESULT_FILENAME).write_text(
+        "not json", encoding="utf-8"
+    )
+    assert release_updates.pending_upgrade_result() is None
