@@ -2819,6 +2819,19 @@ function renderVersionBanners() {
   }
   body.append(title, detail);
 
+  // Without the notes the banner only says a number changed, which tells you
+  // nothing about whether the update matters to you.
+  if (info.release_notes) {
+    const notes = document.createElement("details");
+    notes.className = "version-banner-notes";
+    const summary = document.createElement("summary");
+    summary.textContent = "What changed";
+    const text = document.createElement("pre");
+    text.textContent = info.release_notes;
+    notes.append(summary, text);
+    body.appendChild(notes);
+  }
+
   const actions = document.createElement("div");
   actions.className = "version-banner-actions";
   const updateButton = document.createElement("button");

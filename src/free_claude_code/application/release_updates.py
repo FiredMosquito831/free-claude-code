@@ -86,6 +86,7 @@ class ReleaseStatus:
     update_available: bool = False
     release_url: str | None = None
     release_name: str | None = None
+    release_notes: str | None = None
     published_at: str | None = None
     checked_at: float | None = None
     restart_required: bool = False
@@ -98,6 +99,7 @@ class ReleaseStatus:
             "update_available": self.update_available,
             "release_url": self.release_url,
             "release_name": self.release_name,
+            "release_notes": self.release_notes,
             "published_at": self.published_at,
             "checked_at": self.checked_at,
             "restart_required": self.restart_required,
@@ -195,6 +197,7 @@ async def get_release_status(*, force: bool = False) -> ReleaseStatus:
     status.latest = latest
     status.release_url = payload.get("html_url")
     status.release_name = payload.get("name")
+    status.release_notes = _release_notes(payload.get("body"))
     status.published_at = payload.get("published_at")
     status.update_available = is_newer(latest, running)
     return status
@@ -385,3 +388,23 @@ def reset_cache_for_tests() -> None:
     """Clear cached release state so tests start from a known point."""
     global _CACHE
     _CACHE = _ReleaseCache()
+
+
+_RELEASE_NOTES_MAX_CHARS = 4000
+
+
+def _release_notes(body: object) -> str | None:
+    """Trim the release body for the dashboard banner.
+
+    Bounded because the feed is remote: the banner shows an excerpt and links
+    out for the rest rather than rendering an unbounded blob.
+    """
+
+    if not isinstance(body, str):
+        return None
+    text = body.strip()
+    if not text:
+        return None
+    if len(text) <= _RELEASE_NOTES_MAX_CHARS:
+        return text
+    return text[:_RELEASE_NOTES_MAX_CHARS].rstrip() + "\n\n…"

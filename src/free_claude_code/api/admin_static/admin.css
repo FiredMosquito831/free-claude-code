@@ -1641,6 +1641,31 @@ textarea:focus-visible,
   color: var(--accent);
 }
 
+.version-banner-notes {
+  margin-top: 8px;
+}
+
+.version-banner-notes summary {
+  color: var(--accent);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.version-banner-notes pre {
+  margin: 8px 0 0;
+  max-height: 320px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+  background: var(--surface-2, rgba(255, 255, 255, 0.03));
+  border-radius: 6px;
+  padding: 10px 12px;
+}
+
 .version-banner-actions {
   display: flex;
   align-items: center;
