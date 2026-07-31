@@ -324,3 +324,46 @@ def test_missing_receipt_falls_back_to_the_running_python(monkeypatch) -> None:
     extras, python = release_updates._installed_extras_and_python()
     assert extras == []
     assert python.count(".") == 2
+
+
+# ------------------------------------------------------------- release notes
+
+
+@pytest.mark.asyncio
+async def test_status_carries_release_notes(monkeypatch) -> None:
+    """A version number alone does not tell an operator whether to update."""
+
+    monkeypatch.setattr(release_updates, "current_version", lambda: "4.14.2")
+    payload = _release("v4.15.0")
+    payload["body"] = "## Highlights\n\nSomething worth knowing about."
+
+    async def _fetch():
+        return payload, None
+
+    monkeypatch.setattr(release_updates, "_fetch_latest_release", _fetch)
+    status = await get_release_status()
+    assert status.release_notes == "## Highlights\n\nSomething worth knowing about."
+    assert status.as_dict()["release_notes"] == status.release_notes
+
+
+@pytest.mark.asyncio
+async def test_status_release_notes_absent_when_body_is_blank(monkeypatch) -> None:
+    monkeypatch.setattr(release_updates, "current_version", lambda: "4.14.2")
+    payload = _release("v4.15.0")
+    payload["body"] = "   \n  "
+
+    async def _fetch():
+        return payload, None
+
+    monkeypatch.setattr(release_updates, "_fetch_latest_release", _fetch)
+    status = await get_release_status()
+    assert status.release_notes is None
+
+
+def test_release_notes_are_bounded() -> None:
+    """The feed is remote, so the banner shows an excerpt and links out."""
+
+    trimmed = release_updates._release_notes("x" * 10_000)
+    assert trimmed is not None
+    assert len(trimmed) < 10_000
+    assert trimmed.endswith("…")
