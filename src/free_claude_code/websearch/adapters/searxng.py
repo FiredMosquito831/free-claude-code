@@ -49,6 +49,8 @@ class SearxngWebSearchProvider(BaseWebSearchProvider):
             params["time_range"] = time_range
         if language := options.get("SEARXNG_LANGUAGE", ""):
             params["language"] = language
+        if safesearch := options.get("SEARXNG_SAFESEARCH", ""):
+            params["safesearch"] = safesearch
         try:
             data = await request_json(
                 self._require_client(),

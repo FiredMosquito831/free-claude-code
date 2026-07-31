@@ -17,9 +17,12 @@ from free_claude_code.core.websearch.models import (
 
 from ..base import BaseWebSearchProvider, WebSearchProviderConfig
 from ..errors import WebSearchError, WebSearchQuotaError
+from ..options import option_int
 from .http import build_async_client, request_json
 
 _EXTRA_STATUS_ERRORS: dict[int, type[WebSearchError]] = {432: WebSearchQuotaError}
+# Tavily documents max_results as 0-20; sending more is rejected upstream.
+_MAX_RESULTS_CAP = 20
 
 
 class TavilyWebSearchProvider(BaseWebSearchProvider):
@@ -46,7 +49,7 @@ class TavilyWebSearchProvider(BaseWebSearchProvider):
         options = self._config.options
         payload: dict[str, Any] = {
             "query": query,
-            "max_results": max_results,
+            "max_results": min(max_results, _MAX_RESULTS_CAP),
             "search_depth": options.get("TAVILY_SEARCH_DEPTH", "") or "basic",
         }
         if topic := options.get("TAVILY_TOPIC", ""):
@@ -57,6 +60,14 @@ class TavilyWebSearchProvider(BaseWebSearchProvider):
             payload["include_answer"] = include_answer
         if raw_content := options.get("TAVILY_INCLUDE_RAW_CONTENT", ""):
             payload["include_raw_content"] = raw_content
+        if (chunks := option_int(options.get("TAVILY_CHUNKS_PER_SOURCE"))) is not None:
+            payload["chunks_per_source"] = chunks
+        if country := options.get("TAVILY_COUNTRY", ""):
+            payload["country"] = country
+        if start_date := options.get("TAVILY_START_DATE", ""):
+            payload["start_date"] = start_date
+        if end_date := options.get("TAVILY_END_DATE", ""):
+            payload["end_date"] = end_date
         if allowed_domains:
             payload["include_domains"] = list(allowed_domains)
         if blocked_domains:

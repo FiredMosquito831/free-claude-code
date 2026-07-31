@@ -54,6 +54,8 @@ class SearchApiWebSearchProvider(BaseWebSearchProvider):
             params["gl"] = gl
         if hl := options.get("SEARCHAPI_HL", ""):
             params["hl"] = hl
+        if safe := options.get("SEARCHAPI_SAFE", ""):
+            params["safe"] = safe
         data = await request_json(
             self._require_client(),
             self.provider_id,

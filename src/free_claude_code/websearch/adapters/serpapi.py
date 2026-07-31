@@ -54,6 +54,8 @@ class SerpApiWebSearchProvider(BaseWebSearchProvider):
             params["gl"] = gl
         if hl := options.get("SERPAPI_HL", ""):
             params["hl"] = hl
+        if safe := options.get("SERPAPI_SAFE", ""):
+            params["safe"] = safe
         data = await request_json(
             self._require_client(),
             self.provider_id,

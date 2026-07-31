@@ -6,6 +6,7 @@ cover only the opt-in paths.
 
 import pytest
 
+from free_claude_code.config.websearch_catalog import WEBSEARCH_CATALOG
 from free_claude_code.websearch.adapters.brave import BraveWebSearchProvider
 from free_claude_code.websearch.adapters.ddgs import DdgsWebSearchProvider
 from free_claude_code.websearch.adapters.exa import ExaWebSearchProvider
@@ -539,8 +540,10 @@ class TestParallelOptions:
             await provider.close()
         body = request_json_body(requests[0])
         assert body["mode"] == "turbo"
-        assert body["excerpts"] == {"max_chars_per_result": 1500}
         assert body["max_chars_total"] == 6000
+        assert body["advanced_settings"]["excerpt_settings"] == {
+            "max_chars_per_result": 1500
+        }
 
     @pytest.mark.asyncio
     async def test_defaults_send_no_option_keys(self) -> None:
@@ -939,3 +942,127 @@ class TestSerpApiOptions:
             await provider.close()
         assert requests[0].url.params["engine"] == "google"
         assert "tbs" not in requests[0].url.params
+
+
+class TestSearchCapsAndFilters:
+    """Parameters that were documented upstream but never sent."""
+
+    @pytest.mark.asyncio
+    async def test_linkup_sends_max_results(self) -> None:
+        """Without maxResults Linkup returns its default set and bills for it."""
+
+        provider = LinkupWebSearchProvider(build_config())
+        requests = attach_mock_client(
+            provider, lambda request: json_response({"results": []})
+        )
+        try:
+            await provider.search("q", max_results=4)
+        finally:
+            await provider.close()
+        assert request_json_body(requests[0])["maxResults"] == 4
+
+    @pytest.mark.asyncio
+    async def test_linkup_date_range(self) -> None:
+        provider = LinkupWebSearchProvider(
+            build_config(
+                options={
+                    "LINKUP_FROM_DATE": "2026-01-01",
+                    "LINKUP_TO_DATE": "2026-06-30",
+                }
+            )
+        )
+        requests = attach_mock_client(
+            provider, lambda request: json_response({"results": []})
+        )
+        try:
+            await provider.search("q")
+        finally:
+            await provider.close()
+        body = request_json_body(requests[0])
+        assert body["fromDate"] == "2026-01-01"
+        assert body["toDate"] == "2026-06-30"
+
+    @pytest.mark.asyncio
+    async def test_parallel_sends_source_policy_for_domains(self) -> None:
+        """SUPPORTS_DOMAINS was False despite source_policy being documented."""
+
+        provider = ParallelWebSearchProvider(build_config())
+        requests = attach_mock_client(
+            provider, lambda request: json_response({"results": []})
+        )
+        try:
+            await provider.search(
+                "q",
+                allowed_domains=("docs.python.org",),
+                blocked_domains=(),
+            )
+        finally:
+            await provider.close()
+        policy = request_json_body(requests[0])["advanced_settings"]["source_policy"]
+        assert policy["include_domains"] == ["docs.python.org"]
+
+    @pytest.mark.asyncio
+    async def test_tavily_clamps_max_results_to_documented_cap(self) -> None:
+        provider = TavilyWebSearchProvider(build_config())
+        requests = attach_mock_client(
+            provider, lambda request: json_response({"results": []})
+        )
+        try:
+            await provider.search("q", max_results=50)
+        finally:
+            await provider.close()
+        assert request_json_body(requests[0])["max_results"] == 20
+
+    @pytest.mark.asyncio
+    async def test_firecrawl_limit_is_divided_across_sources(self) -> None:
+        """``limit`` is per source type, so N sources fetch N times too many."""
+
+        provider = FirecrawlWebSearchProvider(
+            build_config(options={"FIRECRAWL_SOURCES": "web,news"})
+        )
+        requests = attach_mock_client(
+            provider, lambda request: json_response({"data": {"web": [], "news": []}})
+        )
+        try:
+            await provider.search("q", max_results=10)
+        finally:
+            await provider.close()
+        assert request_json_body(requests[0])["limit"] == 5
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("provider_cls", "env", "value", "param"),
+        [
+            (BraveWebSearchProvider, "BRAVE_SAFESEARCH", "strict", "safesearch"),
+            (SerpApiWebSearchProvider, "SERPAPI_SAFE", "active", "safe"),
+            (SearchApiWebSearchProvider, "SEARCHAPI_SAFE", "active", "safe"),
+        ],
+    )
+    async def test_safe_search_reaches_the_provider(
+        self, provider_cls, env, value, param
+    ) -> None:
+        provider = provider_cls(build_config(options={env: value}))
+        requests = attach_mock_client(
+            provider, lambda request: json_response({"web": {"results": []}})
+        )
+        try:
+            await provider.search("q")
+        finally:
+            await provider.close()
+        assert requests[0].url.params[param] == value
+
+
+def test_every_advanced_option_documents_its_default() -> None:
+    """The admin UI falls back to a generic string when cost_note is empty.
+
+    That fallback tells an operator nothing about what leaving the field blank
+    does, which was true of 37 of the 53 options before they were filled in.
+    """
+
+    undocumented = [
+        f"{descriptor.provider_id}:{option.env}"
+        for descriptor in WEBSEARCH_CATALOG.values()
+        for option in descriptor.advanced_options
+        if not option.cost_note
+    ]
+    assert undocumented == []
