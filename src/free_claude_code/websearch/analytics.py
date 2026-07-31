@@ -138,6 +138,18 @@ DELETE FROM search_route_log
 WHERE id NOT IN (SELECT id FROM search_route_log ORDER BY id DESC LIMIT ?)
 """
 
+# One logical route writes one row here but >=1 rows into ``search_log`` (an
+# extra row per fallback hop), so the attempt table reaches ``max_rows`` first.
+# Pruning both to the same row count would leave routes summarizing a window
+# whose attempt detail is already gone -- and the admin dashboard renders the
+# route and attempt tables side by side as if they covered the same period.
+# Trim routes back to the window the surviving attempts still cover.
+_PRUNE_ORPHAN_ROUTES_SQL = """
+DELETE FROM search_route_log
+WHERE (SELECT COUNT(*) FROM search_log) > 0
+  AND ts_epoch < (SELECT MIN(ts_epoch) FROM search_log)
+"""
+
 _REQUEST_COLUMNS = (
     "id, ts_epoch, ts_iso, provider, key_index, key_label, query, results_count,"
     " duration_ms, status, error_kind, error_message, cost_usd, route_id,"
@@ -478,7 +490,9 @@ class WebSearchLogStore:
                     item.deleted = self._clear_rows(connection)
                 item.done.set()
             elif isinstance(item, SearchRouteOutcome):
-                route_rows.append(_route_row_tuple(item))
+                route_rows.append(
+                    _route_row_tuple(item, capture_content=self._capture_content)
+                )
             else:
                 attempt_rows.append(
                     _row_tuple(
@@ -527,6 +541,7 @@ class WebSearchLogStore:
         try:
             connection.execute(_PRUNE_SQL, (self._max_rows,))
             connection.execute(_PRUNE_ROUTES_SQL, (self._max_rows,))
+            connection.execute(_PRUNE_ORPHAN_ROUTES_SQL)
             connection.commit()
         except Exception:
             connection.rollback()
@@ -635,7 +650,11 @@ def _row_tuple(
         outcome.provider,
         outcome.key_index,
         outcome.key_label,
-        outcome.query[:QUERY_LOG_CHARS],
+        # The query is search content too. ``WEBSEARCH_LOG_CAPTURE_CONTENT``
+        # exists so operators can stop persisting what was searched for, so it
+        # has to cover this column as well as the payload JSON -- otherwise the
+        # setting silently leaves the most readable part on disk.
+        outcome.query[:QUERY_LOG_CHARS] if capture_content else "",
         outcome.results_count,
         outcome.duration_ms,
         outcome.status,
@@ -659,12 +678,15 @@ def _row_tuple(
     )
 
 
-def _route_row_tuple(outcome: SearchRouteOutcome) -> tuple[object, ...]:
+def _route_row_tuple(
+    outcome: SearchRouteOutcome, *, capture_content: bool
+) -> tuple[object, ...]:
     return (
         outcome.route_id,
         outcome.ts_epoch,
         outcome.ts_iso,
-        outcome.query[:QUERY_LOG_CHARS],
+        # Withheld with the attempt-row query; see ``_row_tuple``.
+        outcome.query[:QUERY_LOG_CHARS] if capture_content else "",
         outcome.primary_provider,
         outcome.terminal_provider,
         _encode_provider_path(outcome.provider_path),

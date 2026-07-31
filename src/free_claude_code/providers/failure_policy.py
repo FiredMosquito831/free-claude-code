@@ -1,13 +1,9 @@
 """Provider-owned SDK classification and retry qualification."""
 
-import contextlib
 import json
-import re
 from collections.abc import Callable, Mapping
 from contextlib import suppress
 from dataclasses import replace
-from datetime import UTC, datetime
-from email.utils import parsedate_to_datetime
 from typing import Any
 
 import httpx
@@ -19,6 +15,11 @@ from free_claude_code.core.diagnostics import (
     safe_exception_message,
 )
 from free_claude_code.core.failures import ExecutionFailure, FailureKind
+from free_claude_code.core.rate_limit import (
+    DEFAULT_RATE_LIMIT_COOLDOWN_SECONDS,
+    MAX_RATE_LIMIT_COOLDOWN_SECONDS,
+    retry_after_seconds,
+)
 
 MarkRateLimited = Callable[[float], None]
 ProviderFailureOverride = Callable[[Exception], ExecutionFailure | None]
@@ -213,55 +214,6 @@ def provider_error_message(
     return safe_exception_message(exc)
 
 
-DEFAULT_RATE_LIMIT_COOLDOWN_SECONDS = 60.0
-MAX_RATE_LIMIT_COOLDOWN_SECONDS = 3600.0
-
-# Headers providers actually use to say when a limit resets. ``Retry-After`` is
-# the RFC 9110 standard; the ``x-ratelimit-reset-*`` family is the de-facto
-# convention OpenAI, Anthropic, Groq, and Mistral all ship.
-_RETRY_AFTER_HEADERS = (
-    "retry-after-ms",
-    "retry-after",
-    "x-ratelimit-reset-requests",
-    "x-ratelimit-reset-tokens",
-    "ratelimit-reset",
-)
-
-
-def _parse_duration(name: str, raw: str) -> float | None:
-    """Parse one rate-limit header value into seconds."""
-    text = raw.strip()
-    if not text:
-        return None
-    if name == "retry-after-ms":
-        try:
-            return float(text) / 1000.0
-        except ValueError:
-            return None
-    # Values like "1s", "6m0s", "250ms" appear in the wild alongside plain
-    # numbers, so parse the suffixed forms rather than discarding them.
-    try:
-        return float(text)
-    except ValueError:
-        pass
-    match = re.fullmatch(
-        r"(?:(\d+(?:\.\d+)?)h)?(?:(\d+(?:\.\d+)?)m(?!s))?"
-        r"(?:(\d+(?:\.\d+)?)s)?(?:(\d+(?:\.\d+)?)ms)?",
-        text,
-    )
-    if match and any(match.groups()):
-        hours, minutes, seconds, millis = (float(g or 0) for g in match.groups())
-        return hours * 3600 + minutes * 60 + seconds + millis / 1000.0
-    with contextlib.suppress(ValueError, TypeError):
-        # Retry-After also permits an HTTP-date.
-        when = parsedate_to_datetime(text)
-        if when is not None:
-            return max(
-                0.0, (when - datetime.now(tz=when.tzinfo or UTC)).total_seconds()
-            )
-    return None
-
-
 def rate_limit_cooldown_seconds(exc: BaseException) -> float:
     """How long the upstream says to wait, or a conservative default.
 
@@ -270,20 +222,10 @@ def rate_limit_cooldown_seconds(exc: BaseException) -> float:
     on every 429, so use it when present.
     """
     response = getattr(exc, "response", None)
-    headers = getattr(response, "headers", None)
-    if headers is None:
+    seconds = retry_after_seconds(getattr(response, "headers", None))
+    if seconds is None:
         return DEFAULT_RATE_LIMIT_COOLDOWN_SECONDS
-    for name in _RETRY_AFTER_HEADERS:
-        try:
-            raw = headers.get(name)
-        except AttributeError, TypeError:
-            return DEFAULT_RATE_LIMIT_COOLDOWN_SECONDS
-        if raw is None:
-            continue
-        seconds = _parse_duration(name, str(raw))
-        if seconds is not None and seconds >= 0:
-            return min(seconds, MAX_RATE_LIMIT_COOLDOWN_SECONDS)
-    return DEFAULT_RATE_LIMIT_COOLDOWN_SECONDS
+    return min(seconds, MAX_RATE_LIMIT_COOLDOWN_SECONDS)
 
 
 def _classify_provider_failure(

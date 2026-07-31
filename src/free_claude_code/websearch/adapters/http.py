@@ -11,6 +11,8 @@ from typing import Any
 
 import httpx
 
+from free_claude_code.core.rate_limit import retry_after_seconds
+
 from ..errors import (
     WebSearchAuthError,
     WebSearchError,
@@ -62,9 +64,17 @@ def map_status_error(
     message = extract_error_message(_try_parse_json(response), fallback=response.text)
     if not message:
         message = f"HTTP {status}"
-    return _error_type_for_status(status, extra_status_errors)(
-        provider_id, message, status_code=status
-    )
+    error_type = _error_type_for_status(status, extra_status_errors)
+    if issubclass(error_type, WebSearchRateLimitError):
+        # Providers publish the real reset on a 429; carrying it forward lets
+        # the key pool cool down for exactly as long as it was told to.
+        return error_type(
+            provider_id,
+            message,
+            status_code=status,
+            retry_after_seconds=retry_after_seconds(response.headers),
+        )
+    return error_type(provider_id, message, status_code=status)
 
 
 async def request_json(

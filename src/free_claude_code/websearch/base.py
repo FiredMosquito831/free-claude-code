@@ -99,7 +99,11 @@ class BaseWebSearchProvider(ABC):
                 )
             except WebSearchRateLimitError as error:
                 error.key_index = key_index
-                self._pool.report_rate_limit(key_index, message=error.message)
+                self._pool.report_rate_limit(
+                    key_index,
+                    message=error.message,
+                    retry_after_seconds=error.retry_after_seconds,
+                )
                 last_error = error
             except WebSearchInvalidRequestError, WebSearchConfigError:
                 # Caller/config faults: rotating keys cannot help.

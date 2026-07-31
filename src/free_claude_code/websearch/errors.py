@@ -47,6 +47,19 @@ class WebSearchRateLimitError(WebSearchError):
 
     kind: ClassVar[str] = "rate_limit"
 
+    def __init__(
+        self,
+        provider: str,
+        message: str,
+        *,
+        status_code: int | None = None,
+        retry_after_seconds: float | None = None,
+    ) -> None:
+        super().__init__(provider, message, status_code=status_code)
+        # What the provider itself said about when the limit resets. None means
+        # it stayed silent, which is different from "reset immediately".
+        self.retry_after_seconds = retry_after_seconds
+
 
 class WebSearchQuotaError(WebSearchError):
     """Billing/plan quota exhausted (HTTP 402 or provider-specific status)."""

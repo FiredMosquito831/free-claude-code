@@ -21,6 +21,7 @@ from enum import StrEnum
 from typing import Any
 
 from free_claude_code.config.credentials import mask_key_label
+from free_claude_code.core.rate_limit import MAX_RATE_LIMIT_COOLDOWN_SECONDS
 
 __all__ = [
     "KeyHealth",
@@ -174,15 +175,34 @@ class KeyPool:
         health.state = KeyHealthState.COOLDOWN
         health.state_until = now + self._cooldown_seconds(health.consecutive_failures)
 
-    def report_rate_limit(self, index: int, *, message: str | None = None) -> None:
-        """Record a 429: fixed 60s cooldown outside the failure ladder."""
+    def report_rate_limit(
+        self,
+        index: int,
+        *,
+        message: str | None = None,
+        retry_after_seconds: float | None = None,
+    ) -> None:
+        """Record a 429, honouring the provider's own reset when it sent one.
+
+        A fixed cooldown either benches a key that resets in a second or keeps
+        hammering one that needs an hour. ``retry_after_seconds`` is whatever
+        the provider published; falling back to the default only when it said
+        nothing.
+        """
 
         health = self._health[index]
         health.failures += 1
         health.rate_limits += 1
         health.last_error = message
         health.state = KeyHealthState.COOLDOWN
-        health.state_until = self._clock() + RATE_LIMIT_COOLDOWN_SECONDS
+        cooldown = (
+            retry_after_seconds
+            if retry_after_seconds is not None and retry_after_seconds >= 0
+            else RATE_LIMIT_COOLDOWN_SECONDS
+        )
+        health.state_until = self._clock() + min(
+            cooldown, MAX_RATE_LIMIT_COOLDOWN_SECONDS
+        )
 
     def snapshot(self) -> dict[str, Any]:
         """Health snapshot for admin UI / diagnostics (keys masked)."""
