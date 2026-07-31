@@ -518,3 +518,60 @@ def test_deferred_helper_survives_native_stderr(tmp_path) -> None:
     # Success is judged by exit code captured immediately after the call.
     assert "$code = $LASTEXITCODE" in script
     assert "$ok = $code -eq 0" in script
+
+
+def test_deferred_helper_pins_parent_identity_not_just_pid(tmp_path) -> None:
+    """Windows recycles pids fast; matching on the id alone hangs the helper.
+
+    Observed in practice: the server was stopped, Windows handed its pid to an
+    unrelated python process seconds later, and the helper waited out its whole
+    deadline without ever installing.
+    """
+
+    script = release_updates._deferred_helper_script(
+        uv_executable="uv",
+        command=["uv", "tool", "install", "--force", "pkg"],
+        result_path=tmp_path / "r.json",
+        stage_dir=tmp_path,
+    )
+    assert "$parentStart" in script
+    assert "StartTime.ToFileTimeUtc()" in script
+    # An unknown start time must mean "assume alive", never "assume gone":
+    # installing while the server still runs is the corruption we avoid.
+    assert "if ($parentStart -eq 0) { return $true }" in script
+
+
+def test_deferred_helper_retries_the_install(tmp_path) -> None:
+    """Handle release lags; one lost race must not leave a broken install."""
+
+    script = release_updates._deferred_helper_script(
+        uv_executable="uv",
+        command=["uv", "tool", "install", "--force", "pkg"],
+        result_path=tmp_path / "r.json",
+        stage_dir=tmp_path,
+    )
+    assert "$delays = @(0, 5, 10, 20, 30)" in script
+    assert "foreach ($wait in $delays)" in script
+    assert "if ($code -eq 0) { break }" in script
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows process times")
+def test_process_creation_filetime_matches_powershell() -> None:
+    """The value must be comparable with Process.StartTime.ToFileTimeUtc()."""
+
+    import subprocess as sp
+
+    ours = release_updates._process_creation_filetime()
+    assert ours > 0
+    theirs = sp.run(
+        [
+            "powershell",
+            "-NoProfile",
+            "-Command",
+            f"(Get-Process -Id {os.getpid()}).StartTime.ToFileTimeUtc()",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    ).stdout.strip()
+    assert theirs == str(ours)

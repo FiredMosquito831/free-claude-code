@@ -322,6 +322,51 @@ def clear_pending_upgrade_result() -> None:
         (_stage_dir() / _PENDING_RESULT_FILENAME).unlink()
 
 
+def _process_creation_filetime() -> int:
+    """This process's creation time as a Windows FILETIME (UTC ticks).
+
+    Pairs with ``Process.StartTime.ToFileTimeUtc()`` in PowerShell so the helper
+    can tell our parent apart from a later process that reused its id.
+    """
+
+    if not _WINDOWS:
+        # Only meaningful on Windows; 0 makes the helper fall back to the id
+        # alone, and the tests that render the script run on Linux CI too.
+        return 0
+    # Imported here, not at module scope: ``ctypes.wintypes`` raises on
+    # non-Windows, and this module is imported on every platform.
+    import ctypes
+    from ctypes import wintypes
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    # Without explicit argtypes the HANDLE is truncated to 32 bits on 64-bit
+    # Windows and the call fails, silently yielding a useless 0.
+    kernel32.GetCurrentProcess.restype = wintypes.HANDLE
+    kernel32.GetCurrentProcess.argtypes = []
+    kernel32.GetProcessTimes.restype = wintypes.BOOL
+    kernel32.GetProcessTimes.argtypes = [
+        wintypes.HANDLE,
+        ctypes.POINTER(wintypes.FILETIME),
+        ctypes.POINTER(wintypes.FILETIME),
+        ctypes.POINTER(wintypes.FILETIME),
+        ctypes.POINTER(wintypes.FILETIME),
+    ]
+    creation = wintypes.FILETIME()
+    unused = (wintypes.FILETIME(), wintypes.FILETIME(), wintypes.FILETIME())
+    ok = kernel32.GetProcessTimes(
+        kernel32.GetCurrentProcess(),
+        ctypes.byref(creation),
+        ctypes.byref(unused[0]),
+        ctypes.byref(unused[1]),
+        ctypes.byref(unused[2]),
+    )
+    if not ok:
+        # Without a start time the helper falls back to the id alone, which is
+        # the previous behaviour rather than a new failure mode.
+        return 0
+    return (creation.dwHighDateTime << 32) | creation.dwLowDateTime
+
+
 def _powershell_literal(value: str) -> str:
     """Quote a value for a PowerShell single-quoted string."""
 
@@ -345,12 +390,28 @@ def _deferred_helper_script(
     quoted_args = ", ".join(_powershell_literal(arg) for arg in command[1:])
     return f"""$ErrorActionPreference = 'Stop'
 $parent = {os.getpid()}
+# Windows recycles process ids quickly, so a bare Get-Process -Id would happily
+# match an unrelated process that inherited ours and wait out the full deadline
+# without ever installing. Pin the identity with the creation time too: same id
+# but a different start time means our parent is gone.
+$parentStart = {_process_creation_filetime()}
+function Test-ParentAlive {{
+    $proc = Get-Process -Id $parent -ErrorAction SilentlyContinue
+    if (-not $proc) {{ return $false }}
+    # 0 means we could not read our own creation time; fall back to the id
+    # alone, which is the old behaviour rather than a new failure mode. Never
+    # treat "unknown start time" as "parent gone", or we would install while
+    # the server is still running -- the exact corruption this avoids.
+    if ($parentStart -eq 0) {{ return $true }}
+    try {{ return $proc.StartTime.ToFileTimeUtc() -eq $parentStart }}
+    catch {{ return $false }}   # access denied reading StartTime => not ours
+}}
 $deadline = (Get-Date).AddSeconds({_HELPER_WAIT_SECONDS})
 while ((Get-Date) -lt $deadline) {{
-    if (-not (Get-Process -Id $parent -ErrorAction SilentlyContinue)) {{ break }}
+    if (-not (Test-ParentAlive)) {{ break }}
     Start-Sleep -Milliseconds 500
 }}
-if (Get-Process -Id $parent -ErrorAction SilentlyContinue) {{
+if (Test-ParentAlive) {{
     $result = @{{ ok = $false; message = 'Timed out waiting for the server to stop.' }}
     $result | ConvertTo-Json | Set-Content -Path {_powershell_literal(str(result_path))} -Encoding utf8
     exit 1
@@ -362,14 +423,27 @@ Start-Sleep -Seconds 2
 # this script before it installs anything, so drop back to Continue for the
 # call itself and judge the result by exit code alone.
 $ErrorActionPreference = 'Continue'
-$output = & {_powershell_literal(uv_executable)} {quoted_args} 2>&1 | Out-String
-$code = $LASTEXITCODE
+# Handle release is not instantaneous on Windows -- an antivirus scan, the
+# search indexer, or a slow shutdown can still hold the environment briefly.
+# A single attempt that loses that race leaves uv having deleted part of the
+# environment, which is precisely the broken install this whole path exists to
+# avoid, so retry with backoff: a later attempt succeeds because the earlier
+# one already removed whatever it could.
+$delays = @(0, 5, 10, 20, 30)
+foreach ($wait in $delays) {{
+    if ($wait -gt 0) {{ Start-Sleep -Seconds $wait }}
+    $output = & {_powershell_literal(uv_executable)} {quoted_args} 2>&1 | Out-String
+    $code = $LASTEXITCODE
+    $attempts = $delays.IndexOf($wait) + 1
+    if ($code -eq 0) {{ break }}
+}}
 $ErrorActionPreference = 'Stop'
 $ok = $code -eq 0
 $result = @{{
     ok = $ok
     exit_code = $code
-    message = if ($ok) {{ 'Deferred install completed.' }} else {{ 'Deferred install failed.' }}
+    attempts = $attempts
+    message = if ($ok) {{ 'Deferred install completed.' }} else {{ 'Deferred install failed after ' + $attempts + ' attempt(s).' }}
     output = $output
 }}
 $result | ConvertTo-Json | Set-Content -Path {_powershell_literal(str(result_path))} -Encoding utf8
