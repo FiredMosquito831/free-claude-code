@@ -319,6 +319,8 @@ def test_stats_applies_all_list_filters_to_every_aggregate(
             "requests": 2,
             "tokens_in": 18,
             "tokens_out": 8,
+            "cache_read_tokens": 0,
+            "cache_write_tokens": 0,
             "errors": 1,
             "avg_duration_ms": 60.0,
         }
@@ -329,6 +331,8 @@ def test_stats_applies_all_list_filters_to_every_aggregate(
             "requests": 2,
             "tokens_in": 18,
             "tokens_out": 8,
+            "cache_read_tokens": 0,
+            "cache_write_tokens": 0,
             "errors": 1,
             "avg_duration_ms": 60.0,
         }
@@ -481,7 +485,7 @@ def test_stats_covering_index_is_created(tmp_path) -> None:
                         "SELECT name FROM sqlite_master WHERE type='index'"
                     )
                 }
-                if "idx_requests_stats_v2" in names:
+                if "idx_requests_stats_v3" in names:
                     plan = [
                         str(row[3])
                         for row in conn.execute(
@@ -494,7 +498,7 @@ def test_stats_covering_index_is_created(tmp_path) -> None:
                 conn.close()
             time.sleep(0.05)
         assert plan, "covering index was never created"
-        assert any("idx_requests_stats_v2" in step for step in plan), plan
+        assert any("idx_requests_stats_v3" in step for step in plan), plan
     finally:
         store.close()
 
@@ -668,7 +672,7 @@ def test_migrates_a_database_created_before_key_columns(tmp_path) -> None:
         # The pre-existing covering index lacked key_label, so it must be
         # replaced rather than silently kept by CREATE INDEX IF NOT EXISTS.
         assert "idx_requests_stats" not in indexes
-        assert "idx_requests_stats_v2" in indexes
+        assert "idx_requests_stats_v3" in indexes
     finally:
         store.close()
 
@@ -678,3 +682,66 @@ def test_key_breakdown_labels_unattributed_rows(store: RequestLogStore) -> None:
     store.close()
     by_key = {entry["key"] for entry in store.stats()["by_key"]}
     assert by_key == {"(unknown)"}
+
+
+class TestCacheTokenAnalytics:
+    """Cached prompt tokens are billed differently; they need their own columns."""
+
+    def test_totals_and_breakdowns_report_cache_tokens(self, tmp_path) -> None:
+        store = RequestLogStore(tmp_path / "requests.db")
+        store.enqueue(
+            _record(
+                "a",
+                provider="nvidia_nim",
+                tokens_in=100,
+                tokens_out=10,
+                cache_read_tokens=900,
+                cache_write_tokens=0,
+            )
+        )
+        store.close()
+
+        store = RequestLogStore(tmp_path / "requests.db")
+        stats = store.stats()
+        assert stats["cache_read_tokens"] == 900
+        assert stats["cache_write_tokens"] == 0
+        # tokens_in stays the *uncached* portion, matching Anthropic's usage
+        # semantics -- summing it with cache reads would double count.
+        assert stats["tokens_in"] == 100
+
+        (provider,) = [r for r in stats["by_provider"] if r["key"] == "nvidia_nim"]
+        assert provider["tokens_in"] == 100
+        assert provider["tokens_out"] == 10
+        assert provider["cache_read_tokens"] == 900
+        store.close()
+
+    def test_columns_are_added_to_a_database_created_before_them(
+        self, tmp_path
+    ) -> None:
+        """Existing installs must migrate in place, not lose their history."""
+
+        db_path = tmp_path / "requests.db"
+        conn = sqlite3.connect(db_path)
+        try:
+            conn.executescript(_OLD_SCHEMA)
+            conn.execute(
+                "INSERT INTO requests (id, ts_epoch, ts_iso, endpoint, protocol,"
+                " status, provider, tokens_in, tokens_out)"
+                " VALUES ('legacy', ?, 'x', '/v1/messages', 'anthropic',"
+                " 'success', 'nvidia_nim', 5, 7)",
+                (time.time(),),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        store = RequestLogStore(db_path)
+        store.enqueue(_record("fresh", provider="nvidia_nim", cache_read_tokens=7))
+        store.close()
+
+        with sqlite3.connect(db_path) as conn:
+            rows = dict(
+                conn.execute("SELECT id, cache_read_tokens FROM requests").fetchall()
+            )
+        assert rows["legacy"] is None  # pre-existing row survives, value unset
+        assert rows["fresh"] == 7

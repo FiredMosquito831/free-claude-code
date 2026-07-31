@@ -54,6 +54,8 @@ class RequestCapture:
         self._output_chars = 0
         self._stored_chars = 0
         self._tokens_in: int | None = None
+        self._cache_read_tokens: int | None = None
+        self._cache_write_tokens: int | None = None
         self._tokens_out: int | None = None
         self._error: tuple[str | None, str | None] | None = None
         self._finalized = False
@@ -173,6 +175,12 @@ class RequestCapture:
                 usage = message.get("usage")
                 if isinstance(usage, dict):
                     self._tokens_in = _int_or_none(usage.get("input_tokens"))
+                    self._cache_read_tokens = _int_or_none(
+                        usage.get("cache_read_input_tokens")
+                    )
+                    self._cache_write_tokens = _int_or_none(
+                        usage.get("cache_creation_input_tokens")
+                    )
         elif event_type == "content_block_delta":
             delta = payload.get("delta")
             if isinstance(delta, dict) and delta.get("type") == "text_delta":
@@ -213,6 +221,8 @@ class RequestCapture:
         record.ttft_ms = self._ttft_ms
         record.tokens_in = self._tokens_in
         record.tokens_out = self._tokens_out
+        record.cache_read_tokens = self._cache_read_tokens
+        record.cache_write_tokens = self._cache_write_tokens
         output_text = "".join(self._output_parts)
         record.output_chars = self._output_chars
         if self._capture_bodies:

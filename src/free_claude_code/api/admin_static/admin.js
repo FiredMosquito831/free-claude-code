@@ -1,3 +1,15 @@
+
+// Anthropic reports tokens_in as the *uncached* portion, so total prompt input
+// is uncached + cache reads + cache writes. Anything else understates the rate.
+function formatCacheHitRate(row) {
+  const uncached = Number(row?.tokens_in || 0);
+  const read = Number(row?.cache_read_tokens || 0);
+  const written = Number(row?.cache_write_tokens || 0);
+  const total = uncached + read + written;
+  if (!total) return "—";
+  return `${((read / total) * 100).toFixed(1)}%`;
+}
+
 const state = {
   config: null,
   fields: new Map(),
@@ -3177,8 +3189,11 @@ function renderRequestStatsCards(stats) {
     ["Success rate", `${successRate}%`],
     ["Error rate", `${((stats.error_rate || 0) * 100).toFixed(1)}%`],
     ["Cancelled", stats.cancelled],
-    ["Tokens in", stats.tokens_in],
-    ["Tokens out", stats.tokens_out],
+    ["Input (uncached)", formatAnalyticsNumber(stats.tokens_in || 0)],
+    ["Cached input", formatAnalyticsNumber(stats.cache_read_tokens || 0)],
+    ["Cache hit rate", formatCacheHitRate(stats)],
+    ["Cache writes", formatAnalyticsNumber(stats.cache_write_tokens || 0)],
+    ["Tokens out", formatAnalyticsNumber(stats.tokens_out || 0)],
     ["Avg duration", stats.avg_duration_ms != null ? `${stats.avg_duration_ms} ms` : "—"],
     ["p50 duration", stats.p50_duration_ms != null ? `${stats.p50_duration_ms} ms` : "—"],
     ["p95 duration", stats.p95_duration_ms != null ? `${stats.p95_duration_ms} ms` : "—"],
@@ -3203,7 +3218,16 @@ function renderRequestProviderBreakdown(rows) {
   container.innerHTML = "";
   container.appendChild(
     analyticsTable(
-      ["Provider", "Requests", "Error rate", "Tokens", "Avg latency"],
+      [
+        "Provider",
+        "Requests",
+        "Error rate",
+        "Input (uncached)",
+        "Cached input",
+        "Cache hit",
+        "Tokens out",
+        "Avg latency",
+      ],
       rows.map((row) => {
         const requests = Number(row.requests || 0);
         const errors = Number(row.errors || 0);
@@ -3211,9 +3235,10 @@ function renderRequestProviderBreakdown(rows) {
           row.key || "unknown",
           formatAnalyticsNumber(requests),
           requests ? `${((errors / requests) * 100).toFixed(1)}%` : "0%",
-          formatAnalyticsNumber(
-            Number(row.tokens_in || 0) + Number(row.tokens_out || 0),
-          ),
+          formatAnalyticsNumber(Number(row.tokens_in || 0)),
+          formatAnalyticsNumber(Number(row.cache_read_tokens || 0)),
+          formatCacheHitRate(row),
+          formatAnalyticsNumber(Number(row.tokens_out || 0)),
           row.avg_duration_ms != null ? `${row.avg_duration_ms} ms` : "—",
         ];
       }),
@@ -3227,7 +3252,16 @@ function renderRequestKeyBreakdown(rows) {
   container.innerHTML = "";
   container.appendChild(
     analyticsTable(
-      ["Key", "Requests", "Error rate", "Tokens", "Avg latency"],
+      [
+        "Key",
+        "Requests",
+        "Error rate",
+        "Input (uncached)",
+        "Cached input",
+        "Cache hit",
+        "Tokens out",
+        "Avg latency",
+      ],
       rows.map((row) => {
         const requests = Number(row.requests || 0);
         const errors = Number(row.errors || 0);
@@ -3235,9 +3269,10 @@ function renderRequestKeyBreakdown(rows) {
           row.key || "unknown",
           formatAnalyticsNumber(requests),
           requests ? `${((errors / requests) * 100).toFixed(1)}%` : "0%",
-          formatAnalyticsNumber(
-            Number(row.tokens_in || 0) + Number(row.tokens_out || 0),
-          ),
+          formatAnalyticsNumber(Number(row.tokens_in || 0)),
+          formatAnalyticsNumber(Number(row.cache_read_tokens || 0)),
+          formatCacheHitRate(row),
+          formatAnalyticsNumber(Number(row.tokens_out || 0)),
           row.avg_duration_ms != null ? `${row.avg_duration_ms} ms` : "—",
         ];
       }),
