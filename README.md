@@ -14,7 +14,7 @@ An Anthropic-compatible local proxy for Claude Code, Codex, Pi, and their IDE ex
 
 Run your coding agents with free, paid, or local models. Choose and validate providers from one local Admin UI.
 
-[Features](#features) · [Quick Start](#quick-start) · [Model Providers](#model-providers) · [Web Search](#web-search) · [Admin Dashboard](#admin-dashboard) · [Clients](#connect-your-client) · [Integrations](#optional-integrations) · [Manage](#manage-your-installation)
+[Features](#features) · [Quick Start](#quick-start) · [Model Providers](#model-providers) · [Web Search](#web-search) · [Admin Dashboard](#admin-dashboard) · [Updates](#version--updates) · [Clients](#connect-your-client) · [Integrations](#optional-integrations) · [Manage](#manage-your-installation)
 
 </div>
 
@@ -55,6 +55,7 @@ Run your coding agents with free, paid, or local models. Choose and validate pro
 | **Observability** | Persistent local request and web-search analytics with consistent filters, range-aware rollups, provider/key health, latency, errors, known spend, export, and auto-refresh. |
 | **Editor integrations** | Claude Code and Codex in VS Code, or Claude Code through JetBrains ACP. |
 | **Messaging** | Optionally run Claude Code sessions through Discord or Telegram with voice-note transcription. |
+| **Version & updates** | The dashboard shows the running version, announces new releases, and installs them for you with checksum verification. |
 | **Security** | Optional token authentication for the local proxy. |
 
 Everything is configured through the same `.env` file (see [.env.example](.env.example)) and the Admin UI.
@@ -68,16 +69,18 @@ Everything is configured through the same `.env` file (see [.env.example](.env.e
 macOS/Linux:
 
 ```bash
-curl -fsSL "https://raw.githubusercontent.com/FiredMosquito831/free-claude-code/v4.13.0/scripts/install.sh" | sh
+curl -fsSL "https://raw.githubusercontent.com/FiredMosquito831/free-claude-code/v4.15.0/scripts/install.sh" | sh
 ```
 
 Windows PowerShell:
 
 ```powershell
-& ([scriptblock]::Create((irm "https://raw.githubusercontent.com/FiredMosquito831/free-claude-code/v4.13.0/scripts/install.ps1")))
+& ([scriptblock]::Create((irm "https://raw.githubusercontent.com/FiredMosquito831/free-claude-code/v4.15.0/scripts/install.ps1")))
 ```
 
-These commands are pinned to the verified `v4.13.0` fork release. Use the command published by a newer reviewed release when you choose to update. You can review the installers before running them: [install.sh](scripts/install.sh) and [install.ps1](scripts/install.ps1).
+Both commands are pinned to the verified `v4.15.0` release and refuse to install if the downloaded wheel's SHA-256 does not match the one baked into the script. They also install Claude Code, Codex, Pi, and a compatible `uv` if those are missing. You can review the installers before running them: [install.sh](scripts/install.sh) and [install.ps1](scripts/install.ps1).
+
+Already installed? You no longer need to re-run these by hand — the Admin UI tells you when a new release is out and can install it for you. See [Version & Updates](#version--updates).
 
 ### 2. Start The Server
 
@@ -272,7 +275,15 @@ Policies:
 | `least_used` | Healthy key with the fewest requests goes first. |
 | `failover` (alias `on_error`) | Stick to the first healthy key until it fails, then move to the next (default when multiple keys are set). |
 
-Health model: a key that fails is benched with tiered cooldowns (10s → 30s → 60s → 120s); three consecutive failures open the circuit until cooldown elapses, after which a single half-open probe is allowed through. Auth failures (401/403) trigger an escalating lockout (5 min → 1 h → 24 h) followed by a probe before full reuse. Rotation only happens for errors another key could fix (auth, rate limits, 5xx/overload, transport) — a plain 400 is not rotated. All of this is visible and manageable from **Admin UI → Providers → Manage keys**, which shows per-key state/usage and lets you reset keys, plus a **Test** button per provider.
+Each key gets its own upstream client and its own rate-limit window, so one key saturating or stalling never throttles the others.
+
+**Health model.** A key that fails is benched with tiered cooldowns (10s → 30s → 60s → 120s); three consecutive failures open the circuit until the cooldown elapses, after which a **single** half-open probe is allowed through — concurrent requests are routed to other keys rather than stampeding the recovering one. A successful probe restores the key; a failed probe re-benches it at the next tier. Auth failures (401/403) trigger an escalating lockout (5 min → 1 h → 24 h) on their own counter, so unrelated transient errors can't push a healthy key toward the long lockout.
+
+Rate limits (429) escalate the cooldown ladder but deliberately do **not** open the circuit — a throttled key isn't a broken one.
+
+**When rotation happens.** Only for errors another key could actually fix: authentication, rate limits, 5xx/overload, and transport failures. A plain 400 fails identically on every key and is not rotated. Failover happens before the first streamed chunk; once output has started, switching credentials would corrupt the response, so a mid-stream failure is recorded against the key but propagated to the client.
+
+All of this is visible and manageable from **Admin UI → Providers → Manage keys**, which shows per-key state and usage and lets you reset keys, plus a **Test** button per provider. For historical per-key request volume, error rate, tokens, and latency, see [Per-Key Attribution](#per-key-attribution).
 
 Web search provider keys share the same rotation engine — see [Web Search → Multi-key rotation](#multi-key-rotation-web-search-keys).
 
@@ -288,11 +299,21 @@ Open **Admin UI → Model Config → Reasoning** to choose how FCC handles clien
 
 You can instead select **Off**, **Low**, **Medium**, **High**, **X-High**, or **Max**. Fable, Opus, Sonnet, and Haiku each have the same choices plus **Inherit**, which uses the root policy. Providers with named effort receive those names; numeric-budget providers map **Low=512**, **Medium=1,024**, **High=2,048**, **X-High=4,096**, and **Max=8,192** reasoning tokens; boolean providers receive on or off. Unsupported controls safely remain provider-defined.
 
+<div align="center">
+  <img src="assets/admin-model-config.png" alt="Model configuration with tier routing and reasoning control" width="820">
+  <p><em>Model Config: the fallback <code>MODEL</code> picker, per-tier routing, and reasoning control.</em></p>
+</div>
+
 <a id="web-search"></a>
 
 ## Web Search
 
 Claude Code's `web_search` is an Anthropic **server tool**: normally Anthropic's servers execute the search and bill you for it. FCC fulfills that server tool at the proxy level instead — the client emits a `web_search` tool-use block, FCC runs the search against a provider you choose (or the keyless default), and streams the results back as a regular text block. No Anthropic search credits are used, and the whole flow works with any model provider.
+
+<div align="center">
+  <img src="assets/admin-websearch.png" alt="Web search provider configuration and analytics" width="820">
+  <p><em>Web Search view: route summary, provider cards, key health, and its own analytics.</em></p>
+</div>
 
 ### Search Providers
 
@@ -414,6 +435,12 @@ The Admin UI (`http://127.0.0.1:8082/admin`, local-only) is the control center f
 - **Web Search** — configured and last-observed route summaries, strict/fallback policy, provider cards, key health, advanced options, separate route/attempt analytics, and full captured input/output drill-down.
 - **Analytics** — the full model-request observability dashboard (see below).
 - **Messaging** — Discord/Telegram bot and voice-note settings.
+- **Version** — running version, update announcements, and one-click upgrades (see [Version & Updates](#version--updates)).
+
+<div align="center">
+  <img src="assets/admin-version.png" alt="Admin dashboard providers view with the version panel" width="820">
+  <p><em>Providers view. The version panel sits at the top; the running version is always visible in the sidebar.</em></p>
+</div>
 
 ### Request Analytics
 
@@ -426,6 +453,50 @@ REQUEST_LOG_CAPTURE_BODIES=true   # false stores only body lengths + SHA-256 has
 ```
 
 **Privacy note:** request bodies are stored locally on disk by default. They never leave your machine, but set `REQUEST_LOG_CAPTURE_BODIES=false` (or disable the log entirely) if you'd rather not persist conversation text.
+
+<div align="center">
+  <img src="assets/admin-analytics.png" alt="Request analytics overview with metric cards and charts" width="820">
+  <p><em>Analytics overview: metric cards, requests over time, and tokens by model — all obeying the same filter row.</em></p>
+</div>
+
+#### Per-Key Attribution
+
+Every request records **which credential served it**, so a multi-key pool is no longer a black box. The Analytics view adds a **Key** column to the request table, a **Key performance** panel, and a **Key** filter that composes with every other filter.
+
+Credentials are identified by a masked `first4…last4` label and their pool index. **The raw key is never written to the database, a log line, or any HTTP response.**
+
+<div align="center">
+  <img src="assets/admin-key-performance.png" alt="Provider and per-key performance breakdown tables" width="820">
+  <p><em>Per-key breakdown. Here a three-key NVIDIA NIM pool under <code>round_robin</code> has served 32 / 32 / 31 requests — an even spread. Rows logged before per-key tracking existed show as <code>(unknown)</code>.</em></p>
+</div>
+
+<div align="center">
+  <img src="assets/admin-requests.png" alt="Request table showing the key that served each request" width="820">
+  <p><em>The request table showing rotation in action: consecutive requests cycle across the three keys. Request and response bodies are not shown in the table — they live behind <strong>View</strong>.</em></p>
+</div>
+
+<a id="version--updates"></a>
+
+## Version & Updates
+
+The running version is always visible in the Admin UI sidebar. **Providers → Version** shows the current version, the latest published release, and when the check last ran.
+
+FCC checks the GitHub releases feed when the dashboard loads, caching the result for six hours so it never hammers the API. **Check for updates** forces a fresh check. If the machine is offline or GitHub is unreachable, the panel still shows your running version and notes that the check failed — it never blocks the dashboard.
+
+When a newer release exists, a banner announces it with a link to the release notes:
+
+<div align="center">
+  <img src="assets/admin-update-banner.png" alt="Update available banner announcing a new release" width="820">
+  <p><em>Update announcement. Dismissal is remembered per version, so hiding one release still surfaces the next.</em></p>
+</div>
+
+**Update now** performs the same steps as the install script: download the release wheel, verify its SHA-256 against the digest GitHub publishes, and install it with `uv`. A checksum mismatch aborts the install. Any extras you originally installed (such as voice support) are detected and preserved, so upgrading never silently drops a feature.
+
+**Upgrading does not restart the server.** A running process keeps serving the code it already loaded, so an upgrade can never drop an in-flight Claude Code stream. Once the install finishes you get a *restart required* banner; restart `fcc-server` whenever it suits you and the new version takes effect.
+
+If `uv` is not on `PATH`, the upgrade declines and tells you to re-run the install script instead. These endpoints (`/admin/api/version*`) are loopback-only, like the rest of the Admin API.
+
+Prefer the command line? Re-running the install command from [Quick Start](#install) does exactly the same thing.
 
 <a id="oauth-providers"></a>
 
@@ -606,32 +677,32 @@ macOS/Linux:
 
 ```bash
 # NVIDIA NIM transcription
-curl -fsSL "https://raw.githubusercontent.com/FiredMosquito831/free-claude-code/v4.13.0/scripts/install.sh" | sh -s -- --voice-nim
+curl -fsSL "https://raw.githubusercontent.com/FiredMosquito831/free-claude-code/v4.15.0/scripts/install.sh" | sh -s -- --voice-nim
 
 # Local Whisper on CPU or CUDA
-curl -fsSL "https://raw.githubusercontent.com/FiredMosquito831/free-claude-code/v4.13.0/scripts/install.sh" | sh -s -- --voice-local
+curl -fsSL "https://raw.githubusercontent.com/FiredMosquito831/free-claude-code/v4.15.0/scripts/install.sh" | sh -s -- --voice-local
 
 # Both backends
-curl -fsSL "https://raw.githubusercontent.com/FiredMosquito831/free-claude-code/v4.13.0/scripts/install.sh" | sh -s -- --voice-all
+curl -fsSL "https://raw.githubusercontent.com/FiredMosquito831/free-claude-code/v4.15.0/scripts/install.sh" | sh -s -- --voice-all
 
 # Local Whisper with the CUDA 13.0 PyTorch backend
-curl -fsSL "https://raw.githubusercontent.com/FiredMosquito831/free-claude-code/v4.13.0/scripts/install.sh" | sh -s -- --voice-local --torch-backend cu130
+curl -fsSL "https://raw.githubusercontent.com/FiredMosquito831/free-claude-code/v4.15.0/scripts/install.sh" | sh -s -- --voice-local --torch-backend cu130
 ```
 
 Windows PowerShell:
 
 ```powershell
 # NVIDIA NIM transcription
-& ([scriptblock]::Create((irm "https://raw.githubusercontent.com/FiredMosquito831/free-claude-code/v4.13.0/scripts/install.ps1"))) -VoiceNim
+& ([scriptblock]::Create((irm "https://raw.githubusercontent.com/FiredMosquito831/free-claude-code/v4.15.0/scripts/install.ps1"))) -VoiceNim
 
 # Local Whisper on CPU or CUDA
-& ([scriptblock]::Create((irm "https://raw.githubusercontent.com/FiredMosquito831/free-claude-code/v4.13.0/scripts/install.ps1"))) -VoiceLocal
+& ([scriptblock]::Create((irm "https://raw.githubusercontent.com/FiredMosquito831/free-claude-code/v4.15.0/scripts/install.ps1"))) -VoiceLocal
 
 # Both backends
-& ([scriptblock]::Create((irm "https://raw.githubusercontent.com/FiredMosquito831/free-claude-code/v4.13.0/scripts/install.ps1"))) -VoiceAll
+& ([scriptblock]::Create((irm "https://raw.githubusercontent.com/FiredMosquito831/free-claude-code/v4.15.0/scripts/install.ps1"))) -VoiceAll
 
 # Local Whisper with the CUDA 13.0 PyTorch backend
-& ([scriptblock]::Create((irm "https://raw.githubusercontent.com/FiredMosquito831/free-claude-code/v4.13.0/scripts/install.ps1"))) -VoiceLocal -TorchBackend cu130
+& ([scriptblock]::Create((irm "https://raw.githubusercontent.com/FiredMosquito831/free-claude-code/v4.15.0/scripts/install.ps1"))) -VoiceLocal -TorchBackend cu130
 ```
 
 Restart `fcc-server`. In **Admin UI → Messaging → Voice**, enable voice notes, select `cpu`, `cuda`, or `nvidia_nim`, and choose the Whisper model. Local gated models need `HUGGINGFACE_API_KEY`; NVIDIA NIM transcription needs `NVIDIA_NIM_API_KEY`.

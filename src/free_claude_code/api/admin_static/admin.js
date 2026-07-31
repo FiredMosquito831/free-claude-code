@@ -15,6 +15,8 @@ const state = {
   webSearchDetailReturnFocus: null,
   customProviders: [],
   editingCustomProviderId: null,
+  versionInfo: null,
+  versionUpgrading: false,
 };
 
 const MASKED_SECRET = "********";
@@ -129,6 +131,7 @@ async function load() {
   await refreshLocalStatus();
   updateDirtyState();
   showMessage("");
+  await loadVersionInfo();
 }
 
 function renderNav() {
@@ -2724,6 +2727,225 @@ byId("addCustomProviderButton").addEventListener("click", () =>
 );
 byId("cpCancelButton").addEventListener("click", closeCustomProviderForm);
 byId("customProviderForm").addEventListener("submit", submitCustomProviderForm);
+
+/* --------------------------------------------------------------------- */
+/* Version / self-update                                                 */
+/* --------------------------------------------------------------------- */
+
+function versionDismissKey(version) {
+  return `fcc-version-dismissed-${version}`;
+}
+
+function formatCheckedAt(epochSeconds) {
+  if (epochSeconds == null) return "Never checked";
+  return new Date(epochSeconds * 1000).toLocaleString();
+}
+
+async function loadVersionInfo() {
+  try {
+    state.versionInfo = await api("/admin/api/version");
+  } catch (error) {
+    state.versionInfo = { error: error.message };
+  }
+  renderVersionIndicator();
+  renderVersionBanners();
+  renderVersionPanel();
+}
+
+function renderVersionIndicator() {
+  const indicator = byId("versionIndicator");
+  if (!indicator) return;
+  const info = state.versionInfo;
+  indicator.innerHTML = "";
+  if (!info) return;
+  const label = document.createElement("span");
+  label.textContent = info.current ? `v${info.current}` : "version unknown";
+  indicator.appendChild(label);
+  if (info.update_available) {
+    const dot = document.createElement("span");
+    dot.className = "version-update-dot";
+    dot.title = info.latest ? `Update available: v${info.latest}` : "Update available";
+    indicator.appendChild(dot);
+  }
+}
+
+function renderVersionBanners() {
+  const container = byId("versionBanners");
+  if (!container) return;
+  container.innerHTML = "";
+  const info = state.versionInfo;
+  if (!info || info.error) return;
+
+  if (info.restart_required) {
+    const banner = document.createElement("div");
+    banner.className = "version-banner restart-required";
+    const body = document.createElement("div");
+    body.className = "version-banner-body";
+    const title = document.createElement("div");
+    title.className = "version-banner-title";
+    title.textContent = "Update installed — restart the server to apply";
+    const detail = document.createElement("div");
+    detail.className = "version-banner-detail";
+    detail.textContent = info.installed_version
+      ? `Installed v${info.installed_version}.`
+      : "The new version is installed.";
+    body.append(title, detail);
+    banner.appendChild(body);
+    container.appendChild(banner);
+    return;
+  }
+
+  if (!info.update_available || !info.latest) return;
+  if (localStorage.getItem(versionDismissKey(info.latest)) === "1") return;
+
+  const banner = document.createElement("div");
+  banner.className = "version-banner";
+  const body = document.createElement("div");
+  body.className = "version-banner-body";
+  const title = document.createElement("div");
+  title.className = "version-banner-title";
+  title.textContent = `Update available: v${info.latest}`;
+  const detail = document.createElement("div");
+  detail.className = "version-banner-detail";
+  if (info.release_url) {
+    const link = document.createElement("a");
+    link.href = info.release_url;
+    link.target = "_blank";
+    link.rel = "noopener noreferrer";
+    link.textContent = info.release_name || `v${info.latest}`;
+    detail.appendChild(link);
+  } else {
+    detail.textContent = info.release_name || `v${info.latest}`;
+  }
+  body.append(title, detail);
+
+  const actions = document.createElement("div");
+  actions.className = "version-banner-actions";
+  const updateButton = document.createElement("button");
+  updateButton.type = "button";
+  updateButton.className = "primary-button";
+  updateButton.textContent = "Update now";
+  updateButton.addEventListener("click", () => runVersionUpgrade(updateButton));
+  const dismissButton = document.createElement("button");
+  dismissButton.type = "button";
+  dismissButton.className = "ghost-button";
+  dismissButton.textContent = "Dismiss";
+  dismissButton.addEventListener("click", () => {
+    localStorage.setItem(versionDismissKey(info.latest), "1");
+    renderVersionBanners();
+  });
+  actions.append(updateButton, dismissButton);
+
+  banner.append(body, actions);
+  container.appendChild(banner);
+}
+
+function renderVersionPanel() {
+  const details = byId("versionDetails");
+  const checkButton = byId("versionCheckButton");
+  const updateButton = byId("versionUpdateButton");
+  if (!details || !checkButton || !updateButton) return;
+  const info = state.versionInfo;
+
+  details.innerHTML = "";
+  const entries = [
+    ["Current", info?.current ? `v${info.current}` : "—"],
+    ["Latest", info?.latest ? `v${info.latest}` : "—"],
+    ["Last checked", formatCheckedAt(info?.checked_at)],
+  ];
+  entries.forEach(([label, value]) => {
+    const dl = document.createElement("dl");
+    const dt = document.createElement("dt");
+    dt.textContent = label;
+    const dd = document.createElement("dd");
+    dd.textContent = value;
+    dl.append(dt, dd);
+    details.appendChild(dl);
+  });
+  if (info?.error) {
+    const note = document.createElement("p");
+    note.className = "version-error field-description";
+    note.textContent = `Could not check for updates: ${info.error}`;
+    details.appendChild(note);
+  }
+
+  if (!state.versionUpgrading) {
+    updateButton.disabled = !info?.update_available;
+    updateButton.textContent = "Update now";
+  }
+}
+
+async function checkForUpdates(button) {
+  const original = button.textContent;
+  button.disabled = true;
+  button.textContent = "Checking...";
+  try {
+    state.versionInfo = await api("/admin/api/version/check", {
+      method: "POST",
+      body: "{}",
+    });
+    renderVersionIndicator();
+    renderVersionBanners();
+    renderVersionPanel();
+    showMessage(
+      state.versionInfo.update_available
+        ? `Update available: v${state.versionInfo.latest}`
+        : "Already up to date",
+      "ok",
+    );
+  } catch (error) {
+    showMessage(`Could not check for updates: ${error.message}`, "error");
+  } finally {
+    button.disabled = false;
+    button.textContent = original;
+  }
+}
+
+async function runVersionUpgrade(button) {
+  if (state.versionUpgrading) return;
+  state.versionUpgrading = true;
+  const logEl = byId("versionUpgradeLog");
+  const updateButton = byId("versionUpdateButton");
+  [button, updateButton].forEach((candidate) => {
+    if (candidate) {
+      candidate.disabled = true;
+      candidate.textContent = "Updating... (this can take a few minutes)";
+    }
+  });
+  if (logEl) {
+    logEl.hidden = true;
+    logEl.textContent = "";
+  }
+  try {
+    const result = await api("/admin/api/version/upgrade", {
+      method: "POST",
+      body: "{}",
+    });
+    if (logEl && Array.isArray(result.log) && result.log.length) {
+      logEl.textContent = result.log.join("\n");
+      logEl.hidden = false;
+    }
+    if (result.ok) {
+      showMessage(result.message || "Update installed", "ok");
+    } else {
+      showMessage(result.message || "Update failed", "error");
+    }
+    await loadVersionInfo();
+  } catch (error) {
+    showMessage(`Update failed: ${error.message}`, "error");
+  } finally {
+    state.versionUpgrading = false;
+    if (button) button.textContent = "Update now";
+    renderVersionPanel();
+  }
+}
+
+byId("versionCheckButton").addEventListener("click", (event) =>
+  checkForUpdates(event.currentTarget),
+);
+byId("versionUpdateButton").addEventListener("click", (event) =>
+  runVersionUpgrade(event.currentTarget),
+);
 
 function downloadJson(filename, value) {
   const blob = new Blob([`${JSON.stringify(value, null, 2)}\n`], {

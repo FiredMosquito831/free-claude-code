@@ -13,6 +13,10 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from free_claude_code.application.model_metadata import ProviderModelRefreshResult
+from free_claude_code.application.release_updates import (
+    get_release_status,
+    perform_upgrade,
+)
 from free_claude_code.config.admin.manifest import FIELD_BY_KEY
 from free_claude_code.config.admin.persistence import validate_updates
 from free_claude_code.config.admin.sources import is_locked_source
@@ -805,3 +809,34 @@ async def clear_request_log(
     store = _request_log_store_or_none(settings)
     cleared = await asyncio.to_thread(store.clear) if store is not None else 0
     return {"cleared": cleared}
+
+
+@router.get("/admin/api/version")
+async def read_version(request: Request):
+    """Running version plus the latest published release, if reachable."""
+    require_loopback_admin(request)
+    status = await get_release_status()
+    return status.as_dict()
+
+
+@router.post("/admin/api/version/check")
+async def check_version(request: Request):
+    """Re-query the release feed, bypassing the cached result."""
+    require_loopback_admin(request)
+    status = await get_release_status(force=True)
+    return status.as_dict()
+
+
+@router.post("/admin/api/version/upgrade")
+async def upgrade_version(request: Request):
+    """Install the latest release. The running server is left untouched.
+
+    A live process keeps serving the code it already imported, so the response
+    reports that a restart is required rather than restarting mid-request and
+    dropping in-flight streams.
+    """
+    require_loopback_admin(request)
+    result = await perform_upgrade()
+    payload = result.as_dict()
+    payload["restart_required"] = result.ok
+    return payload
