@@ -492,3 +492,26 @@ def test_pending_upgrade_result_tolerates_missing_or_corrupt_file(
         "not json", encoding="utf-8"
     )
     assert release_updates.pending_upgrade_result() is None
+
+
+def test_deferred_helper_survives_native_stderr(tmp_path) -> None:
+    """uv writes progress to stderr; that must not kill the helper.
+
+    Under ``$ErrorActionPreference = 'Stop'`` a native command's stderr becomes
+    a terminating NativeCommandError, so the script died before installing
+    anything and never wrote its result file.
+    """
+
+    script = release_updates._deferred_helper_script(
+        uv_executable="uv",
+        command=["uv", "tool", "install", "--force", "pkg"],
+        result_path=tmp_path / "r.json",
+        stage_dir=tmp_path,
+    )
+    invoke = script.index("$output = &")
+    # The native call must run with Continue in effect, not Stop.
+    preference_before = script.rfind("$ErrorActionPreference = 'Continue'", 0, invoke)
+    assert preference_before != -1, "native call must drop back to Continue"
+    # Success is judged by exit code captured immediately after the call.
+    assert "$code = $LASTEXITCODE" in script
+    assert "$ok = $code -eq 0" in script

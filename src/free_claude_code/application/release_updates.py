@@ -357,11 +357,18 @@ if (Get-Process -Id $parent -ErrorAction SilentlyContinue) {{
 }}
 # Give Windows a moment to release the handles the exiting process held.
 Start-Sleep -Seconds 2
+# uv writes progress to stderr. Under ErrorActionPreference='Stop' a native
+# command's stderr becomes a *terminating* NativeCommandError, which would kill
+# this script before it installs anything, so drop back to Continue for the
+# call itself and judge the result by exit code alone.
+$ErrorActionPreference = 'Continue'
 $output = & {_powershell_literal(uv_executable)} {quoted_args} 2>&1 | Out-String
-$ok = $LASTEXITCODE -eq 0
+$code = $LASTEXITCODE
+$ErrorActionPreference = 'Stop'
+$ok = $code -eq 0
 $result = @{{
     ok = $ok
-    exit_code = $LASTEXITCODE
+    exit_code = $code
     message = if ($ok) {{ 'Deferred install completed.' }} else {{ 'Deferred install failed.' }}
     output = $output
 }}
