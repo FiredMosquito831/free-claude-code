@@ -314,6 +314,13 @@ class Settings(BaseSettings):
     websearch_digest_chars: int = Field(
         default=600, validation_alias="WEBSEARCH_DIGEST_CHARS"
     )
+    # Cap for the provider's extracted page text, which is far longer than a
+    # snippet and only present when an operator opts into it (EXA_CONTENTS,
+    # TAVILY_INCLUDE_RAW_CONTENT, FIRECRAWL_SCRAPE_FORMAT, ...). Separate from
+    # the snippet cap so turning content on is not trimmed back to snippet size.
+    websearch_digest_content_chars: int = Field(
+        default=2000, ge=0, validation_alias="WEBSEARCH_DIGEST_CONTENT_CHARS"
+    )
     websearch_digest_answer: bool = Field(
         default=True, validation_alias="WEBSEARCH_DIGEST_ANSWER"
     )

@@ -22,10 +22,15 @@ from free_claude_code.api.web_tools.outbound import (
     _web_search_response_items,
     _web_tool_client_error_summary,
 )
-from free_claude_code.api.web_tools.request import is_web_server_tool_request
+from free_claude_code.api.web_tools.request import (
+    WebSearchToolOptions,
+    is_web_server_tool_request,
+    web_search_tool_options,
+)
 from free_claude_code.api.web_tools.streaming import (
     _format_page_age,
     _search_summary,
+    _web_search_error_code,
     stream_web_server_tool_response,
 )
 from free_claude_code.application.errors import InvalidRequestError
@@ -52,6 +57,9 @@ from free_claude_code.core.websearch.models import (
 from free_claude_code.messaging.event_parser import parse_cli_event
 from free_claude_code.websearch.errors import (
     WebSearchConfigError,
+    WebSearchInvalidRequestError,
+    WebSearchQuotaError,
+    WebSearchRateLimitError,
     WebSearchUpstreamError,
 )
 from free_claude_code.websearch.registry import SearchOutcome, SearchRouteOutcome
@@ -381,7 +389,9 @@ async def test_run_web_fetch_excess_redirects_raises():
 
 @pytest.mark.asyncio
 async def test_streams_web_search_server_tool_result(monkeypatch):
-    async def fake_search(query: str, _settings: Settings) -> list[dict[str, str]]:
+    async def fake_search(
+        query: str, _settings: Settings, **_kwargs: object
+    ) -> list[dict[str, str]]:
         assert query == "DeepSeek V4 model release 2026"
         return [{"title": "DeepSeek V4 Released", "url": "https://example.com/v4"}]
 
@@ -494,7 +504,9 @@ async def test_disabled_web_search_streams_clear_error_without_outbound(monkeypa
 
 @pytest.mark.asyncio
 async def test_service_streams_forced_web_search_by_default(monkeypatch):
-    async def fake_search(_query: str, _settings: Settings) -> list[dict[str, str]]:
+    async def fake_search(
+        _query: str, _settings: Settings, **_kwargs: object
+    ) -> list[dict[str, str]]:
         return [{"title": "DeepSeek V4 Released", "url": "https://example.com/v4"}]
 
     monkeypatch.setattr(
@@ -528,7 +540,9 @@ async def test_service_streams_forced_web_search_by_default(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_service_aggregates_forced_web_search_when_stream_false(monkeypatch):
-    async def fake_search(_query: str, _settings: Settings) -> list[dict[str, str]]:
+    async def fake_search(
+        _query: str, _settings: Settings, **_kwargs: object
+    ) -> list[dict[str, str]]:
         return [{"title": "DeepSeek V4 Released", "url": "https://example.com/v4"}]
 
     monkeypatch.setattr(
@@ -876,6 +890,7 @@ async def test_run_web_search_routes_through_configured_provider(monkeypatch):
             "title": "One",
             "url": "https://example.com/0",
             "snippet": "",
+            "content": "",
             "published": "",
             "answer": "",
             "provider": "exa",
@@ -884,6 +899,7 @@ async def test_run_web_search_routes_through_configured_provider(monkeypatch):
             "title": "Two",
             "url": "https://example.com/1",
             "snippet": "",
+            "content": "",
             "published": "",
             "answer": "",
             "provider": "exa",
@@ -941,6 +957,7 @@ async def test_run_web_search_falls_back_to_ddgs_after_provider_error(monkeypatc
             "title": "Fallback",
             "url": "https://example.com/0",
             "snippet": "",
+            "content": "",
             "published": "",
             "answer": "",
             "provider": "exa",
@@ -1406,6 +1423,7 @@ async def test_run_web_search_builds_settings_when_not_passed(monkeypatch):
             "title": "Env",
             "url": "https://example.com/0",
             "snippet": "",
+            "content": "",
             "published": "",
             "answer": "",
             "provider": "exa",
@@ -1471,6 +1489,7 @@ def test_web_search_response_items_pass_richness_through() -> None:
             "title": "Alpha",
             "url": "https://example.com/a",
             "snippet": "Alpha snippet",
+            "content": "",
             "published": "2026-01-02",
             "answer": "Provider answer lead.",
             "provider": "tavily",
@@ -1479,6 +1498,7 @@ def test_web_search_response_items_pass_richness_through() -> None:
             "title": "Beta",
             "url": "https://example.com/b",
             "snippet": "",
+            "content": "",
             "published": "",
             "answer": "Provider answer lead.",
             "provider": "tavily",
@@ -1507,6 +1527,7 @@ class TestSearchSummaryDigest:
                     "title": "Alpha",
                     "url": "https://example.com/a",
                     "snippet": "Alpha snippet",
+                    "content": "",
                     "published": "2026-01-02",
                     "answer": "Provider answer lead.",
                 },
@@ -1514,6 +1535,7 @@ class TestSearchSummaryDigest:
                     "title": "Beta",
                     "url": "https://example.com/b",
                     "snippet": "Beta snippet",
+                    "content": "",
                     "published": "",
                     "answer": "Provider answer lead.",
                 },
@@ -1536,6 +1558,7 @@ class TestSearchSummaryDigest:
                     "title": "Alpha",
                     "url": "https://example.com/a",
                     "snippet": "S",
+                    "content": "",
                     "published": "",
                     "answer": "Provider answer lead.",
                 }
@@ -1554,6 +1577,7 @@ class TestSearchSummaryDigest:
                     "title": "Alpha",
                     "url": "https://example.com/a",
                     "snippet": "x" * 100,
+                    "content": "",
                     "published": "",
                     "answer": "",
                 }
@@ -1599,12 +1623,15 @@ class TestSearchSummaryDigest:
 
 @pytest.mark.asyncio
 async def test_stream_emits_page_age_and_rich_digest(monkeypatch):
-    async def fake_search(_query: str, _settings: Settings) -> list[dict[str, str]]:
+    async def fake_search(
+        _query: str, _settings: Settings, **_kwargs: object
+    ) -> list[dict[str, str]]:
         return [
             {
                 "title": "Alpha",
                 "url": "https://example.com/a",
                 "snippet": "Alpha snippet",
+                "content": "",
                 "published": "2026-01-02",
                 "answer": "Provider answer lead.",
                 "provider": "tavily",
@@ -1613,6 +1640,7 @@ async def test_stream_emits_page_age_and_rich_digest(monkeypatch):
                 "title": "Beta",
                 "url": "https://example.com/b",
                 "snippet": "",
+                "content": "",
                 "published": "",
                 "answer": "Provider answer lead.",
                 "provider": "tavily",
@@ -1664,12 +1692,15 @@ async def test_stream_emits_page_age_and_rich_digest(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_stream_digest_honors_chars_and_answer_env(monkeypatch):
-    async def fake_search(_query: str, _settings: Settings) -> list[dict[str, str]]:
+    async def fake_search(
+        _query: str, _settings: Settings, **_kwargs: object
+    ) -> list[dict[str, str]]:
         return [
             {
                 "title": "Alpha",
                 "url": "https://example.com/a",
                 "snippet": "y" * 100,
+                "content": "",
                 "published": "",
                 "answer": "Provider answer lead.",
                 "provider": "tavily",
@@ -1704,3 +1735,154 @@ async def test_stream_digest_honors_chars_and_answer_env(monkeypatch):
     assert "Provider answer lead." not in text
     assert "y" * 10 in text
     assert "y" * 11 not in text
+
+
+def _content_response() -> WebSearchResponse:
+    """A provider that returns extracted page text alongside the snippet.
+
+    Exa (``EXA_CONTENTS``), Tavily (``TAVILY_INCLUDE_RAW_CONTENT``), Firecrawl,
+    Jina, Brave and Parallel all populate ``content`` when configured to.
+    """
+
+    return WebSearchResponse(
+        provider="exa",
+        query="q",
+        results=(
+            WebSearchResultItem(
+                title="Alpha",
+                url="https://example.com/a",
+                snippet="short snippet",
+                content="Full extracted page text that the operator paid to retrieve.",
+                published=None,
+            ),
+        ),
+        key_index=0,
+        cost_usd=None,
+    )
+
+
+def test_web_search_response_items_forward_extracted_content() -> None:
+    """``content`` must survive the hop into the digest.
+
+    Seven adapters populate it and the digest already reads it, but it was
+    never copied across -- so enabling the paid content options changed
+    nothing the model could see.
+    """
+
+    (item,) = _web_search_response_items(_content_response())
+    assert item["content"] == (
+        "Full extracted page text that the operator paid to retrieve."
+    )
+
+
+def test_search_summary_prefers_extracted_content_over_snippet() -> None:
+    settings = Settings.model_validate({"WEBSEARCH_DIGEST_CONTENT_CHARS": 200})
+    summary = _search_summary(
+        "q", _web_search_response_items(_content_response()), settings
+    )
+    assert "Full extracted page text" in summary
+
+
+class TestWebSearchToolOptions:
+    """Anthropic declares search parameters on the tool, not the tool call."""
+
+    def _request(self, tool_extra: dict[str, Any]) -> MessagesRequest:
+        return MessagesRequest.model_validate(
+            {
+                "model": "m",
+                "max_tokens": 64,
+                "messages": [{"role": "user", "content": "query: python 3.14"}],
+                "tools": [
+                    {"type": "web_search_20250305", "name": "web_search", **tool_extra}
+                ],
+                "tool_choice": {"type": "tool", "name": "web_search"},
+            }
+        )
+
+    def test_reads_allowed_domains_and_max_uses(self) -> None:
+        options = web_search_tool_options(
+            self._request(
+                {
+                    "allowed_domains": ["docs.python.org", " peps.python.org "],
+                    "max_uses": 3,
+                }
+            )
+        )
+        assert options.allowed_domains == ("docs.python.org", "peps.python.org")
+        assert options.blocked_domains == ()
+        assert options.max_uses == 3
+
+    def test_reads_blocked_domains(self) -> None:
+        options = web_search_tool_options(
+            self._request({"blocked_domains": ["spam.example"]})
+        )
+        assert options.blocked_domains == ("spam.example",)
+        assert options.allowed_domains == ()
+
+    def test_allow_list_wins_when_a_client_sends_both(self) -> None:
+        """Anthropic rejects both; honour the allow list rather than intersecting."""
+
+        options = web_search_tool_options(
+            self._request(
+                {
+                    "allowed_domains": ["good.example"],
+                    "blocked_domains": ["bad.example"],
+                }
+            )
+        )
+        assert options.allowed_domains == ("good.example",)
+        assert options.blocked_domains == ()
+
+    def test_absent_parameters_yield_empty_options(self) -> None:
+        options = web_search_tool_options(self._request({}))
+        assert options == WebSearchToolOptions()
+
+
+class TestWebSearchErrorCodes:
+    """Only ``unavailable`` was ever emitted; clients act on the distinction."""
+
+    @pytest.mark.parametrize(
+        ("error", "expected"),
+        [
+            (WebSearchRateLimitError("exa", "slow down"), "too_many_requests"),
+            (WebSearchQuotaError("exa", "plan exhausted"), "too_many_requests"),
+            (WebSearchInvalidRequestError("exa", "bad query"), "invalid_tool_input"),
+            (WebSearchUpstreamError("exa", "boom"), "unavailable"),
+            (RuntimeError("unexpected"), "unavailable"),
+        ],
+    )
+    def test_error_maps_to_documented_code(self, error, expected) -> None:
+        assert _web_search_error_code(error) == expected
+
+
+@pytest.mark.asyncio
+async def test_run_web_search_forwards_domain_filters_to_provider(monkeypatch):
+    """The registry and every adapter already accept these; nothing sent them.
+
+    ``SUPPORTS_DOMAINS`` was effectively dead in production because the API
+    layer never read the filters off the client's tool definition.
+    """
+
+    settings = Settings.model_validate({"EXA_API_KEY": "k1-aaaa1111bbbb"})
+    search_with_logging = AsyncMock(return_value=_web_search_response("One"))
+    monkeypatch.setattr(
+        "free_claude_code.api.web_tools.outbound.runtime_provider",
+        AsyncMock(return_value=MagicMock()),
+    )
+    monkeypatch.setattr(
+        "free_claude_code.api.web_tools.outbound.search_with_logging",
+        search_with_logging,
+    )
+
+    await _run_web_search(
+        "test query",
+        settings,
+        allowed_domains=("docs.python.org",),
+        blocked_domains=(),
+    )
+
+    await_args = search_with_logging.await_args
+    assert await_args is not None
+    kwargs = await_args.kwargs
+    assert kwargs["allowed_domains"] == ("docs.python.org",)
+    assert kwargs["blocked_domains"] == ()
