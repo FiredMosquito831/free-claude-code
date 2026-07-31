@@ -916,3 +916,21 @@ def test_installers_define_every_helper_they_call() -> None:
     assert ps_defined >= _POWERSHELL_HELPER_NAMES, (
         f"install.ps1 is missing helpers: {_POWERSHELL_HELPER_NAMES - ps_defined}"
     )
+
+
+def test_install_ps1_does_not_rely_on_script_scope_for_release_state() -> None:
+    """The published command runs this file as a scriptblock, not a file.
+
+    Under `irm ... | iex` a function's `$script:` writes are not visible to the
+    rest of the script, so resolved release state must be returned and passed
+    explicitly. This failed only when actually run: the file still parsed, and
+    -File execution worked.
+    """
+    powershell = (_repo_root() / "scripts" / "install.ps1").read_text(encoding="utf-8")
+
+    assert "$script:FccVersion" not in powershell
+    assert "$script:FccWheelUrl" not in powershell
+    assert "$script:FccWheelName" not in powershell
+    assert "$script:FccWheelSha256" not in powershell
+    assert "return [pscustomobject]@{" in powershell
+    assert "Get-VerifiedReleaseWheel -Release" in powershell

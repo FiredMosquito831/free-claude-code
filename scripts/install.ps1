@@ -20,12 +20,6 @@ $PythonVersion = "3.14.0"
 $MinUvVersion = "0.11.0"
 $UvInstallUrl = "https://astral.sh/uv/install.ps1"
 
-# Resolved from the release feed at run time (or from -Version).
-$FccVersion = ""
-$FccWheelName = ""
-$FccWheelUrl = ""
-$FccWheelSha256 = ""
-
 function Show-Usage {
     @"
 Usage: install.ps1 [options]
@@ -391,7 +385,8 @@ function Ensure-Uv {
 
 function Resolve-Release {
     if ($Version) {
-        $script:FccVersion = $Version -replace '^v', ''
+        $resolvedVersion = $Version -replace '^v', ''
+        $resolvedSha256 = ""
     }
     else {
         # A GET that changes nothing, so it also runs during -DryRun and can
@@ -405,26 +400,37 @@ function Resolve-Release {
         catch {
             throw "Could not reach the release feed to find the latest version: $($_.Exception.Message)"
         }
-        $script:FccVersion = ([string] $release.tag_name) -replace '^v', ''
-        if ([string]::IsNullOrWhiteSpace($script:FccVersion)) {
+        $resolvedVersion = ([string] $release.tag_name) -replace '^v', ''
+        if ([string]::IsNullOrWhiteSpace($resolvedVersion)) {
             throw "Could not read the latest release version from the release feed."
         }
+        $resolvedSha256 = ""
         # GitHub publishes a sha256 digest per asset, so the download is still
         # verified even though no checksum is pinned in this script.
         $wheelAsset = @($release.assets | Where-Object { $_.name -like "*.whl" })
         if ($wheelAsset.Count -gt 0 -and $wheelAsset[0].digest) {
-            $script:FccWheelSha256 = ([string] $wheelAsset[0].digest) -replace '^sha256:', ''
+            $resolvedSha256 = ([string] $wheelAsset[0].digest) -replace '^sha256:', ''
         }
     }
-    $script:FccWheelName = "free_claude_code-$($script:FccVersion)-py3-none-any.whl"
-    $script:FccWheelUrl = "https://github.com/$FccRepo/releases/download/v$($script:FccVersion)/$($script:FccWheelName)"
+    $wheelName = "free_claude_code-$resolvedVersion-py3-none-any.whl"
+    # Returned rather than stored in script scope: when this file is run as a
+    # scriptblock (the published `irm | iex` form) a function's `$script:`
+    # writes are not visible to the rest of the script.
+    return [pscustomobject]@{
+        Version   = $resolvedVersion
+        WheelName = $wheelName
+        WheelUrl  = "https://github.com/$FccRepo/releases/download/v$resolvedVersion/$wheelName"
+        Sha256    = $resolvedSha256
+    }
 }
 
 function Get-VerifiedReleaseWheel {
+    param([Parameter(Mandatory = $true)] $Release)
+
     if ($DryRun) {
-        Write-Host "+ irm $FccWheelUrl -OutFile <temporary-wheel>"
-        if ($FccWheelSha256) {
-            Write-Host "+ verify SHA-256 $FccWheelSha256 for <temporary-wheel>"
+        Write-Host "+ irm $($Release.WheelUrl) -OutFile <temporary-wheel>"
+        if ($($Release.Sha256)) {
+            Write-Host "+ verify SHA-256 $($Release.Sha256) for <temporary-wheel>"
         }
         else {
             Write-Host "+ verify the SHA-256 published for this release"
@@ -435,11 +441,11 @@ function Get-VerifiedReleaseWheel {
     $temporaryDirectory = Join-Path (
         [IO.Path]::GetTempPath()
     ) ("fcc-wheel-" + [guid]::NewGuid().ToString("N"))
-    $wheelPath = Join-Path $temporaryDirectory $FccWheelName
+    $wheelPath = Join-Path $temporaryDirectory $($Release.WheelName)
     try {
         New-Item -ItemType Directory -Path $temporaryDirectory | Out-Null
-        Write-Host "+ irm $FccWheelUrl -OutFile $(Format-Argument $wheelPath)"
-        Invoke-RestMethod -Uri $FccWheelUrl -OutFile $wheelPath -ErrorAction Stop
+        Write-Host "+ irm $($Release.WheelUrl) -OutFile $(Format-Argument $wheelPath)"
+        Invoke-RestMethod -Uri $($Release.WheelUrl) -OutFile $wheelPath -ErrorAction Stop
         if (
             (-not (Test-Path -LiteralPath $wheelPath -PathType Leaf)) -or
             ((Get-Item -LiteralPath $wheelPath).Length -eq 0)
@@ -448,16 +454,16 @@ function Get-VerifiedReleaseWheel {
         }
 
         $actualSha256 = (Get-FileHash -LiteralPath $wheelPath -Algorithm SHA256).Hash
-        if ($FccWheelSha256) {
-            if ($actualSha256 -ne $FccWheelSha256) {
+        if ($($Release.Sha256)) {
+            if ($actualSha256 -ne $($Release.Sha256)) {
                 throw "FCC release wheel checksum mismatch; refusing to install."
             }
-            Write-Host "Verified FCC v$FccVersion release wheel SHA-256."
+            Write-Host "Verified FCC v$($Release.Version) release wheel SHA-256."
         }
         else {
             # Only reachable with -Version, where the release feed was not read
             # and no published digest is available to compare against.
-            Write-Host "FCC v$FccVersion release wheel SHA-256: $actualSha256"
+            Write-Host "FCC v$($Release.Version) release wheel SHA-256: $actualSha256"
         }
         return $wheelPath
     }
@@ -491,8 +497,8 @@ function Get-PackageSpec {
 }
 
 function Install-FreeClaudeCode {
-    Resolve-Release
-    $wheelPath = Get-VerifiedReleaseWheel
+    $release = Resolve-Release
+    $wheelPath = Get-VerifiedReleaseWheel -Release $release
     $packageUrl = if ($DryRun) {
         "file:///<verified-release-wheel>"
     }
@@ -530,9 +536,12 @@ function Install-FreeClaudeCode {
             Remove-Item -LiteralPath (Split-Path -Parent $wheelPath) -Recurse -Force -ErrorAction SilentlyContinue
         }
     }
+    return $release.Version
 }
 
 function Configure-AndConfirmFreeClaudeCode {
+    param([Parameter(Mandatory = $true)] [string] $ExpectedVersion)
+
     if ($DryRun) {
         Write-Host "+ uv tool update-shell"
         Write-Host "+ uv tool dir --bin"
@@ -573,8 +582,8 @@ function Configure-AndConfirmFreeClaudeCode {
     }
 
     $installedVersion = Invoke-NativeCapture -FilePath $installedCommands["fcc-server"] -Arguments @("--version")
-    if ($installedVersion -ne "free-claude-code $FccVersion") {
-        throw "Expected free-claude-code $FccVersion; found: $installedVersion"
+    if ($installedVersion -ne "free-claude-code $ExpectedVersion") {
+        throw "Expected free-claude-code $ExpectedVersion; found: $installedVersion"
     }
 }
 
@@ -598,17 +607,17 @@ Write-Step "Ensuring uv $MinUvVersion or newer is installed"
 Ensure-Uv
 
 Write-Step "Installing or updating Free Claude Code"
-Install-FreeClaudeCode
+$InstalledVersion = Install-FreeClaudeCode
 
 Write-Step "Configuring PATH and verifying Free Claude Code"
-Configure-AndConfirmFreeClaudeCode
+Configure-AndConfirmFreeClaudeCode -ExpectedVersion $InstalledVersion
 
 Write-Host ""
 if ($DryRun) {
     Write-Host "Dry run complete. No changes were made."
 }
 else {
-    Write-Host "Free Claude Code $FccVersion is installed and verified."
+    Write-Host "Free Claude Code $InstalledVersion is installed and verified."
     Write-Host "Start the proxy with: fcc-server"
     Write-Host ""
     Write-Host "If you use Claude Code, Codex, or Pi, launch them through the proxy"
