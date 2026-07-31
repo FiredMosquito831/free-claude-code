@@ -76,7 +76,7 @@ Everything is configured through the same `.env` file (see [.env.example](.env.e
 Open **Windows PowerShell** (no admin rights needed) and run:
 
 ```powershell
-& ([scriptblock]::Create((irm "https://raw.githubusercontent.com/FiredMosquito831/free-claude-code/v4.17.0/scripts/install.ps1")))
+& ([scriptblock]::Create((irm "https://raw.githubusercontent.com/FiredMosquito831/free-claude-code/main/scripts/install.ps1")))
 ```
 
 If PowerShell blocks the script, run it for this session only:
@@ -93,7 +93,7 @@ Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 Open your shell (in WSL, open the **Ubuntu** terminal — not PowerShell) and run:
 
 ```bash
-curl -fsSL "https://raw.githubusercontent.com/FiredMosquito831/free-claude-code/v4.17.0/scripts/install.sh" | sh
+curl -fsSL "https://raw.githubusercontent.com/FiredMosquito831/free-claude-code/main/scripts/install.sh" | sh
 ```
 
 </details>
@@ -109,22 +109,15 @@ fcc-server --version
 #### What the installer actually does
 
 1. Installs `uv` (the Python tool runner) if it's missing or too old.
-2. Downloads the Free Claude Code wheel for the pinned release and **verifies its SHA-256** — a mismatch aborts the install rather than running unverified code.
+2. Looks up the **latest** release, downloads its wheel, and **verifies the SHA-256 that GitHub publishes for that asset** — a mismatch aborts rather than running unverified code.
 3. Installs Free Claude Code and puts `fcc-server`, `fcc-claude`, `fcc-codex`, and `fcc-pi` on your `PATH`.
-4. **Then** installs the Claude Code, Codex, and Pi CLIs if they're missing.
 
-Step 4 is last on purpose. Those three are separate third-party tools and **Free Claude Code does not need any of them to run**. If one fails to install — no `npm` for Pi, a network hiccup, an unusual `PATH` — you get a warning like:
+That's all it does. **It does not install Claude Code, Codex, or Pi** — those are separate third-party tools, and Free Claude Code doesn't need any of them to run. Install whichever you actually use, yourself. The `fcc-*` launchers just point an agent you already have at the proxy.
 
-```text
-warning: Pi could not be installed. Free Claude Code does not need it; continuing.
-```
-
-…and the install still finishes successfully. The summary at the end lists anything that was skipped.
-
-To skip the coding agents entirely (useful if you already have them, or on a locked-down machine):
+The command always installs the **newest** release, so re-running it is how you update from the command line. To install a specific release instead:
 
 ```bash
-sh install.sh --skip-agents        # PowerShell: -SkipAgents
+sh install.sh --version 4.16.0      # PowerShell: -Version 4.16.0
 ```
 
 Want to see what it would do without changing anything? Add `--dry-run` (PowerShell: `-DryRun`).
@@ -202,8 +195,8 @@ fcc-codex exec "hello"
 | Symptom | Cause and fix |
 | --- | --- |
 | `fcc-server: command not found` right after installing | Your shell's `PATH` is stale. **Close and reopen the terminal.** If it persists, check that `~/.local/bin` (Windows: `%USERPROFILE%\.local\bin`) is on `PATH`. |
-| The install stopped partway with an error about `claude`, `codex`, or `pi` | You're on a release older than v4.16.0, where a failing coding agent aborted the whole install. Re-run with the current command above — those failures are now warnings. |
-| `Pi could not be installed` | Pi installs through `npm`. Either install Node.js/npm and re-run, or ignore it — nothing else needs Pi. Use `--skip-agents` to stop trying. |
+| The install stopped partway with an error about `claude`, `codex`, or `pi` | An old installer tried to install those for you and aborted when one failed. The current installer doesn't touch them at all — just re-run the command above. |
+| I want Claude Code / Codex / Pi installed too | The installer no longer installs them. Install each from its own official installer; then `fcc-claude`, `fcc-codex`, and `fcc-pi` will launch them through the proxy. |
 | `FCC release wheel checksum mismatch; refusing to install` | The download was corrupted or incomplete. Re-run the command. This check is deliberate: it will not install a wheel it can't verify. |
 | PowerShell refuses to run the script | `Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass`, then re-run. This only affects the current window. |
 | Admin UI won't open, or settings don't seem to apply | You probably installed in **both** PowerShell and WSL and are editing one config while the server reads the other. Run `fcc-server --version` in each and pick one environment. |
@@ -240,21 +233,36 @@ Notes:
 
 The desktop app routes its **Code tab** through the same `~/.claude/settings.json` above, but it also has a native gateway setting (no file editing). Menu labels vary slightly by app version — the current documented path is:
 
-1. **Enable Developer Mode**: open **Help → Troubleshooting → Enable Developer Mode**. The app restarts with a new **Developer** menu/tab. (On older builds: **Settings → enable Developer mode**, which exposes **Settings → Developer** instead.)
-2. Open **Developer → Configure Third-Party Inference** and set:
-   - **Inference provider**: `Gateway`
-   - **Gateway base URL**: `http://127.0.0.1:8082`
-   - **Auth scheme**: `bearer`
-   - **Gateway API key**: `freecc`
-3. Press **OK** / save, then **restart the app**.
+**1. Enable Developer Mode.** Open **Help → Troubleshooting → Enable Developer Mode**. The app restarts with a **Developer** menu. (On older builds: **Settings → enable Developer mode**, which exposes **Settings → Developer** instead.)
 
-After connecting, the app auto-discovers models from FCC's `/v1/models` — the **initial warning dialog can be safely ignored**; the model picker fills in once discovery completes. One limitation: with a gateway active, the desktop app runs **local sessions only** (no Anthropic-hosted cloud environments).
+**2. Open Developer → Configure Third-Party Inference…**
 
-Visual walkthroughs from other gateway tutorials (same dialogs, different URLs):
+<div align="center">
+  <img src="assets/claude-desktop-developer-menu.png" alt="Claude Desktop Developer menu with Configure Third-Party Inference highlighted" width="760">
+</div>
 
-- [Bifrost docs — Claude Desktop](https://docs.getbifrost.ai/cli-agents/claude-desktop): [Developer tab → Inference provider = Gateway](https://kimi-web-img.moonshot.cn/prod-data/online-image/search-upload/4befc03b3922a39e8d1f6b486e4164ce.png) · [Gateway fields (base URL / auth scheme / key)](https://kimi-web-img.moonshot.cn/prod-data/online-image/search-upload/127dede83b3b9a57e8cdcd2eeb0c7ec9.png)
-- [Merge docs — Claude Code via Gateway](https://docs.merge.dev/merge-gateway/features/use-in-your-ide/claude-code) (Developer mode → add endpoint → add API key)
-- [CodeGateway — Claude Desktop Developer Mode custom endpoint](https://www.codegateway.dev/en/blog/claude-desktop-developer-mode-api-proxy) (older-build flow via `claude_desktop_config.json`)
+**3. Fill in the Connection section**, then click **Apply Changes**:
+
+| Field | Value |
+| --- | --- |
+| **Connection** | `Gateway` |
+| **Gateway base URL** | `http://127.0.0.1:8082` |
+| **Gateway API key** | `freecc` |
+| **Gateway auth scheme** | `bearer` |
+| **Credential kind** | `Static API key` |
+| **Model discovery** | on |
+
+<div align="center">
+  <img src="assets/claude-desktop-gateway-config.png" alt="Claude Desktop third-party inference settings filled in for Free Claude Code" width="760">
+</div>
+
+Use the port from your server's startup log if it isn't `8082`, and match the API key to `AUTH_TOKEN` if you changed it from the default `freecc`.
+
+**4. Restart the app.**
+
+**Test connection** and **Test model discovery** in that dialog both hit your running FCC server, so use them to confirm the setup before restarting — the server must be running for either to succeed.
+
+With **Model discovery** on, the app auto-populates its picker from FCC's `/v1/models` at launch; you can leave **Model list** empty. The **initial warning dialog can be safely ignored** — the picker fills in once discovery completes. One limitation: with a gateway active, the desktop app runs **local sessions only** (no Anthropic-hosted cloud environments).
 
 <a id="model-providers"></a>
 
@@ -355,14 +363,7 @@ Rate limits (429) escalate the cooldown ladder but deliberately do **not** open 
 
 **Provider-declared backoff.** On a 429, FCC reads the upstream's own `Retry-After`, `retry-after-ms`, and `X-RateLimit-Reset-*` headers (all the formats providers actually ship, including `6m0s` and `250ms`) and waits exactly that long, capped at an hour. Only when a provider says nothing does it fall back to a fixed minute.
 
-**Daily budgets.** Free tiers usually cap requests per *day*, and a daily cap resets at a fixed wall-clock instant rather than N seconds after a failure — something cooldown timers cannot express. Set a per-key budget and, when the provider doesn't reset at UTC midnight, the offset:
-
-```bash
-NVIDIA_NIM_API_KEY_DAILY_LIMIT=1000
-GEMINI_API_KEY_QUOTA_RESET_UTC_OFFSET=-8   # Gemini resets at Pacific midnight
-```
-
-Counts are in-memory, so a restart forgets the day's usage. That is a deliberate trade: the counter exists to avoid wasting requests, not to enforce billing, and persisting it would put a write on every request path.
+**No invented ceilings.** FCC never caps a key at a number it made up. Every limit it applies comes from the provider's own response — the reset window on a 429, the status on a rejection. Providers change their limits without notice, so a hardcoded budget is wrong the moment it ships; reading what the upstream actually reports stays right.
 
 **When rotation happens.** Only for errors another key could actually fix: authentication, rate limits, 5xx/overload, and transport failures. A plain 400 fails identically on every key and is not rotated. Failover happens before the first streamed chunk; once output has started, switching credentials would corrupt the response, so a mid-stream failure is recorded against the key but propagated to the client.
 
@@ -760,32 +761,32 @@ macOS/Linux:
 
 ```bash
 # NVIDIA NIM transcription
-curl -fsSL "https://raw.githubusercontent.com/FiredMosquito831/free-claude-code/v4.17.0/scripts/install.sh" | sh -s -- --voice-nim
+curl -fsSL "https://raw.githubusercontent.com/FiredMosquito831/free-claude-code/main/scripts/install.sh" | sh -s -- --voice-nim
 
 # Local Whisper on CPU or CUDA
-curl -fsSL "https://raw.githubusercontent.com/FiredMosquito831/free-claude-code/v4.17.0/scripts/install.sh" | sh -s -- --voice-local
+curl -fsSL "https://raw.githubusercontent.com/FiredMosquito831/free-claude-code/main/scripts/install.sh" | sh -s -- --voice-local
 
 # Both backends
-curl -fsSL "https://raw.githubusercontent.com/FiredMosquito831/free-claude-code/v4.17.0/scripts/install.sh" | sh -s -- --voice-all
+curl -fsSL "https://raw.githubusercontent.com/FiredMosquito831/free-claude-code/main/scripts/install.sh" | sh -s -- --voice-all
 
 # Local Whisper with the CUDA 13.0 PyTorch backend
-curl -fsSL "https://raw.githubusercontent.com/FiredMosquito831/free-claude-code/v4.17.0/scripts/install.sh" | sh -s -- --voice-local --torch-backend cu130
+curl -fsSL "https://raw.githubusercontent.com/FiredMosquito831/free-claude-code/main/scripts/install.sh" | sh -s -- --voice-local --torch-backend cu130
 ```
 
 Windows PowerShell:
 
 ```powershell
 # NVIDIA NIM transcription
-& ([scriptblock]::Create((irm "https://raw.githubusercontent.com/FiredMosquito831/free-claude-code/v4.17.0/scripts/install.ps1"))) -VoiceNim
+& ([scriptblock]::Create((irm "https://raw.githubusercontent.com/FiredMosquito831/free-claude-code/main/scripts/install.ps1"))) -VoiceNim
 
 # Local Whisper on CPU or CUDA
-& ([scriptblock]::Create((irm "https://raw.githubusercontent.com/FiredMosquito831/free-claude-code/v4.17.0/scripts/install.ps1"))) -VoiceLocal
+& ([scriptblock]::Create((irm "https://raw.githubusercontent.com/FiredMosquito831/free-claude-code/main/scripts/install.ps1"))) -VoiceLocal
 
 # Both backends
-& ([scriptblock]::Create((irm "https://raw.githubusercontent.com/FiredMosquito831/free-claude-code/v4.17.0/scripts/install.ps1"))) -VoiceAll
+& ([scriptblock]::Create((irm "https://raw.githubusercontent.com/FiredMosquito831/free-claude-code/main/scripts/install.ps1"))) -VoiceAll
 
 # Local Whisper with the CUDA 13.0 PyTorch backend
-& ([scriptblock]::Create((irm "https://raw.githubusercontent.com/FiredMosquito831/free-claude-code/v4.17.0/scripts/install.ps1"))) -VoiceLocal -TorchBackend cu130
+& ([scriptblock]::Create((irm "https://raw.githubusercontent.com/FiredMosquito831/free-claude-code/main/scripts/install.ps1"))) -VoiceLocal -TorchBackend cu130
 ```
 
 Restart `fcc-server`. In **Admin UI → Messaging → Voice**, enable voice notes, select `cpu`, `cuda`, or `nvidia_nim`, and choose the Whisper model. Local gated models need `HUGGINGFACE_API_KEY`; NVIDIA NIM transcription needs `NVIDIA_NIM_API_KEY`.

@@ -606,72 +606,12 @@ async def test_rotating_provider_uses_a_throttled_credential_when_all_are():
     assert chunks in (["a"], ["b"])
 
 
-@pytest.mark.asyncio
-async def test_rotating_provider_skips_a_credential_out_of_daily_budget():
-    from free_claude_code.providers.daily_quota import DailyQuotaTracker
-
-    first = _FakeProvider(chunks=("a",))
-    second = _FakeProvider(chunks=("b",))
-    quota = DailyQuotaTracker(2, limit=1)
-    config = ProviderConfig(
-        api_key="k1",
-        base_url="http://x",
-        api_keys=("k1", "k2"),
-        credential_rotation="round_robin",
-    )
-    state = CredentialRotationState(2, "round_robin")
-    provider = RotatingProvider(config, [first, second], state, daily_quota=quota)
-
-    # First request spends key 0's single-request budget.
-    assert [c async for c in provider.stream_response(_request())] == ["a"]
-    assert quota.exhausted_indices() == frozenset({0})
-    # Key 0 is out of budget, so the next request must use key 1.
-    assert [c async for c in provider.stream_response(_request())] == ["b"]
-    assert first.calls == 1
-    assert second.calls == 1
-
-
-@pytest.mark.asyncio
-async def test_exhausting_every_daily_budget_still_serves_requests():
-    """A spent budget is a preference, not a hard block.
-
-    Refusing outright would turn a soft guardrail into a self-inflicted
-    outage, so once every credential is over budget the pool falls back to
-    normal selection and lets the upstream decide.
-    """
-    from free_claude_code.providers.daily_quota import DailyQuotaTracker
-
-    first = _FakeProvider(chunks=("a",))
-    second = _FakeProvider(chunks=("b",))
-    quota = DailyQuotaTracker(2, limit=1)
-    config = ProviderConfig(api_key="k1", base_url="http://x", api_keys=("k1", "k2"))
-    provider = RotatingProvider(
-        config,
-        [first, second],
-        CredentialRotationState(2, "round_robin"),
-        daily_quota=quota,
-    )
-
-    for _ in range(4):
-        chunks = [c async for c in provider.stream_response(_request())]
-        assert chunks in (["a"], ["b"])
-    assert quota.exhausted_indices() == frozenset({0, 1})
-
-
-def test_key_health_reports_throttle_and_daily_budget() -> None:
-    from free_claude_code.providers.daily_quota import DailyQuotaTracker
-
+def test_key_health_reports_the_throttle_window() -> None:
     providers = [_ThrottledProvider(throttled_for=12.0), _FakeProvider()]
     config = ProviderConfig(api_key="k1", base_url="http://x", api_keys=("k1", "k2"))
-    quota = DailyQuotaTracker(2, limit=50)
     rotating = RotatingProvider(
-        config,
-        providers,
-        CredentialRotationState(2, "round_robin"),
-        daily_quota=quota,
+        config, providers, CredentialRotationState(2, "round_robin")
     )
     health = rotating.key_health()
     assert health[0]["throttle_remaining"] == 12.0
     assert health[1]["throttle_remaining"] == 0.0
-    assert health[0]["daily_limit"] == 50
-    assert health[0]["daily_remaining"] == 50

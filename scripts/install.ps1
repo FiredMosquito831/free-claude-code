@@ -1,5 +1,5 @@
 param(
-    [switch] $SkipAgents,
+    [string] $Version = "",
     [switch] $VoiceNim,
     [switch] $VoiceLocal,
     [switch] $VoiceAll,
@@ -14,27 +14,29 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
 
-$FccVersion = "4.17.0"
-$FccWheelName = "free_claude_code-$FccVersion-py3-none-any.whl"
-$FccWheelUrl = "https://github.com/FiredMosquito831/free-claude-code/releases/download/v$FccVersion/$FccWheelName"
-$FccWheelSha256 = "91aaec9d83e2e931dbad653e74faa3c106acd6f8bd30a21a7985d77d870aef8b"
+$FccRepo = "FiredMosquito831/free-claude-code"
+$FccLatestReleaseUrl = "https://api.github.com/repos/$FccRepo/releases/latest"
 $PythonVersion = "3.14.0"
 $MinUvVersion = "0.11.0"
-$ClaudeInstallUrl = "https://claude.ai/install.ps1"
-$CodexInstallUrl = "https://chatgpt.com/codex/install.ps1"
-$PiInstallUrl = "https://pi.dev/install.ps1"
 $UvInstallUrl = "https://astral.sh/uv/install.ps1"
+
+# Resolved from the release feed at run time (or from -Version).
+$FccVersion = ""
+$FccWheelName = ""
+$FccWheelUrl = ""
+$FccWheelSha256 = ""
 
 function Show-Usage {
     @"
 Usage: install.ps1 [options]
 
-Installs or updates Free Claude Code, then installs the Claude Code, Codex, and
-Pi coding agents if they are missing. A coding agent that fails to install is
-reported as a warning; Free Claude Code itself still installs.
+Installs or updates Free Claude Code to the latest published release.
+
+Installs a compatible uv if one is missing. It does not install Claude Code,
+Codex, or Pi -- install whichever of those you use yourself.
 
 Options:
-  -SkipAgents            Install only Free Claude Code, not the coding agents.
+  -Version VALUE         Install this exact release instead of the latest.
   -VoiceNim              Install NVIDIA NIM voice transcription support.
   -VoiceLocal            Install local Whisper voice transcription support.
   -VoiceAll              Install all voice transcription backends.
@@ -296,132 +298,6 @@ function Confirm-PiApplication {
     Invoke-NativeCommand -FilePath $command.Source -Arguments @("--version")
 }
 
-function Ensure-ClaudeCode {
-    if (Get-ApplicationCommand "claude") {
-        Write-Host "Claude Code already found on PATH; verifying it."
-    }
-    else {
-        Invoke-DownloadedPowerShellInstaller -Url $ClaudeInstallUrl -Name "Claude Code"
-        Add-KnownBinDirectories
-    }
-
-    Confirm-Application -CommandName "claude" -DisplayName "Claude Code"
-}
-
-function Ensure-Codex {
-    if (Get-ApplicationCommand "codex") {
-        Write-Host "Codex already found on PATH; verifying it."
-    }
-    else {
-        Invoke-DownloadedPowerShellInstaller -Url $CodexInstallUrl -Name "Codex" -NonInteractive
-        Add-KnownBinDirectories
-    }
-
-    Confirm-Application -CommandName "codex" -DisplayName "Codex"
-}
-
-$script:FailedAgents = @()
-
-function Invoke-OptionalAgent {
-    param(
-        [Parameter(Mandatory = $true)] [string] $Label,
-        [Parameter(Mandatory = $true)] [scriptblock] $Action
-    )
-
-    # The coding agents are convenience launchers around third-party CLIs; none
-    # of them is required for the proxy to work. Catching here means a missing
-    # npm, an offline mirror, or a PATH quirk downgrades to a warning instead of
-    # aborting before Free Claude Code itself is installed.
-    if ($SkipAgents) {
-        Write-Host "Skipping $Label (-SkipAgents)."
-        return
-    }
-
-    try {
-        & $Action
-    }
-    catch {
-        $script:FailedAgents += $Label
-        Write-Warning "$Label could not be installed: $($_.Exception.Message)"
-        Write-Warning "Free Claude Code does not need it; continuing."
-    }
-}
-
-function Ensure-Pi {
-    $existingPi = Get-ApplicationCommand "pi"
-    if ($existingPi -and ($DryRun -or (Test-PiApplication $existingPi))) {
-        Write-Host "Pi already found on PATH; verifying it."
-    }
-    else {
-        if ($existingPi) {
-            Write-Host "The existing 'pi' command at '$($existingPi.Source)' is not Pi Coding Agent; installing Pi."
-        }
-        Invoke-DownloadedPowerShellInstaller -Url $PiInstallUrl -Name "Pi"
-        Add-PiBinDirectories
-    }
-
-    Confirm-PiApplication
-}
-
-function Convert-UvVersionOutput {
-    param([string] $Output)
-
-    if ([string]::IsNullOrWhiteSpace($Output)) {
-        return ""
-    }
-
-    if ($Output -match '(?m)(?:^|\s)(?:uv\s+)?(?<version>\d+\.\d+\.\d+(?:[-+][0-9A-Za-z][0-9A-Za-z.-]*)?)\b') {
-        return $Matches["version"]
-    }
-
-    return ""
-}
-
-function Get-UvVersion {
-    param([string] $UvPath)
-
-    $output = Invoke-NativeCapture -FilePath $UvPath -Arguments @("--version")
-    $version = Convert-UvVersionOutput $output
-    if ([string]::IsNullOrWhiteSpace($version)) {
-        throw "uv is present, but 'uv --version' did not return a valid version."
-    }
-
-    return $version
-}
-
-function Test-UvVersionAtLeast {
-    param(
-        [string] $Version,
-        [string] $Minimum
-    )
-
-    $normalizedVersion = (Convert-UvVersionOutput $Version) -replace '[-+].*$', ''
-    $normalizedMinimum = (Convert-UvVersionOutput $Minimum) -replace '[-+].*$', ''
-    if ([string]::IsNullOrWhiteSpace($normalizedVersion) -or [string]::IsNullOrWhiteSpace($normalizedMinimum)) {
-        throw "Unable to compare uv versions."
-    }
-
-    return ([version] $normalizedVersion) -ge ([version] $normalizedMinimum)
-}
-
-function Confirm-Uv {
-    if ($DryRun) {
-        Write-Host "+ uv --version"
-        return
-    }
-
-    $uvCommand = Get-ApplicationCommand "uv"
-    if (-not $uvCommand) {
-        throw "uv was installed, but it is not available on PATH."
-    }
-
-    $version = Get-UvVersion $uvCommand.Source
-    if (-not (Test-UvVersionAtLeast -Version $version -Minimum $MinUvVersion)) {
-        throw "uv $MinUvVersion or newer is required; found uv $version after installation."
-    }
-    Write-Host "Verified uv $version."
-}
-
 function Ensure-Uv {
     if ($DryRun) {
         if (Get-ApplicationCommand "uv") {
@@ -454,10 +330,46 @@ function Ensure-Uv {
     Confirm-Uv
 }
 
+function Resolve-Release {
+    if ($Version) {
+        $script:FccVersion = $Version -replace '^v', ''
+    }
+    else {
+        # A GET that changes nothing, so it also runs during -DryRun and can
+        # report the version that would actually install.
+        Write-Host "+ irm $FccLatestReleaseUrl"
+        try {
+            $release = Invoke-RestMethod -Uri $FccLatestReleaseUrl -Headers @{
+                "Accept" = "application/vnd.github+json"
+            } -ErrorAction Stop
+        }
+        catch {
+            throw "Could not reach the release feed to find the latest version: $($_.Exception.Message)"
+        }
+        $script:FccVersion = ([string] $release.tag_name) -replace '^v', ''
+        if ([string]::IsNullOrWhiteSpace($script:FccVersion)) {
+            throw "Could not read the latest release version from the release feed."
+        }
+        # GitHub publishes a sha256 digest per asset, so the download is still
+        # verified even though no checksum is pinned in this script.
+        $wheelAsset = @($release.assets | Where-Object { $_.name -like "*.whl" })
+        if ($wheelAsset.Count -gt 0 -and $wheelAsset[0].digest) {
+            $script:FccWheelSha256 = ([string] $wheelAsset[0].digest) -replace '^sha256:', ''
+        }
+    }
+    $script:FccWheelName = "free_claude_code-$($script:FccVersion)-py3-none-any.whl"
+    $script:FccWheelUrl = "https://github.com/$FccRepo/releases/download/v$($script:FccVersion)/$($script:FccWheelName)"
+}
+
 function Get-VerifiedReleaseWheel {
     if ($DryRun) {
         Write-Host "+ irm $FccWheelUrl -OutFile <temporary-wheel>"
-        Write-Host "+ verify SHA-256 $FccWheelSha256 for <temporary-wheel>"
+        if ($FccWheelSha256) {
+            Write-Host "+ verify SHA-256 $FccWheelSha256 for <temporary-wheel>"
+        }
+        else {
+            Write-Host "+ verify the SHA-256 published for this release"
+        }
         return "<verified-release-wheel>"
     }
 
@@ -477,10 +389,17 @@ function Get-VerifiedReleaseWheel {
         }
 
         $actualSha256 = (Get-FileHash -LiteralPath $wheelPath -Algorithm SHA256).Hash
-        if ($actualSha256 -ne $FccWheelSha256) {
-            throw "FCC release wheel checksum mismatch; refusing to install."
+        if ($FccWheelSha256) {
+            if ($actualSha256 -ne $FccWheelSha256) {
+                throw "FCC release wheel checksum mismatch; refusing to install."
+            }
+            Write-Host "Verified FCC v$FccVersion release wheel SHA-256."
         }
-        Write-Host "Verified FCC v$FccVersion release wheel SHA-256."
+        else {
+            # Only reachable with -Version, where the release feed was not read
+            # and no published digest is available to compare against.
+            Write-Host "FCC v$FccVersion release wheel SHA-256: $actualSha256"
+        }
         return $wheelPath
     }
     catch {
@@ -513,6 +432,7 @@ function Get-PackageSpec {
 }
 
 function Install-FreeClaudeCode {
+    Resolve-Release
     $wheelPath = Get-VerifiedReleaseWheel
     $packageUrl = if ($DryRun) {
         "file:///<verified-release-wheel>"
@@ -615,10 +535,6 @@ if ((-not [string]::IsNullOrWhiteSpace($TorchBackend)) -and (-not ($VoiceLocal -
 
 Add-KnownBinDirectories
 
-# uv and Free Claude Code come first: they are what this script exists to
-# install, and neither depends on the coding agents. The agents are installed
-# afterwards so a failure in one of them can no longer prevent Free Claude Code
-# from being installed at all.
 Write-Step "Ensuring uv $MinUvVersion or newer is installed"
 Ensure-Uv
 
@@ -628,31 +544,14 @@ Install-FreeClaudeCode
 Write-Step "Configuring PATH and verifying Free Claude Code"
 Configure-AndConfirmFreeClaudeCode
 
-Write-Step "Ensuring Claude Code is installed"
-Invoke-OptionalAgent -Label "Claude Code" -Action { Ensure-ClaudeCode }
-
-Write-Step "Ensuring Codex is installed"
-Invoke-OptionalAgent -Label "Codex" -Action { Ensure-Codex }
-
-Write-Step "Ensuring Pi is installed"
-Invoke-OptionalAgent -Label "Pi" -Action { Ensure-Pi }
-
 Write-Host ""
 if ($DryRun) {
     Write-Host "Dry run complete. No changes were made."
 }
 else {
-    Write-Host "Free Claude Code is installed and verified. Start the proxy with: fcc-server"
-    if ($script:FailedAgents.Count -gt 0) {
-        Write-Host ""
-        Write-Host "These coding agents were not installed: $($script:FailedAgents -join ', ')"
-        Write-Host "Free Claude Code works without them. Install them yourself and re-run"
-        Write-Host "this script, or use the agents you already have against the proxy at"
-        Write-Host "http://127.0.0.1:8082 (see the README ""Connect Your Client"" section)."
-    }
-    else {
-        Write-Host "Run Claude Code with: fcc-claude"
-        Write-Host "Run Codex with: fcc-codex"
-        Write-Host "Run Pi with: fcc-pi"
-    }
+    Write-Host "Free Claude Code $FccVersion is installed and verified."
+    Write-Host "Start the proxy with: fcc-server"
+    Write-Host ""
+    Write-Host "If you use Claude Code, Codex, or Pi, launch them through the proxy"
+    Write-Host "with fcc-claude, fcc-codex, or fcc-pi."
 }
