@@ -298,6 +298,65 @@ function Confirm-PiApplication {
     Invoke-NativeCommand -FilePath $command.Source -Arguments @("--version")
 }
 
+function Convert-UvVersionOutput {
+    param([string] $Output)
+
+    if ([string]::IsNullOrWhiteSpace($Output)) {
+        return ""
+    }
+
+    if ($Output -match '(?m)(?:^|\s)(?:uv\s+)?(?<version>\d+\.\d+\.\d+(?:[-+][0-9A-Za-z][0-9A-Za-z.-]*)?)\b') {
+        return $Matches["version"]
+    }
+
+    return ""
+}
+
+function Get-UvVersion {
+    param([string] $UvPath)
+
+    $output = Invoke-NativeCapture -FilePath $UvPath -Arguments @("--version")
+    $version = Convert-UvVersionOutput $output
+    if ([string]::IsNullOrWhiteSpace($version)) {
+        throw "uv is present, but 'uv --version' did not return a valid version."
+    }
+
+    return $version
+}
+
+function Test-UvVersionAtLeast {
+    param(
+        [string] $Version,
+        [string] $Minimum
+    )
+
+    $normalizedVersion = (Convert-UvVersionOutput $Version) -replace '[-+].*$', ''
+    $normalizedMinimum = (Convert-UvVersionOutput $Minimum) -replace '[-+].*$', ''
+    if ([string]::IsNullOrWhiteSpace($normalizedVersion) -or [string]::IsNullOrWhiteSpace($normalizedMinimum)) {
+        throw "Unable to compare uv versions."
+    }
+
+    return ([version] $normalizedVersion) -ge ([version] $normalizedMinimum)
+}
+
+function Confirm-Uv {
+    if ($DryRun) {
+        Write-Host "+ uv --version"
+        return
+    }
+
+    $uvCommand = Get-ApplicationCommand "uv"
+    if (-not $uvCommand) {
+        throw "uv was installed, but it is not available on PATH."
+    }
+
+    $version = Get-UvVersion $uvCommand.Source
+    if (-not (Test-UvVersionAtLeast -Version $version -Minimum $MinUvVersion)) {
+        throw "uv $MinUvVersion or newer is required; found uv $version after installation."
+    }
+    Write-Host "Verified uv $version."
+}
+
 function Ensure-Uv {
     if ($DryRun) {
         if (Get-ApplicationCommand "uv") {
