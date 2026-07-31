@@ -790,12 +790,17 @@ def test_installers_use_native_clients_and_single_python_selection() -> None:
         assert "@earendil-works/pi-coding-agent" not in text
         assert "git+" not in text
         assert "git --version" not in text
-        assert (
-            "https://github.com/FiredMosquito831/free-claude-code/releases/download/"
-            in text
-        )
-        assert FCC_VERSION in text
-        assert FCC_WHEEL_SHA256 in text
+        # The wheel URL is now assembled from the release the feed reports, so
+        # the script must carry the repo and the feed, not a pinned version.
+        assert "FiredMosquito831/free-claude-code" in text
+        assert "releases/latest" in text
+        assert "releases/download/" in text
+        assert FCC_VERSION not in text, "no product version may be pinned"
+        assert FCC_WHEEL_SHA256 not in text, "no checksum may be pinned"
+        # The proxy installs on its own; the coding agents are not its business.
+        assert "claude.ai/install" not in text
+        assert "chatgpt.com/codex/install" not in text
+        assert "pi.dev/install" not in text
         assert "Alishahryar1/free-claude-code" not in text
         assert "refs/heads/main" not in text
         assert "python install" not in text
@@ -804,8 +809,8 @@ def test_installers_use_native_clients_and_single_python_selection() -> None:
         assert "--python" in text
         assert "checksum mismatch" in text
 
-    assert "https://pi.dev/install.sh" in shell
-    assert "https://pi.dev/install.ps1" in powershell
+    assert "https://astral.sh/uv/install.sh" in shell
+    assert "https://astral.sh/uv/install.ps1" in powershell
 
 
 def test_readme_install_section_has_no_manual_git_prerequisite() -> None:

@@ -199,6 +199,67 @@ verify_command() {
     run "$command_path" --version
 }
 
+current_uv_version() {
+    if output=$(uv --version); then
+        :
+    else
+        return 1
+    fi
+
+    case "$output" in
+        uv\ *) version=${output#uv } ;;
+        *) version=$output ;;
+    esac
+    version=${version%% *}
+
+    case "$version" in
+        [0-9]*.[0-9]*.[0-9]*) printf '%s\n' "$version" ;;
+        *) return 1 ;;
+    esac
+}
+
+version_ge() {
+    current=${1%%[-+]*}
+    minimum=${2%%[-+]*}
+
+    old_ifs=$IFS
+    IFS=.
+    set -- $current
+    current_major=${1:-0}
+    current_minor=${2:-0}
+    current_patch=${3:-0}
+    set -- $minimum
+    minimum_major=${1:-0}
+    minimum_minor=${2:-0}
+    minimum_patch=${3:-0}
+    IFS=$old_ifs
+
+    case "$current_major$current_minor$current_patch$minimum_major$minimum_minor$minimum_patch" in
+        *[!0-9]*) return 1 ;;
+    esac
+
+    [ "$current_major" -gt "$minimum_major" ] && return 0
+    [ "$current_major" -lt "$minimum_major" ] && return 1
+    [ "$current_minor" -gt "$minimum_minor" ] && return 0
+    [ "$current_minor" -lt "$minimum_minor" ] && return 1
+    [ "$current_patch" -ge "$minimum_patch" ]
+}
+
+verify_uv() {
+    if [ "$dry_run" -eq 1 ]; then
+        print_command uv --version
+        return 0
+    fi
+
+    command -v uv >/dev/null 2>&1 || fail "uv was installed, but it is not available on PATH."
+    version=$(current_uv_version) || fail "uv is present, but 'uv --version' did not return a valid version."
+    if ! version_ge "$version" "$MIN_UV_VERSION"; then
+        fail "uv $MIN_UV_VERSION or newer is required; found uv $version after installation."
+    fi
+
+    printf 'Verified uv %s.\n' "$version"
+}
+
 ensure_uv() {
     if [ "$dry_run" -eq 1 ]; then
         if command -v uv >/dev/null 2>&1; then
