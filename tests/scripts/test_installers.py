@@ -270,7 +270,7 @@ def test_install_sh_fresh_install_is_verified(posix_harness: PosixHarness) -> No
     result = posix_harness.run()
 
     assert result.returncode == 0, result.stderr
-    assert "Free Claude Code is installed and verified." in result.stdout
+    assert "is installed and verified." in result.stdout
     calls = posix_harness.calls()
     assert calls.index("uv-install") < calls.index("uv:--version")
     assert any(
@@ -324,7 +324,7 @@ def test_install_sh_stops_without_success_on_each_failure(
     result = posix_harness.run(fail_step=failure)
 
     assert result.returncode != 0
-    assert "Free Claude Code is installed and verified." not in result.stdout
+    assert "is installed and verified." not in result.stdout
     forbidden = {
         "uv-download": "uv-install",
         "uv-install": "uv:--version",
@@ -345,9 +345,11 @@ def test_install_sh_dry_run_never_executes_commands(
     result = posix_harness.run("--dry-run")
 
     assert result.returncode == 0, result.stderr
-    assert posix_harness.calls() == []
+    assert posix_harness.calls() == [f"download:{FCC_LATEST_RELEASE_URL}"], (
+        "a dry run may read the release feed, but must change nothing"
+    )
     assert "Dry run complete. No changes were made." in result.stdout
-    assert "Free Claude Code is installed and verified." not in result.stdout
+    assert "is installed and verified." not in result.stdout
 
 
 def test_install_sh_rejects_unparseable_existing_uv(
@@ -659,7 +661,7 @@ def test_install_ps1_fresh_install_is_verified(
     result = powershell_harness.run()
 
     assert result.returncode == 0, result.stderr
-    assert "Free Claude Code is installed and verified." in result.stdout
+    assert "is installed and verified." in result.stdout
     calls = powershell_harness.calls()
     assert calls.index("uv-install") < calls.index("uv:--version")
     assert any(
@@ -715,7 +717,7 @@ def test_install_ps1_stops_without_success_on_each_failure(
     result = powershell_harness.run(fail_step=failure)
 
     assert result.returncode != 0
-    assert "Free Claude Code is installed and verified." not in result.stdout
+    assert "is installed and verified." not in result.stdout
     forbidden = {
         "uv-download": "uv-install",
         "uv-install": "uv:--version",
@@ -753,7 +755,7 @@ def test_install_ps1_dry_run_never_executes_commands(
     assert result.returncode == 0, result.stderr
     assert powershell_harness.calls() == []
     assert "Dry run complete. No changes were made." in result.stdout
-    assert "Free Claude Code is installed and verified." not in result.stdout
+    assert "is installed and verified." not in result.stdout
 
 
 def test_install_ps1_rejects_unparseable_existing_uv(
