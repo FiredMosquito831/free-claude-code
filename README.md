@@ -51,7 +51,7 @@ Run your coding agents with free, paid, or local models. Choose and validate pro
 | **Model-tier routing** | Route Fable, Opus, Sonnet, Haiku, and fallback traffic to different models. |
 | **Protocol fidelity** | Streaming, tool use, reasoning, and image input preserved across compatible models, with configurable reasoning control. |
 | **Key rotation** | Multi-key credential rotation for both model and web search providers: comma-separated keys, four rotation policies, health tracking with cooldowns/circuit breaking/lockout, and per-key admin management. |
-| **Web search** | Claude Code's official `web_search` server tool fulfilled at the proxy level by 14 search providers, with 50+ advanced per-provider options, rich result digests, and zero-config keyless fallback. |
+| **Web search** | Claude Code's official `web_search` server tool fulfilled at the proxy level by 14 search providers, with 66 advanced per-provider options, full-page-text retrieval, domain filtering, rich result digests, and zero-config keyless fallback. |
 | **Observability** | Persistent local request and web-search analytics with consistent filters, range-aware rollups, provider/key health, latency, errors, known spend, export, and auto-refresh. |
 | **Editor integrations** | Claude Code and Codex in VS Code, or Claude Code through JetBrains ACP. |
 | **Messaging** | Optionally run Claude Code sessions through Discord or Telegram with voice-note transcription. |
@@ -416,7 +416,7 @@ FCC supports 14 search backends, resolved by `WEB_SEARCH_PROVIDER`:
 | Firecrawl | `FIRECRAWL_API_KEY` | One-time free credit grant on signup | [firecrawl.dev/app/api-keys](https://www.firecrawl.dev/app/api-keys) |
 | Linkup | `LINKUP_API_KEY` | $20 free credit, topped back up monthly | [app.linkup.so](https://app.linkup.so/) |
 | Perplexity Search | `PERPLEXITY_SEARCH_API_KEY` | No meaningful free tier (prepaid credit; mint a fresh key) | [perplexity.ai/settings/api](https://www.perplexity.ai/settings/api) |
-| Parallel | `PARALLEL_API_KEY` | Pay-per-use from $0.005 per 10 results (Search API beta) | [platform.parallel.ai](https://platform.parallel.ai/) |
+| Parallel | `PARALLEL_API_KEY` | Pay-per-use from $0.005 per 10 results | [platform.parallel.ai](https://platform.parallel.ai/) |
 | SearchAPI.io | `SEARCHAPI_API_KEY` | 100 free one-time requests | [searchapi.io](https://www.searchapi.io/) |
 | SerpAPI | `SERPAPI_API_KEY` | 250 free searches/month | [serpapi.com/manage-api-key](https://serpapi.com/manage-api-key) |
 
@@ -494,11 +494,89 @@ WEBSEARCH_DIGEST_CONTENT_CHARS=2000  # per-result cap for extracted page text
 WEBSEARCH_DIGEST_ANSWER=true         # include the provider answer lead
 ```
 
-When a provider returns **extracted page text** rather than just a snippet — `EXA_CONTENTS`, `TAVILY_INCLUDE_RAW_CONTENT`, `FIRECRAWL_SCRAPE_FORMAT`, `BRAVE_EXTRA_SNIPPETS`, and Jina/Parallel by default — that fuller text is used in place of the snippet and capped by `WEBSEARCH_DIGEST_CONTENT_CHARS`. It has its own, larger cap so opting into content is not trimmed back to snippet length. Raise it to give the model more per result, at the cost of input tokens.
+### Giving the model full page text, not just snippets
 
-### Domain filtering and search caps
+By default most providers return a one- or two-sentence snippet per result. Several can return the **extracted text of the page itself**, which is usually the difference between the model guessing from a summary and actually reading the source.
 
-Claude Code declares `allowed_domains`, `blocked_domains`, and `max_uses` on its `web_search` tool definition. These are read from the request and forwarded to the provider, so `allowed_domains: ["docs.python.org"]` restricts results server-side on providers that support it (Exa, Tavily, Firecrawl, Linkup, Perplexity). Providers without native support drop the filters; each recorded attempt shows `supports_domain_filters` so you can tell which happened. Anthropic rejects requests carrying both lists, so if both arrive the allow list wins.
+Turn it on per provider, then give it room:
+
+```bash
+# Pick whichever provider you use — each has its own switch:
+EXA_CONTENTS=text                    # or highlights+text, full
+TAVILY_INCLUDE_RAW_CONTENT=markdown  # or text
+FIRECRAWL_SCRAPE_FORMAT=markdown     # or summary
+BRAVE_EXTRA_SNIPPETS=true            # plan-gated
+
+WEBSEARCH_DIGEST_CONTENT_CHARS=4000  # how much of it reaches the model
+```
+
+Jina, Parallel and Linkup return extracted text by default and need no switch.
+
+Extracted text has its **own, larger cap** (`WEBSEARCH_DIGEST_CONTENT_CHARS`) rather than sharing the snippet cap, so opting into content isn't silently trimmed back to snippet length. Raise it for more grounding, lower it to control input tokens, or set it to `0` to keep snippets only.
+
+> **Cost:** content options bill more on most providers (Firecrawl multiplies credits per result; Exa charges per content type) and increase input tokens on every search. Check the option's drawer in the Admin UI — each states its cost.
+
+### Restricting searches to specific sites
+
+Claude Code declares `allowed_domains`, `blocked_domains`, and `max_uses` on its `web_search` tool definition. FCC reads them from the request and forwards them, so:
+
+```json
+{ "type": "web_search_20250305", "name": "web_search",
+  "allowed_domains": ["docs.python.org", "peps.python.org"] }
+```
+
+restricts results **server-side** on Exa, Tavily, Firecrawl, Linkup, Perplexity and Parallel — you pay for relevant results rather than filtering afterwards. Providers without native support drop the filters and search normally; every recorded attempt shows `supports_domain_filters`, so the analytics detail view tells you which happened.
+
+Anthropic rejects requests carrying both lists, so if both arrive the allow list wins rather than silently intersecting them.
+
+### Safe search, locale and freshness
+
+Safe search is available on the providers that document it:
+
+```bash
+BRAVE_SAFESEARCH=strict      # off | moderate | strict
+SEARXNG_SAFESEARCH=2         # 0 | 1 | 2
+SERPAPI_SAFE=active          # active | off
+SEARCHAPI_SAFE=active        # active | blur | off
+DDGS_SAFESEARCH=strict
+```
+
+Locale is per provider and worth setting if you are not in the US — **Firecrawl defaults to US results unless told otherwise**:
+
+```bash
+FIRECRAWL_COUNTRY=DE
+TAVILY_COUNTRY=germany
+BRAVE_COUNTRY=DE
+SERPER_GL=de           # SERPAPI_GL / SEARCHAPI_GL / JINA_GL are the same idea
+PARALLEL_LOCATION=DE
+```
+
+Freshness uses each provider's own vocabulary (`BRAVE_FRESHNESS=pw`, `TAVILY_TIME_RANGE=week`, `SERPER_TBS=qdr:w`, …). For a precise window rather than a relative one, several providers now take explicit dates:
+
+```bash
+TAVILY_START_DATE=2026-01-01
+TAVILY_END_DATE=2026-06-30
+LINKUP_FROM_DATE=2026-01-01
+EXA_START_PUBLISHED_DATE=2026-01-01
+```
+
+Two more worth knowing:
+
+- `TAVILY_CHUNKS_PER_SOURCE=3` — more snippets per source, the cheapest way to get more text out of Tavily without raw content.
+- `FIRECRAWL_CATEGORIES=github,research` — restrict to GitHub or research papers, which is often exactly what a coding question wants.
+
+### How failures are reported
+
+Search failures come back to the client as a proper `web_search_tool_result_error` with the error code that matches what happened, so a client can react correctly rather than treating everything as a generic outage:
+
+| What happened | Code the client sees |
+| --- | --- |
+| Rate limited or plan quota exhausted | `too_many_requests` |
+| Request rejected by the provider | `invalid_tool_input` |
+| `max_uses` budget leaves no room | `max_uses_exceeded` |
+| Anything else | `unavailable` |
+
+**Rate limits use the provider's own reset time.** When a provider returns 429 it usually says when the limit clears (`Retry-After`, `retry-after-ms`, `x-ratelimit-reset-*`); FCC honours that instead of assuming a fixed cooldown, so a key that resets in a second isn't benched for a minute and one that needs an hour isn't hammered. If the provider says nothing, a conservative default applies. Nothing is capped by an invented ceiling — the only bound is a 1-hour sanity limit on what a single header can request.
 
 ### Web search analytics
 
@@ -513,7 +591,7 @@ WEBSEARCH_LOG_CAPTURE_CONTENT=true      # false keeps lengths + SHA-256 only
 WEBSEARCH_LOG_CONTENT_MAX_CHARS=50000   # cap per input/output JSON payload
 ```
 
-Oversized payloads are stored as valid JSON truncation envelopes containing the original length, SHA-256, and a bounded preview. API keys are never copied into configuration snapshots, secret-looking object fields are redacted, and proxy/userinfo credentials are removed. Search content still commonly includes private queries, result URLs, and page text; disable `WEBSEARCH_LOG_CAPTURE_CONTENT` or the entire log for sensitive work.
+Oversized payloads are stored as valid JSON truncation envelopes containing the original length, SHA-256, and a bounded preview. API keys are never copied into configuration snapshots, secret-looking object fields are redacted, and proxy/userinfo credentials are removed. Search content still commonly includes private queries, result URLs, and page text. `WEBSEARCH_LOG_CAPTURE_CONTENT=false` withholds the captured input/output payloads **and the query text itself**, keeping only lengths and SHA-256 hashes, so the switch covers everything a search reveals. Set `WEBSEARCH_LOG_ENABLED=false` to record nothing at all.
 
 <a id="admin-dashboard"></a>
 
@@ -574,7 +652,7 @@ The running version is always visible in the Admin UI sidebar. **Providers → V
 
 FCC checks the GitHub releases feed when the dashboard loads, caching the result for six hours so it never hammers the API. **Check for updates** forces a fresh check. If the machine is offline or GitHub is unreachable, the panel still shows your running version and notes that the check failed — it never blocks the dashboard.
 
-When a newer release exists, a banner announces it with a link to the release notes:
+When a newer release exists, a banner announces it and carries the release notes inline. Expand **What changed** to read them without leaving the dashboard — a version number on its own rarely tells you whether an update is worth taking. The link to the full release page is still there for anything trimmed:
 
 <div align="center">
   <img src="assets/admin-update-banner.png" alt="Update available banner announcing a new release" width="820">

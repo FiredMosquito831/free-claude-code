@@ -1,5 +1,7 @@
 """Freeze ``WEBSEARCH_CATALOG`` insertion order and field sanity."""
 
+from pathlib import Path
+
 from free_claude_code.config.settings import Settings
 from free_claude_code.config.websearch_catalog import (
     SUPPORTED_WEBSEARCH_PROVIDER_IDS,
@@ -237,3 +239,22 @@ def test_websearch_catalog_option_specs_are_internally_consistent() -> None:
             if spec.field_type != "boolean" and spec.default != "":
                 problems.append(f"{where}: unexpected default {spec.default!r}")
     assert problems == []
+
+
+def test_every_catalog_option_is_documented_in_env_example() -> None:
+    """`.env.example` is what the README points at for the full option list.
+
+    Options were added to the catalog without landing here, so the documented
+    list silently fell behind what the admin UI actually offers.
+    """
+
+    env_example = (Path(__file__).resolve().parents[2] / ".env.example").read_text(
+        encoding="utf-8"
+    )
+    missing = [
+        f"{descriptor.provider_id}:{option.env}"
+        for descriptor in WEBSEARCH_CATALOG.values()
+        for option in descriptor.advanced_options
+        if option.env not in env_example
+    ]
+    assert missing == []
