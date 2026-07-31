@@ -1,4 +1,5 @@
 import os
+import re
 import shutil
 import subprocess
 from dataclasses import dataclass
@@ -13,6 +14,33 @@ FCC_WHEEL_URL = (
     f"v{FCC_VERSION}/{FCC_WHEEL_NAME}"
 )
 FCC_WHEEL_SHA256 = "91aaec9d83e2e931dbad653e74faa3c106acd6f8bd30a21a7985d77d870aef8b"
+# Helpers each installer must keep defining. Deleting one only surfaces when a
+# user runs the script, so it is asserted here instead.
+_SHELL_HELPER_NAMES = frozenset(
+    {
+        "resolve_release",
+        "download_verified_release_wheel",
+        "install_free_claude_code",
+        "configure_and_verify_free_claude_code",
+        "ensure_uv",
+        "verify_uv",
+        "current_uv_version",
+        "version_ge",
+    }
+)
+_POWERSHELL_HELPER_NAMES = frozenset(
+    {
+        "Resolve-Release",
+        "Get-VerifiedReleaseWheel",
+        "Install-FreeClaudeCode",
+        "Ensure-Uv",
+        "Confirm-Uv",
+        "Get-UvVersion",
+        "Convert-UvVersionOutput",
+        "Test-UvVersionAtLeast",
+    }
+)
+
 FCC_LATEST_RELEASE_URL = (
     "https://api.github.com/repos/FiredMosquito831/free-claude-code/releases/latest"
 )
@@ -859,3 +887,32 @@ if ($resolved -ne {str(fallback)!r}) {{
     )
 
     assert result.returncode == 0, result.stderr
+
+
+def test_installers_define_every_helper_they_call() -> None:
+    """Guard against deleting a helper that is still referenced.
+
+    Stripping the coding-agent code once removed the uv version helpers that
+    happened to sit beside it, and neither script fails until the moment a
+    user runs it -- the PowerShell path is not exercised on the Linux CI
+    runners at all. This catches that statically.
+    """
+    shell = (_repo_root() / "scripts" / "install.sh").read_text(encoding="utf-8")
+    powershell = (_repo_root() / "scripts" / "install.ps1").read_text(encoding="utf-8")
+
+    shell_defined = set(re.findall(r"^([a-z_][a-z0-9_]*)\(\)\s*\{", shell, re.M))
+    shell_called = set(re.findall(r"^\s*([a-z_][a-z0-9_]*)(?:\s|$)", shell, re.M))
+    missing_shell = {
+        name for name in shell_called & _SHELL_HELPER_NAMES if name not in shell_defined
+    }
+    assert not missing_shell, f"install.sh calls undefined helpers: {missing_shell}"
+    assert shell_defined >= _SHELL_HELPER_NAMES, (
+        f"install.sh is missing helpers: {_SHELL_HELPER_NAMES - shell_defined}"
+    )
+
+    ps_defined = set(
+        re.findall(r"^function\s+([A-Za-z][A-Za-z0-9-]*)\s*\{", powershell, re.M)
+    )
+    assert ps_defined >= _POWERSHELL_HELPER_NAMES, (
+        f"install.ps1 is missing helpers: {_POWERSHELL_HELPER_NAMES - ps_defined}"
+    )
