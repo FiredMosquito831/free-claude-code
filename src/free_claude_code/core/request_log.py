@@ -51,6 +51,8 @@ _LIST_METADATA_COLUMNS = (
     "params",
     "tokens_in",
     "tokens_out",
+    "cache_read_tokens",
+    "cache_write_tokens",
     "ttft_ms",
     "duration_ms",
     "status",
@@ -102,6 +104,11 @@ CREATE INDEX IF NOT EXISTS idx_requests_model ON requests(resolved_model);
 _ADDED_COLUMNS = (
     ("key_index", "ALTER TABLE requests ADD COLUMN key_index INTEGER"),
     ("key_label", "ALTER TABLE requests ADD COLUMN key_label TEXT"),
+    ("cache_read_tokens", "ALTER TABLE requests ADD COLUMN cache_read_tokens INTEGER"),
+    (
+        "cache_write_tokens",
+        "ALTER TABLE requests ADD COLUMN cache_write_tokens INTEGER",
+    ),
 )
 
 # Indexes over post-release columns, created only once those columns exist.
@@ -147,6 +154,10 @@ class RequestRecord:
     params: dict[str, Any] | None = None
     tokens_in: int | None = None
     tokens_out: int | None = None
+    # Anthropic reports these beside input_tokens; tokens_in is the
+    # *uncached* portion, so total input is the sum of all three.
+    cache_read_tokens: int | None = None
+    cache_write_tokens: int | None = None
     ttft_ms: float | None = None
     duration_ms: float | None = None
     status: RequestStatus = "success"
@@ -265,11 +276,12 @@ class RequestLogStore:
             # an older index built before ``key_label`` joined the column list,
             # leaving the per-key aggregate without index-only coverage.
             conn.execute("DROP INDEX IF EXISTS idx_requests_stats")
+            conn.execute("DROP INDEX IF EXISTS idx_requests_stats_v2")
             conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_requests_stats_v2 ON requests("
+                "CREATE INDEX IF NOT EXISTS idx_requests_stats_v3 ON requests("
                 " ts_epoch, status, provider, resolved_model, endpoint,"
                 " requested_model, key_label, duration_ms, ttft_ms,"
-                " tokens_in, tokens_out)"
+                " tokens_in, tokens_out, cache_read_tokens, cache_write_tokens)"
             )
 
     @staticmethod
@@ -371,10 +383,11 @@ class RequestLogStore:
                         id, ts_epoch, ts_iso, endpoint, protocol, requested_model,
                         provider, resolved_model, stream, input_text, output_text,
                         input_sha256, output_sha256, input_chars, output_chars,
-                        reasoning, params, tokens_in, tokens_out, ttft_ms,
+                        reasoning, params, tokens_in, tokens_out,
+                        cache_read_tokens, cache_write_tokens, ttft_ms,
                         duration_ms, status, error_kind, error_message, headers,
                         key_index, key_label
-                    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                     """,
                     rows,
                 )
@@ -408,6 +421,8 @@ class RequestLogStore:
             json.dumps(record.params) if record.params is not None else None,
             record.tokens_in,
             record.tokens_out,
+            record.cache_read_tokens,
+            record.cache_write_tokens,
             record.ttft_ms,
             record.duration_ms,
             record.status,
@@ -611,6 +626,8 @@ class RequestLogStore:
                        SUM(CASE WHEN status='cancelled' THEN 1 ELSE 0 END) AS cancelled,
                        COALESCE(SUM(tokens_in), 0) AS tokens_in,
                        COALESCE(SUM(tokens_out), 0) AS tokens_out,
+                       COALESCE(SUM(cache_read_tokens), 0) AS cache_read_tokens,
+                       COALESCE(SUM(cache_write_tokens), 0) AS cache_write_tokens,
                        AVG(duration_ms) AS avg_duration_ms,
                        AVG(ttft_ms) AS avg_ttft_ms
                 FROM requests{where}
@@ -651,6 +668,8 @@ class RequestLogStore:
             "error_rate": (totals["error"] or 0) / total if total else 0.0,
             "tokens_in": totals["tokens_in"] or 0,
             "tokens_out": totals["tokens_out"] or 0,
+            "cache_read_tokens": totals["cache_read_tokens"] or 0,
+            "cache_write_tokens": totals["cache_write_tokens"] or 0,
             "avg_duration_ms": _rounded(totals["avg_duration_ms"]),
             "p50_duration_ms": _rounded(_percentile(durations, 0.50)),
             "p95_duration_ms": _rounded(_percentile(durations, 0.95)),
@@ -673,6 +692,8 @@ class RequestLogStore:
             f"SELECT COALESCE({column}, '(unknown)') AS key, COUNT(*) AS requests,"
             " COALESCE(SUM(tokens_in),0) AS tokens_in,"
             " COALESCE(SUM(tokens_out),0) AS tokens_out,"
+            " COALESCE(SUM(cache_read_tokens),0) AS cache_read_tokens,"
+            " COALESCE(SUM(cache_write_tokens),0) AS cache_write_tokens,"
             " SUM(CASE WHEN status='error' THEN 1 ELSE 0 END) AS errors,"
             " AVG(duration_ms) AS avg_duration_ms"
             f" FROM requests{where} GROUP BY key ORDER BY requests DESC",
@@ -684,6 +705,8 @@ class RequestLogStore:
                 "requests": row["requests"],
                 "tokens_in": row["tokens_in"],
                 "tokens_out": row["tokens_out"],
+                "cache_read_tokens": row["cache_read_tokens"],
+                "cache_write_tokens": row["cache_write_tokens"],
                 "errors": row["errors"],
                 "avg_duration_ms": _rounded(row["avg_duration_ms"]),
             }
