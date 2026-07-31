@@ -96,6 +96,55 @@ When unsure between PATCH and MINOR, prefer PATCH for fixes and MINOR for new ca
 
 Example commit on `main` after a packaging fix: bump `1.2.38` → `1.2.39`, run `uv lock`, commit together with the fix.
 
+## WORKING NOTES (READ FIRST, THEN MAINTAIN)
+
+`WORKING-NOTES.md` in the repo root is the operating manual for this project:
+the user's standing preferences, the release process, CI quirks that waste
+hours, domain gotchas, product principles, and known gaps. It is **git-ignored
+and local** — it exists so hard-won context survives between sessions.
+
+### Read it first
+
+Read `WORKING-NOTES.md` before starting anything non-trivial. It will save you
+from re-learning things the expensive way. If it is missing, say so and offer
+to start one; do not silently proceed without it.
+
+It records, among other things:
+
+- Which remote to push to, and which one never to touch.
+- The release sequence, and why an earlier ordering was wrong.
+- Which tests silently **skip** on one platform and therefore prove nothing.
+- Which local test failures are pre-existing and not caused by your change.
+- Product principles that were stated firmly (for example: never introduce
+  hardcoded ceilings or budgets for a provider's capacity).
+
+### Maintain it
+
+Treat it as part of the deliverable, not an afterthought. Update it in the same
+session you learn something, while the detail is still exact.
+
+Add an entry when you:
+
+- **Lose time to something non-obvious** — a platform difference, a silent
+  skip, a scoping rule, a tool that lies about a failure.
+- **Get corrected by the user**, especially on product direction. Record the
+  principle and the reasoning, not just the instruction.
+- **Ship a release** — append it to the version table with one line on what it
+  contained.
+- **Discover a gap you are deliberately not fixing** — put it under open items
+  with enough detail to act on later.
+- **Find that the notes are now wrong.** Stale guidance is worse than none:
+  correct the section rather than appending a contradiction. (The release
+  process was rewritten once when version pinning was removed.)
+
+Write findings so they are useful cold: state the symptom, the cause, and the
+rule to follow next time. Prefer "PowerShell installer tests never run on Linux
+CI, so a PS-only regression ships green" over "be careful with CI".
+
+Keep it local. It is in `.gitignore` on purpose — it is a working artifact, not
+user documentation, and it may reference machine-specific paths and running
+processes.
+
 ## SUMMARY STANDARDS
 
 - Summaries must be technical and granular.
