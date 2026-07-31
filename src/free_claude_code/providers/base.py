@@ -53,6 +53,16 @@ class BaseProvider(ABC):
     def __init__(self, config: ProviderConfig):
         self._config = config
 
+    def throttle_remaining(self) -> float:
+        """Seconds this provider's credential is rate-limited for, 0 if free.
+
+        Rotation uses this to prefer a credential that can serve immediately
+        over one that would only sit waiting inside its own limiter. Providers
+        that do not rate-limit their upstream are never throttled; those that
+        do override this to report their limiter.
+        """
+        return 0.0
+
     @property
     def credential_label(self) -> str | None:
         """Masked label of the credential this provider uses, for analytics.

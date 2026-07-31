@@ -13,6 +13,7 @@ from free_claude_code.config.provider_registry import get_provider_registry
 from free_claude_code.config.settings import Settings
 from free_claude_code.providers.base import BaseProvider, ProviderConfig
 from free_claude_code.providers.credential_rotation import CredentialRotationState
+from free_claude_code.providers.daily_quota import DailyQuotaTracker
 from free_claude_code.providers.openai_chat import (
     GENERIC_OPENAI_PROFILE,
     OPENAI_CHAT_PROFILES,
@@ -20,7 +21,11 @@ from free_claude_code.providers.openai_chat import (
 )
 from free_claude_code.providers.rate_limit import ProviderRateLimiter
 
-from .config import build_provider_config
+from .config import (
+    build_provider_config,
+    credential_daily_limit,
+    credential_quota_reset_offset_hours,
+)
 from .rotating import RotatingProvider
 
 ProviderFactory = Callable[
@@ -210,4 +215,11 @@ def create_provider(provider_id: str, settings: Settings) -> BaseProvider:
     ]
     state = CredentialRotationState(len(providers), config.credential_rotation)
     labels = tuple(mask_key_label(key) for key in keys)
-    return RotatingProvider(config, providers, state, key_labels=labels)
+    quota = DailyQuotaTracker(
+        len(providers),
+        limit=credential_daily_limit(descriptor, settings),
+        reset_offset_hours=credential_quota_reset_offset_hours(descriptor, settings),
+    )
+    return RotatingProvider(
+        config, providers, state, key_labels=labels, daily_quota=quota
+    )
