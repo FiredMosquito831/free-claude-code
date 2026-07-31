@@ -541,3 +541,137 @@ async def test_rotating_provider_fails_over_a_rejected_credential():
     assert first.calls == 1
     assert second.calls == 1
     assert provider.key_health()[0]["state"] == "LOCKED_OUT"
+
+
+@pytest.mark.asyncio
+async def test_acquire_avoids_unavailable_credentials() -> None:
+    """A throttled credential must be skipped while another can serve."""
+    state = CredentialRotationState(3, "round_robin")
+    picks = {await state.acquire(frozenset({0})) for _ in range(6)}
+    assert picks == {1, 2}
+
+
+@pytest.mark.asyncio
+async def test_acquire_falls_back_when_every_credential_is_unavailable() -> None:
+    """Total throttling must queue on a limiter, not hard-fail the request."""
+    state = CredentialRotationState(2, "round_robin")
+    index = await state.acquire(frozenset({0, 1}))
+    assert index in (0, 1)
+
+
+@pytest.mark.asyncio
+async def test_unavailable_credentials_are_still_skipped_when_benched() -> None:
+    state = CredentialRotationState(3, "round_robin")
+    await state.report_failure(2, _RetryableError())
+    picks = {await state.acquire(frozenset({0})) for _ in range(4)}
+    assert picks == {1}
+
+
+class _ThrottledProvider(_FakeProvider):
+    """Sub-provider whose credential is rate-limited for a fixed window."""
+
+    def __init__(self, *, throttled_for: float, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self._throttled_for = throttled_for
+
+    def throttle_remaining(self) -> float:
+        return self._throttled_for
+
+
+@pytest.mark.asyncio
+async def test_rotating_provider_skips_a_rate_limited_credential():
+    """Regression: a throttled key stayed HEALTHY and absorbed traffic.
+
+    Rotation had no view of the limiter, so it selected the throttled
+    credential and the request sat waiting inside that credential's own
+    limiter while an idle credential went unused.
+    """
+    throttled = _ThrottledProvider(throttled_for=30.0, chunks=("slow",))
+    idle = _FakeProvider(chunks=("fast",))
+    provider = _rotating([throttled, idle], "round_robin")
+
+    assert [c async for c in provider.stream_response(_request())] == ["fast"]
+    assert throttled.calls == 0
+    assert idle.calls == 1
+
+
+@pytest.mark.asyncio
+async def test_rotating_provider_uses_a_throttled_credential_when_all_are():
+    """With nothing idle left, the request still goes out rather than failing."""
+    first = _ThrottledProvider(throttled_for=30.0, chunks=("a",))
+    second = _ThrottledProvider(throttled_for=30.0, chunks=("b",))
+    provider = _rotating([first, second], "round_robin")
+
+    chunks = [c async for c in provider.stream_response(_request())]
+    assert chunks in (["a"], ["b"])
+
+
+@pytest.mark.asyncio
+async def test_rotating_provider_skips_a_credential_out_of_daily_budget():
+    from free_claude_code.providers.daily_quota import DailyQuotaTracker
+
+    first = _FakeProvider(chunks=("a",))
+    second = _FakeProvider(chunks=("b",))
+    quota = DailyQuotaTracker(2, limit=1)
+    config = ProviderConfig(
+        api_key="k1",
+        base_url="http://x",
+        api_keys=("k1", "k2"),
+        credential_rotation="round_robin",
+    )
+    state = CredentialRotationState(2, "round_robin")
+    provider = RotatingProvider(config, [first, second], state, daily_quota=quota)
+
+    # First request spends key 0's single-request budget.
+    assert [c async for c in provider.stream_response(_request())] == ["a"]
+    assert quota.exhausted_indices() == frozenset({0})
+    # Key 0 is out of budget, so the next request must use key 1.
+    assert [c async for c in provider.stream_response(_request())] == ["b"]
+    assert first.calls == 1
+    assert second.calls == 1
+
+
+@pytest.mark.asyncio
+async def test_exhausting_every_daily_budget_still_serves_requests():
+    """A spent budget is a preference, not a hard block.
+
+    Refusing outright would turn a soft guardrail into a self-inflicted
+    outage, so once every credential is over budget the pool falls back to
+    normal selection and lets the upstream decide.
+    """
+    from free_claude_code.providers.daily_quota import DailyQuotaTracker
+
+    first = _FakeProvider(chunks=("a",))
+    second = _FakeProvider(chunks=("b",))
+    quota = DailyQuotaTracker(2, limit=1)
+    config = ProviderConfig(api_key="k1", base_url="http://x", api_keys=("k1", "k2"))
+    provider = RotatingProvider(
+        config,
+        [first, second],
+        CredentialRotationState(2, "round_robin"),
+        daily_quota=quota,
+    )
+
+    for _ in range(4):
+        chunks = [c async for c in provider.stream_response(_request())]
+        assert chunks in (["a"], ["b"])
+    assert quota.exhausted_indices() == frozenset({0, 1})
+
+
+def test_key_health_reports_throttle_and_daily_budget() -> None:
+    from free_claude_code.providers.daily_quota import DailyQuotaTracker
+
+    providers = [_ThrottledProvider(throttled_for=12.0), _FakeProvider()]
+    config = ProviderConfig(api_key="k1", base_url="http://x", api_keys=("k1", "k2"))
+    quota = DailyQuotaTracker(2, limit=50)
+    rotating = RotatingProvider(
+        config,
+        providers,
+        CredentialRotationState(2, "round_robin"),
+        daily_quota=quota,
+    )
+    health = rotating.key_health()
+    assert health[0]["throttle_remaining"] == 12.0
+    assert health[1]["throttle_remaining"] == 0.0
+    assert health[0]["daily_limit"] == 50
+    assert health[0]["daily_remaining"] == 50

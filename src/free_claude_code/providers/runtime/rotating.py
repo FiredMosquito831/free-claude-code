@@ -10,6 +10,7 @@ from free_claude_code.core.credential_attribution import record_credential
 from free_claude_code.core.reasoning import DEFAULT_REASONING_POLICY, ReasoningPolicy
 from free_claude_code.providers.base import BaseProvider, ProviderConfig
 from free_claude_code.providers.credential_rotation import CredentialRotationState
+from free_claude_code.providers.daily_quota import DailyQuotaTracker
 from free_claude_code.providers.http import maybe_await_aclose
 
 
@@ -27,12 +28,14 @@ class RotatingProvider(BaseProvider):
         providers: Sequence[BaseProvider],
         state: CredentialRotationState,
         key_labels: Sequence[str] = (),
+        daily_quota: DailyQuotaTracker | None = None,
     ) -> None:
         super().__init__(config)
         if not providers:
             raise ValueError("RotatingProvider requires at least one sub-provider")
         self._providers = tuple(providers)
         self._state = state
+        self._quota = daily_quota or DailyQuotaTracker(len(providers))
         # Masked ``first4…last4`` labels, index-aligned with ``providers``. Used
         # only to identify a credential in analytics and admin views; the raw
         # key values stay inside the sub-providers.
@@ -42,6 +45,23 @@ class RotatingProvider(BaseProvider):
     def credential_label(self) -> str | None:
         """No single label applies: the credential is chosen per request."""
         return None
+
+    def _unavailable_now(self) -> frozenset[int]:
+        """Credentials that are healthy but cannot serve this instant.
+
+        A rate-limited credential used to stay invisible to rotation: it was
+        still HEALTHY, so it was selected, and the request then sat waiting
+        inside that credential's own limiter while an idle credential went
+        unused. Daily-budget exhaustion is invisible to the health model for
+        the same reason.
+        """
+        unavailable = {
+            index
+            for index, provider in enumerate(self._providers)
+            if provider.throttle_remaining() > 0
+        }
+        unavailable |= self._quota.exhausted_indices()
+        return frozenset(unavailable)
 
     def _key_label(self, index: int) -> str | None:
         if 0 <= index < len(self._key_labels):
@@ -102,7 +122,7 @@ class RotatingProvider(BaseProvider):
         last_error: Exception | None = None
 
         while len(attempted) < len(self._providers):
-            index = await self._state.acquire()
+            index = await self._state.acquire(self._unavailable_now())
             if index < 0:
                 # Every credential is benched (cooldown/circuit-open/lockout).
                 wait = await self._state.shortest_cooldown_remaining()
@@ -117,6 +137,7 @@ class RotatingProvider(BaseProvider):
                 # checks and could dispatch to a locked-out credential.
                 break
             attempted.add(index)
+            self._quota.record(index)
             record_credential(index, self._key_label(index))
 
             iterator = self._providers[index].stream_response(
@@ -168,7 +189,11 @@ class RotatingProvider(BaseProvider):
     def key_health(self) -> list[dict[str, Any]]:
         """Per-credential health snapshots (index-aligned with api_keys)."""
         metrics = self._state.get_metrics()
+        quota = self._quota.snapshot()
         for index, entry in enumerate(metrics):
             entry["index"] = index
             entry["key_label"] = self._key_label(index)
+            entry["throttle_remaining"] = self._providers[index].throttle_remaining()
+            if index < len(quota):
+                entry.update(quota[index])
         return metrics

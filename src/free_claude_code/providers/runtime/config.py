@@ -2,6 +2,8 @@
 
 import os
 
+from loguru import logger
+
 from free_claude_code.application.errors import ApplicationUnavailableError
 from free_claude_code.config.credentials import parse_credential_keys
 from free_claude_code.config.env_files import env_file_override
@@ -65,7 +67,83 @@ def credential_rotation_policy(
     value = value.strip().lower()
     if value in CREDENTIAL_ROTATION_POLICIES:
         return value
+    if value:
+        # Silently downgrading a typo to ``single`` pins every request to the
+        # first key with no visible signal, so say something.
+        logger.warning(
+            "{}={!r} is not a rotation policy ({}); using {}.",
+            env_key,
+            value,
+            ", ".join(sorted(CREDENTIAL_ROTATION_POLICIES)),
+            DEFAULT_CREDENTIAL_ROTATION,
+        )
     return DEFAULT_CREDENTIAL_ROTATION
+
+
+def _credential_env_value(
+    descriptor: ProviderDescriptor, settings: Settings, suffix: str
+) -> str:
+    if descriptor.credential_env is None:
+        return ""
+    env_key = f"{descriptor.credential_env}{suffix}"
+    value = env_file_override(settings.model_config, env_key)
+    if value is None:
+        value = os.environ.get(env_key, "")
+    return value.strip()
+
+
+def credential_daily_limit(descriptor: ProviderDescriptor, settings: Settings) -> int:
+    """Requests per credential per day, or 0 when no budget is configured.
+
+    Read from ``{CREDENTIAL_ENV}_DAILY_LIMIT``. Providers cap requests per day
+    as well as per minute, and a daily cap resets on a wall-clock boundary that
+    the rotation cooldowns cannot express.
+    """
+    raw = _credential_env_value(descriptor, settings, "_DAILY_LIMIT")
+    if not raw:
+        return 0
+    try:
+        limit = int(raw)
+    except ValueError:
+        logger.warning(
+            "{}_DAILY_LIMIT={!r} is not a whole number; ignoring it.",
+            descriptor.credential_env,
+            raw,
+        )
+        return 0
+    if limit < 0:
+        return 0
+    return limit
+
+
+def credential_quota_reset_offset_hours(
+    descriptor: ProviderDescriptor, settings: Settings
+) -> float:
+    """Hours to shift the daily reset away from UTC midnight.
+
+    Groq resets at UTC midnight (offset 0); Gemini resets at Pacific midnight
+    (offset -8). Read from ``{CREDENTIAL_ENV}_QUOTA_RESET_UTC_OFFSET``.
+    """
+    raw = _credential_env_value(descriptor, settings, "_QUOTA_RESET_UTC_OFFSET")
+    if not raw:
+        return 0.0
+    try:
+        offset = float(raw)
+    except ValueError:
+        logger.warning(
+            "{}_QUOTA_RESET_UTC_OFFSET={!r} is not a number; using UTC.",
+            descriptor.credential_env,
+            raw,
+        )
+        return 0.0
+    if not -24.0 <= offset <= 24.0:
+        logger.warning(
+            "{}_QUOTA_RESET_UTC_OFFSET={!r} is out of range; using UTC.",
+            descriptor.credential_env,
+            raw,
+        )
+        return 0.0
+    return offset
 
 
 def build_provider_config(

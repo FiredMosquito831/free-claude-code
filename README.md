@@ -76,7 +76,7 @@ Everything is configured through the same `.env` file (see [.env.example](.env.e
 Open **Windows PowerShell** (no admin rights needed) and run:
 
 ```powershell
-& ([scriptblock]::Create((irm "https://raw.githubusercontent.com/FiredMosquito831/free-claude-code/v4.16.0/scripts/install.ps1")))
+& ([scriptblock]::Create((irm "https://raw.githubusercontent.com/FiredMosquito831/free-claude-code/v4.17.0/scripts/install.ps1")))
 ```
 
 If PowerShell blocks the script, run it for this session only:
@@ -93,7 +93,7 @@ Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 Open your shell (in WSL, open the **Ubuntu** terminal — not PowerShell) and run:
 
 ```bash
-curl -fsSL "https://raw.githubusercontent.com/FiredMosquito831/free-claude-code/v4.16.0/scripts/install.sh" | sh
+curl -fsSL "https://raw.githubusercontent.com/FiredMosquito831/free-claude-code/v4.17.0/scripts/install.sh" | sh
 ```
 
 </details>
@@ -350,6 +350,19 @@ Each key gets its own upstream client and its own rate-limit window, so one key 
 **Health model.** A key that fails is benched with tiered cooldowns (10s → 30s → 60s → 120s); three consecutive failures open the circuit until the cooldown elapses, after which a **single** half-open probe is allowed through — concurrent requests are routed to other keys rather than stampeding the recovering one. A successful probe restores the key; a failed probe re-benches it at the next tier. Auth failures (401/403) trigger an escalating lockout (5 min → 1 h → 24 h) on their own counter, so unrelated transient errors can't push a healthy key toward the long lockout.
 
 Rate limits (429) escalate the cooldown ladder but deliberately do **not** open the circuit — a throttled key isn't a broken one.
+
+**Availability, not just health.** A key can be perfectly healthy and still unable to serve right now: rate-limited, or out of daily budget. Rotation skips those keys and picks one that can answer immediately, instead of queueing behind a throttled key while an idle key sits unused. If *every* key is unavailable the request still goes out rather than failing — a soft guardrail should never become a self-inflicted outage.
+
+**Provider-declared backoff.** On a 429, FCC reads the upstream's own `Retry-After`, `retry-after-ms`, and `X-RateLimit-Reset-*` headers (all the formats providers actually ship, including `6m0s` and `250ms`) and waits exactly that long, capped at an hour. Only when a provider says nothing does it fall back to a fixed minute.
+
+**Daily budgets.** Free tiers usually cap requests per *day*, and a daily cap resets at a fixed wall-clock instant rather than N seconds after a failure — something cooldown timers cannot express. Set a per-key budget and, when the provider doesn't reset at UTC midnight, the offset:
+
+```bash
+NVIDIA_NIM_API_KEY_DAILY_LIMIT=1000
+GEMINI_API_KEY_QUOTA_RESET_UTC_OFFSET=-8   # Gemini resets at Pacific midnight
+```
+
+Counts are in-memory, so a restart forgets the day's usage. That is a deliberate trade: the counter exists to avoid wasting requests, not to enforce billing, and persisting it would put a write on every request path.
 
 **When rotation happens.** Only for errors another key could actually fix: authentication, rate limits, 5xx/overload, and transport failures. A plain 400 fails identically on every key and is not rotated. Failover happens before the first streamed chunk; once output has started, switching credentials would corrupt the response, so a mid-stream failure is recorded against the key but propagated to the client.
 
@@ -747,32 +760,32 @@ macOS/Linux:
 
 ```bash
 # NVIDIA NIM transcription
-curl -fsSL "https://raw.githubusercontent.com/FiredMosquito831/free-claude-code/v4.16.0/scripts/install.sh" | sh -s -- --voice-nim
+curl -fsSL "https://raw.githubusercontent.com/FiredMosquito831/free-claude-code/v4.17.0/scripts/install.sh" | sh -s -- --voice-nim
 
 # Local Whisper on CPU or CUDA
-curl -fsSL "https://raw.githubusercontent.com/FiredMosquito831/free-claude-code/v4.16.0/scripts/install.sh" | sh -s -- --voice-local
+curl -fsSL "https://raw.githubusercontent.com/FiredMosquito831/free-claude-code/v4.17.0/scripts/install.sh" | sh -s -- --voice-local
 
 # Both backends
-curl -fsSL "https://raw.githubusercontent.com/FiredMosquito831/free-claude-code/v4.16.0/scripts/install.sh" | sh -s -- --voice-all
+curl -fsSL "https://raw.githubusercontent.com/FiredMosquito831/free-claude-code/v4.17.0/scripts/install.sh" | sh -s -- --voice-all
 
 # Local Whisper with the CUDA 13.0 PyTorch backend
-curl -fsSL "https://raw.githubusercontent.com/FiredMosquito831/free-claude-code/v4.16.0/scripts/install.sh" | sh -s -- --voice-local --torch-backend cu130
+curl -fsSL "https://raw.githubusercontent.com/FiredMosquito831/free-claude-code/v4.17.0/scripts/install.sh" | sh -s -- --voice-local --torch-backend cu130
 ```
 
 Windows PowerShell:
 
 ```powershell
 # NVIDIA NIM transcription
-& ([scriptblock]::Create((irm "https://raw.githubusercontent.com/FiredMosquito831/free-claude-code/v4.16.0/scripts/install.ps1"))) -VoiceNim
+& ([scriptblock]::Create((irm "https://raw.githubusercontent.com/FiredMosquito831/free-claude-code/v4.17.0/scripts/install.ps1"))) -VoiceNim
 
 # Local Whisper on CPU or CUDA
-& ([scriptblock]::Create((irm "https://raw.githubusercontent.com/FiredMosquito831/free-claude-code/v4.16.0/scripts/install.ps1"))) -VoiceLocal
+& ([scriptblock]::Create((irm "https://raw.githubusercontent.com/FiredMosquito831/free-claude-code/v4.17.0/scripts/install.ps1"))) -VoiceLocal
 
 # Both backends
-& ([scriptblock]::Create((irm "https://raw.githubusercontent.com/FiredMosquito831/free-claude-code/v4.16.0/scripts/install.ps1"))) -VoiceAll
+& ([scriptblock]::Create((irm "https://raw.githubusercontent.com/FiredMosquito831/free-claude-code/v4.17.0/scripts/install.ps1"))) -VoiceAll
 
 # Local Whisper with the CUDA 13.0 PyTorch backend
-& ([scriptblock]::Create((irm "https://raw.githubusercontent.com/FiredMosquito831/free-claude-code/v4.16.0/scripts/install.ps1"))) -VoiceLocal -TorchBackend cu130
+& ([scriptblock]::Create((irm "https://raw.githubusercontent.com/FiredMosquito831/free-claude-code/v4.17.0/scripts/install.ps1"))) -VoiceLocal -TorchBackend cu130
 ```
 
 Restart `fcc-server`. In **Admin UI → Messaging → Voice**, enable voice notes, select `cpu`, `cuda`, or `nvidia_nim`, and choose the Whisper model. Local gated models need `HUGGINGFACE_API_KEY`; NVIDIA NIM transcription needs `NVIDIA_NIM_API_KEY`.

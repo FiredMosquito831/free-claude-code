@@ -160,38 +160,22 @@ class CredentialRotationState:
             health.state == STATE_HALF_OPEN and not health.is_probing
         )
 
-    async def acquire(self) -> int:
-        """Return the index of the credential to use for one new request."""
+    async def acquire(self, avoid: frozenset[int] = frozenset()) -> int:
+        """Return the index of the credential to use for one new request.
+
+        ``avoid`` lists credentials that are healthy but cannot serve right now
+        -- rate-limited, or out of daily budget. They are skipped when anything
+        else is available, and fall back to normal selection when every
+        credential is in that state, so a fully throttled pool still queues on
+        its limiter rather than hard-failing.
+        """
         async with self._lock:
             now = time.monotonic()
             self._update_states(now)
 
-            selected: int | None = None
-            if self._policy == "single" or self._key_count == 1:
-                # Still falls through to the bookkeeping below: a single-key or
-                # ``single``-policy pool must report usage like any other, or
-                # per-key analytics stay empty for the default configuration.
-                selected = 0
-            elif self._policy == "round_robin":
-                for i in range(self._key_count):
-                    index = (self._rr_index + i) % self._key_count
-                    if self._selectable(self._health[index]):
-                        selected = index
-                        self._rr_index = (index + 1) % self._key_count
-                        break
-            elif self._policy == "least_used":
-                candidates = [
-                    (h.request_count, h.last_used, i)
-                    for i, h in enumerate(self._health)
-                    if self._selectable(h)
-                ]
-                if candidates:
-                    selected = min(candidates)[2]
-            else:  # failover
-                for i, health in enumerate(self._health):
-                    if self._selectable(health):
-                        selected = i
-                        break
+            selected = self._select(now, avoid)
+            if selected is None and avoid:
+                selected = self._select(now, frozenset())
 
             if selected is None:
                 return -1
@@ -202,6 +186,40 @@ class CredentialRotationState:
             if health.state == STATE_HALF_OPEN:
                 health.is_probing = True
             return selected
+
+    def _select(self, now: float, avoid: frozenset[int]) -> int | None:
+        """Pick a credential under the configured policy, skipping ``avoid``."""
+
+        def usable(index: int) -> bool:
+            return index not in avoid and self._selectable(self._health[index])
+
+        selected: int | None = None
+        if self._policy == "single" or self._key_count == 1:
+            # Still reports usage like any other policy: a single-key or
+            # ``single``-policy pool must count requests, or per-key analytics
+            # stay empty for the default configuration.
+            selected = 0
+        elif self._policy == "round_robin":
+            for i in range(self._key_count):
+                index = (self._rr_index + i) % self._key_count
+                if usable(index):
+                    selected = index
+                    self._rr_index = (index + 1) % self._key_count
+                    break
+        elif self._policy == "least_used":
+            candidates = [
+                (h.request_count, h.last_used, i)
+                for i, h in enumerate(self._health)
+                if usable(i)
+            ]
+            if candidates:
+                selected = min(candidates)[2]
+        else:  # failover
+            for i in range(self._key_count):
+                if usable(i):
+                    selected = i
+                    break
+        return selected
 
     def release_probe(self, index: int) -> None:
         """Clear a half-open probe reservation without judging the credential.
