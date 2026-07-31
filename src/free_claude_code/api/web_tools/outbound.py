@@ -273,9 +273,19 @@ async def _drain_aiohttp_body_capped(
 
 
 async def _run_web_search(
-    query: str, settings: Settings | None = None
+    query: str,
+    settings: Settings | None = None,
+    *,
+    allowed_domains: tuple[str, ...] = (),
+    blocked_domains: tuple[str, ...] = (),
 ) -> list[dict[str, str]]:
-    """Run web_search using the configured, explicit fallback route."""
+    """Run web_search using the configured, explicit fallback route.
+
+    ``allowed_domains``/``blocked_domains`` come from the client's tool
+    definition. Providers that cannot filter server-side drop them in
+    :meth:`BaseWebSearchProvider.search`, which is recorded per attempt as
+    ``supports_domain_filters``.
+    """
 
     settings = settings if settings is not None else Settings()
     trace = _SearchRouteTrace(
@@ -310,6 +320,8 @@ async def _run_web_search(
                 route,
                 trace,
                 route_context,
+                allowed_domains=allowed_domains,
+                blocked_domains=blocked_domains,
             )
             if results is not None:
                 return results
@@ -337,6 +349,9 @@ async def _provider_web_search(
     route: WebSearchRoute,
     trace: _SearchRouteTrace,
     route_context: dict[str, object],
+    *,
+    allowed_domains: tuple[str, ...] = (),
+    blocked_domains: tuple[str, ...] = (),
 ) -> list[dict[str, str]] | None:
     """Try the provider route; None means its terminal legacy fallback may run."""
 
@@ -365,6 +380,8 @@ async def _provider_web_search(
                 provider,
                 query,
                 max_results=_MAX_SEARCH_RESULTS,
+                allowed_domains=allowed_domains,
+                blocked_domains=blocked_domains,
                 route_id=trace.route_id,
                 attempt_number=attempt_number,
                 route_context=route_context,
@@ -461,12 +478,14 @@ def _emit_manual_attempt(
     results: list[dict[str, str]] | None = None,
     error: BaseException | None = None,
     route_context: dict[str, object] | None = None,
+    allowed_domains: tuple[str, ...] = (),
+    blocked_domains: tuple[str, ...] = (),
 ) -> None:
     input_payload: dict[str, object] = {
         "query": trace.query,
         "max_results": _MAX_SEARCH_RESULTS,
-        "allowed_domains": [],
-        "blocked_domains": [],
+        "allowed_domains": list(allowed_domains),
+        "blocked_domains": list(blocked_domains),
     }
     output_payload: dict[str, object]
     if error is None:
@@ -557,13 +576,20 @@ def _elapsed_ms(started: float) -> float:
 
 def _web_search_response_items(response: WebSearchResponse) -> list[dict[str, str]]:
     """Pass provider richness through to the streaming digest (title/url only
-    was the v4.9.0 shape; snippet/published/answer/provider are additive)."""
+    was the v4.9.0 shape; snippet/content/published/answer/provider are additive).
+
+    ``content`` is the provider's extracted page text, populated by exa,
+    tavily, firecrawl, jina, brave, ollama and parallel when the operator turns
+    the corresponding option on. It is deliberately carried separately from
+    ``snippet`` so the digest can prefer the fuller text under its own cap.
+    """
 
     return [
         {
             "title": item.title,
             "url": item.url,
             "snippet": item.snippet,
+            "content": item.content or "",
             "published": item.published or "",
             "answer": response.answer or "",
             "provider": response.provider,

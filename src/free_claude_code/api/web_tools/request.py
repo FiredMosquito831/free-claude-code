@@ -1,8 +1,54 @@
-"""Detect forced Anthropic web server tool requests."""
+"""Detect forced Anthropic web server tool requests and read their parameters."""
+
+from dataclasses import dataclass
 
 from free_claude_code.core.anthropic import MessagesRequest, Tool
 
 from .parsers import content_text
+
+
+@dataclass(frozen=True, slots=True)
+class WebSearchToolOptions:
+    """Parameters the client declared on its ``web_search`` tool definition.
+
+    Anthropic documents ``max_uses``, ``allowed_domains``, ``blocked_domains``
+    and ``user_location`` on the tool itself rather than on the tool call, so
+    they arrive as extra fields on :class:`Tool` (which allows extras).
+    """
+
+    allowed_domains: tuple[str, ...] = ()
+    blocked_domains: tuple[str, ...] = ()
+    max_uses: int | None = None
+
+
+def _domain_tuple(raw: object) -> tuple[str, ...]:
+    if not isinstance(raw, list | tuple):
+        return ()
+    return tuple(str(entry).strip() for entry in raw if str(entry).strip())
+
+
+def web_search_tool_options(request: MessagesRequest) -> WebSearchToolOptions:
+    """Read search parameters off the request's ``web_search`` tool definition.
+
+    Anthropic rejects a request carrying both allow and block lists, so a
+    caller sending both is honoured on the allow list alone rather than
+    silently intersecting them.
+    """
+
+    for tool in request.tools or []:
+        if tool.name != "web_search":
+            continue
+        extra = tool.model_extra or {}
+        allowed = _domain_tuple(extra.get("allowed_domains"))
+        blocked = () if allowed else _domain_tuple(extra.get("blocked_domains"))
+        raw_max_uses = extra.get("max_uses")
+        max_uses = raw_max_uses if isinstance(raw_max_uses, int) else None
+        return WebSearchToolOptions(
+            allowed_domains=allowed,
+            blocked_domains=blocked,
+            max_uses=max_uses,
+        )
+    return WebSearchToolOptions()
 
 
 def forced_tool_turn_text(request: MessagesRequest) -> str:

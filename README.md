@@ -489,9 +489,16 @@ See the **Web Search Advanced Options** block in [.env.example](.env.example) fo
 Search results are rendered as a richer digest than a plain title/URL list: an optional provider **answer lead** (from Exa/Tavily/Linkup/Serper rich blocks, etc.), then numbered results with title, publication date (`page_age` where the provider exposes it), URL, and an excerpt capped per result:
 
 ```bash
-WEBSEARCH_DIGEST_CHARS=600     # per-result excerpt character cap
-WEBSEARCH_DIGEST_ANSWER=true   # include the provider answer lead
+WEBSEARCH_DIGEST_CHARS=600           # per-result snippet cap
+WEBSEARCH_DIGEST_CONTENT_CHARS=2000  # per-result cap for extracted page text
+WEBSEARCH_DIGEST_ANSWER=true         # include the provider answer lead
 ```
+
+When a provider returns **extracted page text** rather than just a snippet — `EXA_CONTENTS`, `TAVILY_INCLUDE_RAW_CONTENT`, `FIRECRAWL_SCRAPE_FORMAT`, `BRAVE_EXTRA_SNIPPETS`, and Jina/Parallel by default — that fuller text is used in place of the snippet and capped by `WEBSEARCH_DIGEST_CONTENT_CHARS`. It has its own, larger cap so opting into content is not trimmed back to snippet length. Raise it to give the model more per result, at the cost of input tokens.
+
+### Domain filtering and search caps
+
+Claude Code declares `allowed_domains`, `blocked_domains`, and `max_uses` on its `web_search` tool definition. These are read from the request and forwarded to the provider, so `allowed_domains: ["docs.python.org"]` restricts results server-side on providers that support it (Exa, Tavily, Firecrawl, Linkup, Perplexity). Providers without native support drop the filters; each recorded attempt shows `supports_domain_filters` so you can tell which happened. Anthropic rejects requests carrying both lists, so if both arrive the allow list wins.
 
 ### Web search analytics
 

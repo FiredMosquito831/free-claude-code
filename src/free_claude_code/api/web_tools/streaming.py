@@ -15,6 +15,11 @@ from free_claude_code.core.anthropic.server_tool_sse import (
     WEB_SEARCH_TOOL_RESULT_ERROR,
 )
 from free_claude_code.core.anthropic.streaming import format_sse_event
+from free_claude_code.websearch.errors import (
+    WebSearchInvalidRequestError,
+    WebSearchQuotaError,
+    WebSearchRateLimitError,
+)
 
 from . import outbound
 from .constants import _MAX_FETCH_CHARS
@@ -24,7 +29,30 @@ from .request import (
     forced_server_tool_name,
     forced_tool_turn_text,
     has_tool_named,
+    web_search_tool_options,
 )
+
+
+class _MaxUsesExceeded(Exception):
+    """The client's ``max_uses`` budget leaves no room for this search."""
+
+
+def _web_search_error_code(error: BaseException) -> str:
+    """Map a failure to one of Anthropic's documented ``error_code`` values.
+
+    Collapsing everything to ``unavailable`` loses the distinction a client
+    acts on: ``too_many_requests`` is worth retrying later, an invalid input
+    never is. Anything we cannot classify confidently stays ``unavailable``.
+    """
+
+    if isinstance(error, _MaxUsesExceeded):
+        return "max_uses_exceeded"
+    if isinstance(error, WebSearchRateLimitError | WebSearchQuotaError):
+        return "too_many_requests"
+    if isinstance(error, WebSearchInvalidRequestError):
+        return "invalid_tool_input"
+    return "unavailable"
+
 
 _MONTH_NAMES = (
     "January",
@@ -89,9 +117,17 @@ def _search_summary(
         if published := result.get("published", ""):
             header += f" ({_format_page_age(published)})"
         block = f"{header}\n{result['url']}"
-        excerpt = result.get("snippet", "") or result.get("content", "")
+        # Extracted page text beats the snippet when the provider returned it:
+        # it is what the operator opted in (and paid) for. It gets its own,
+        # larger cap so enabling content is not silently trimmed to snippet
+        # length.
+        content = result.get("content", "")
+        if content:
+            excerpt = content[: settings.websearch_digest_content_chars]
+        else:
+            excerpt = result.get("snippet", "")[: settings.websearch_digest_chars]
         if excerpt:
-            block += f"\n{excerpt[: settings.websearch_digest_chars]}"
+            block += f"\n{excerpt}"
         lines.append(block)
     return "\n\n".join(lines)
 
@@ -169,7 +205,17 @@ async def stream_web_server_tool_response(
         if tool_name == "web_search":
             query = str(tool_input["query"])
             settings = Settings()
-            results = await outbound._run_web_search(query, settings)
+            search_options = web_search_tool_options(request)
+            if search_options.max_uses is not None and search_options.max_uses < 1:
+                raise _MaxUsesExceeded(
+                    f"web_search max_uses is {search_options.max_uses}"
+                )
+            results = await outbound._run_web_search(
+                query,
+                settings,
+                allowed_domains=search_options.allowed_domains,
+                blocked_domains=search_options.blocked_domains,
+            )
             result_content: Any = [
                 _web_search_result_block(result) for result in results
             ]
@@ -202,7 +248,11 @@ async def stream_web_server_tool_response(
         result_block_type = _result_block_for_tool[tool_name]
         result_content = {
             "type": _error_payload_type_for_tool[tool_name],
-            "error_code": "unavailable",
+            "error_code": (
+                _web_search_error_code(error)
+                if tool_name == "web_search"
+                else "unavailable"
+            ),
         }
         summary = outbound._web_tool_client_error_summary(
             tool_name, error, verbose=verbose_client_errors
