@@ -416,9 +416,15 @@ def _spawn_deferred_upgrade(
             ok=False, message=f"Could not stage the update: {exc!s}", log=log
         )
 
-    # DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP: the helper must outlive us,
-    # and must not die with the console this server was started from.
-    creation_flags = 0x00000008 | 0x00000200
+    # CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP.
+    #
+    # Not DETACHED_PROCESS: it denies the child a console entirely and
+    # powershell.exe then exits immediately without running the script, so the
+    # update silently never happened. CREATE_NO_WINDOW keeps a console the
+    # child can use while hiding it, and the new process group means the helper
+    # is not signalled along with the console this server was started from.
+    # Verified: with CREATE_NO_WINDOW the helper both runs and outlives us.
+    creation_flags = 0x08000000 | 0x00000200
     try:
         subprocess.Popen(
             [

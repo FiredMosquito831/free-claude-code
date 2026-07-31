@@ -467,7 +467,10 @@ def test_upgrade_stages_instead_of_installing_on_windows(monkeypatch, tmp_path) 
     assert spawned, "expected a detached helper to be spawned"
     # Detached + new process group so it outlives this server and its console.
     kwargs = spawned["kwargs"]
-    assert kwargs["creationflags"] == (0x00000008 | 0x00000200)
+    # CREATE_NO_WINDOW, never DETACHED_PROCESS: the latter leaves powershell
+    # without a console and it exits without running the script at all.
+    assert kwargs["creationflags"] == (0x08000000 | 0x00000200)
+    assert not kwargs["creationflags"] & 0x00000008
 
 
 def test_pending_upgrade_result_reports_a_failed_deferred_install(
