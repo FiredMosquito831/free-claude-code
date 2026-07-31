@@ -329,9 +329,11 @@ def _process_creation_filetime() -> int:
     can tell our parent apart from a later process that reused its id.
     """
 
-    if not _WINDOWS:
-        # Only meaningful on Windows; 0 makes the helper fall back to the id
-        # alone, and the tests that render the script run on Linux CI too.
+    # Keyed off the real platform, not ``_WINDOWS``: tests flip that flag to
+    # exercise the staging path on Linux CI, and this call must still not
+    # reach for a Win32 API that isn't there. 0 makes the helper fall back to
+    # matching on the process id alone.
+    if os.name != "nt":
         return 0
     # Imported here, not at module scope: ``ctypes.wintypes`` raises on
     # non-Windows, and this module is imported on every platform.

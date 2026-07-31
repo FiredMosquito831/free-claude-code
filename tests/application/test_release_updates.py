@@ -575,3 +575,16 @@ def test_process_creation_filetime_matches_powershell() -> None:
         check=False,
     ).stdout.strip()
     assert theirs == str(ours)
+
+
+def test_creation_time_lookup_keys_off_the_real_platform(monkeypatch) -> None:
+    """Flipping _WINDOWS for tests must not reach for a Win32 API.
+
+    The staging test sets _WINDOWS=True to exercise that path on Linux CI; if
+    the creation-time lookup keyed off the same flag it would call WinDLL and
+    blow up there.
+    """
+
+    monkeypatch.setattr(release_updates, "_WINDOWS", True)
+    monkeypatch.setattr(release_updates.os, "name", "posix")
+    assert release_updates._process_creation_filetime() == 0
