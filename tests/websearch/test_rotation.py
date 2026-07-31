@@ -2,6 +2,7 @@
 
 import pytest
 
+from free_claude_code.core.rate_limit import MAX_RATE_LIMIT_COOLDOWN_SECONDS
 from free_claude_code.websearch.rotation import (
     CIRCUIT_OPEN_SECONDS,
     LOCKOUT_BASE_SECONDS,
@@ -184,6 +185,27 @@ class TestHealthTransitions:
         )
         assert health.rate_limits == 1
         assert health.consecutive_failures == 0  # 429 does not climb the ladder
+
+    def test_rate_limit_honours_provider_supplied_retry_after(self) -> None:
+        """The provider's own reset beats our default guess."""
+
+        clock = FakeClock()
+        pool = KeyPool(("k0",), policy="failover", clock=clock)
+        pool.report_rate_limit(0, retry_after_seconds=7.5)
+        health = pool.health_at(0)
+        assert health.state is KeyHealthState.COOLDOWN
+        assert health.state_until == pytest.approx(clock.now + 7.5)
+
+    def test_rate_limit_retry_after_is_capped(self) -> None:
+        """A hostile or misparsed header cannot bench a key indefinitely."""
+
+        clock = FakeClock()
+        pool = KeyPool(("k0",), policy="failover", clock=clock)
+        pool.report_rate_limit(0, retry_after_seconds=999_999.0)
+        health = pool.health_at(0)
+        assert health.state_until == pytest.approx(
+            clock.now + MAX_RATE_LIMIT_COOLDOWN_SECONDS
+        )
 
     def test_report_failure_with_rate_limit_kind_delegates(self) -> None:
         clock = FakeClock()

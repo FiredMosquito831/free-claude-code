@@ -331,6 +331,77 @@ class TestRetention:
         assert [row["query"] for row in items] == ["q6", "q5", "q4", "q3", "q2"]
         store.close()
 
+    def test_route_retention_tracks_surviving_attempt_window(self, tmp_path) -> None:
+        """Routes must not outlive the attempts they summarize.
+
+        Each logical route writes more than one attempt row, so ``search_log``
+        reaches ``max_rows`` first. Pruning both tables to the same row count
+        would leave old routes describing a window whose attempt detail is
+        already gone, and the admin UI shows the two tables side by side as if
+        they covered the same period.
+        """
+
+        store = WebSearchLogStore(tmp_path / "websearch.db", max_rows=6, prune_every=1)
+        for index in range(6):
+            route_id = f"route-{index}"
+            ts = _BASE_TS + index
+            # Two attempts per route (a fallback hop), one route row.
+            store.record(_outcome(ts_epoch=ts, route_id=route_id, attempt_number=1))
+            store.record(_outcome(ts_epoch=ts, route_id=route_id, attempt_number=2))
+            store.record_route(_route_outcome(route_id=route_id, ts_epoch=ts))
+        store.flush()
+
+        attempts = store.requests(limit=50)["items"]
+        oldest_attempt = min(row["ts_epoch"] for row in attempts)
+
+        with sqlite3.connect(tmp_path / "websearch.db") as connection:
+            oldest_route, surviving_routes = connection.execute(
+                "SELECT MIN(ts_epoch), COUNT(*) FROM search_route_log"
+            ).fetchone()
+
+        assert surviving_routes, "expected surviving route rows"
+
+        assert oldest_route is not None
+        assert oldest_route >= oldest_attempt, (
+            "route rows survive older than the oldest retained attempt: "
+            f"route={oldest_route} attempt={oldest_attempt}"
+        )
+        store.close()
+
+
+class TestQueryCapture:
+    def test_query_text_is_withheld_when_content_capture_is_off(self, tmp_path) -> None:
+        """``WEBSEARCH_LOG_CAPTURE_CONTENT=false`` must also cover the query.
+
+        The setting exists so operators can stop persisting search content;
+        the query string is search content too, and previously bypassed it.
+        """
+
+        store = WebSearchLogStore(
+            tmp_path / "websearch.db",
+            max_rows=100,
+            prune_every=1,
+            capture_content=False,
+        )
+        store.record(
+            _outcome(
+                query="internal-hostname prod token rotation",
+                input_payload={"query": "internal-hostname prod token rotation"},
+                output_payload={"results": []},
+            )
+        )
+        store.flush()
+
+        (row,) = store.requests()["items"]
+        assert row["content_captured"] == 0
+        assert "internal-hostname" not in (row["query"] or "")
+
+        detail = store.request(row["id"])
+        assert detail is not None
+        assert detail["input"] is None
+        assert "internal-hostname" not in (detail["query"] or "")
+        store.close()
+
 
 def _record_boundary_rows(store: WebSearchLogStore) -> None:
     # 2025-12-28 (Sun) is ISO week 2025-W52; 2025-12-29 (Mon) is ISO week 2026-W01.

@@ -135,3 +135,42 @@ class TestExtractErrorMessage:
         long_message = extract_error_message({"error": "x" * 1000})
         assert len(long_message) <= 301
         assert long_message.endswith("…")
+
+
+class TestRateLimitRetryAfter:
+    """A 429 carries the provider's own reset time; don't discard it."""
+
+    @pytest.mark.parametrize(
+        ("header", "value", "expected"),
+        [
+            ("retry-after", "12", 12.0),
+            ("retry-after-ms", "2500", 2.5),
+            ("x-ratelimit-reset-requests", "6m0s", 360.0),
+            ("ratelimit-reset", "45", 45.0),
+        ],
+    )
+    @pytest.mark.asyncio
+    async def test_retry_after_is_attached_to_rate_limit_error(
+        self, header, value, expected
+    ) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(
+                429, json={"error": "slow down"}, headers={header: value}
+            )
+
+        client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+        with pytest.raises(WebSearchRateLimitError) as excinfo:
+            await request_json(client, "exa", "GET", "https://example.test/search")
+        assert excinfo.value.retry_after_seconds == pytest.approx(expected)
+        await client.aclose()
+
+    @pytest.mark.asyncio
+    async def test_missing_header_leaves_retry_after_unset(self) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(429, json={"error": "slow down"})
+
+        client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+        with pytest.raises(WebSearchRateLimitError) as excinfo:
+            await request_json(client, "exa", "GET", "https://example.test/search")
+        assert excinfo.value.retry_after_seconds is None
+        await client.aclose()
