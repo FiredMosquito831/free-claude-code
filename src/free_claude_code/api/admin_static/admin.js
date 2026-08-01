@@ -79,6 +79,15 @@ const VIEW_GROUPS = [
     sections: ["websearch"],
     containerId: "webSearchSections",
   },
+  {
+    // Static content: no settings sections, nothing to fetch, so it stays
+    // readable even when the server cannot reach a provider or the network.
+    id: "guide",
+    label: "Guide",
+    title: "Guide",
+    sections: [],
+    containerId: null,
+  },
 ];
 
 const byId = (id) => document.getElementById(id);
@@ -261,7 +270,9 @@ function updateProviderCard(providerId, status, label, metaText) {
 function renderSections(sections, fields) {
   state.modelComboboxes.clear();
   VIEW_GROUPS.forEach((view) => {
-    byId(view.containerId).innerHTML = "";
+    // Static views (the guide) have no settings container to clear.
+    const container = view.containerId ? byId(view.containerId) : null;
+    if (container) container.innerHTML = "";
   });
 
   const sectionById = new Map(sections.map((section) => [section.id, section]));
@@ -273,7 +284,8 @@ function renderSections(sections, fields) {
   });
 
   VIEW_GROUPS.forEach((view) => {
-    const container = byId(view.containerId);
+    const container = view.containerId ? byId(view.containerId) : null;
+    if (!container) return;
     view.sections.forEach((sectionId) => {
       const section = sectionById.get(sectionId);
       const sectionFields = bySection.get(sectionId) || [];

@@ -457,6 +457,229 @@
               </div>
             </div>
           </section>
+          <section id="view-guide" class="admin-view" data-view="guide" hidden>
+            <div class="guide">
+              <nav class="guide-toc" aria-label="Guide contents">
+                <a href="#guide-start">Quick start</a>
+                <a href="#guide-keys">API keys</a>
+                <a href="#guide-models">Models</a>
+                <a href="#guide-clients">Connect a client</a>
+                <a href="#guide-websearch">Web search</a>
+                <a href="#guide-analytics">Analytics</a>
+                <a href="#guide-rotation">Key rotation</a>
+                <a href="#guide-updates">Updating</a>
+                <a href="#guide-trouble">Troubleshooting</a>
+              </nav>
+
+              <article class="guide-body">
+                <h3 id="guide-start">Quick start</h3>
+                <p>
+                  Free Claude Code is a local proxy that <strong>speaks Anthropic's
+                  API</strong>. Your coding agent thinks it is talking to Anthropic; this
+                  proxy forwards the request to whichever provider you configure and
+                  translates the response back. Streaming, tool use, reasoning and image
+                  input keep working.
+                </p>
+                <ol>
+                  <li>Add a provider key under <strong>Providers</strong> and press
+                    <em>Validate</em>, then <em>Apply</em>.</li>
+                  <li>Map the model tiers under <strong>Model Config</strong>.</li>
+                  <li>Point your agent at this server &mdash; run <code>fcc-claude</code>,
+                    or set <code>ANTHROPIC_BASE_URL</code> yourself.</li>
+                </ol>
+                <p class="guide-note">
+                  The proxy has to stay running for your agent to work. It is a server, not
+                  a library. This dashboard is loopback-only and never exposed to your
+                  network.
+                </p>
+
+                <h3 id="guide-keys">API keys</h3>
+                <p>
+                  Each provider card on the <strong>Providers</strong> tab takes a key.
+                  <em>Validate</em> makes a real call, so a green result means the key works
+                  <em>and</em> the model you selected is reachable with it.
+                </p>
+                <ul>
+                  <li><strong>401</strong> &mdash; the key is wrong.</li>
+                  <li><strong>404</strong> &mdash; the key is usually fine, but the
+                    <em>model id</em> is not available on your account.</li>
+                </ul>
+                <p>
+                  Everything here is stored in <code>~/.fcc/.env</code>. You can edit that
+                  file directly instead; restart the server afterwards, since config is read
+                  at startup.
+                </p>
+
+                <h3 id="guide-models">Models</h3>
+                <p>
+                  Routing is by <strong>tier</strong>, not by a single model: Fable, Opus,
+                  Sonnet, Haiku and a fallback each map to a real model on your provider.
+                  When your agent asks for Sonnet it gets whatever you mapped Sonnet to
+                  &mdash; which is why its own model picker lists this catalog.
+                </p>
+                <p class="guide-note">
+                  Map <strong>Haiku to something cheap and fast</strong>. Agents use the
+                  small tier constantly for internal bookkeeping, and a slow model there
+                  makes the whole session feel sluggish even when your main model is quick.
+                </p>
+
+                <h3 id="guide-clients">Connect a client</h3>
+                <p><strong>Claude Code (CLI)</strong> &mdash; easiest path:</p>
+                <pre><code>fcc-claude</code></pre>
+                <p>Or set it up by hand:</p>
+                <pre><code>export ANTHROPIC_BASE_URL="http://127.0.0.1:8082"
+export ANTHROPIC_AUTH_TOKEN="any-value"
+claude</code></pre>
+                <p>
+                  The token only matters if you enabled one on the proxy; otherwise any
+                  non-empty value works, because the real credentials live server-side.
+                </p>
+                <p>
+                  <strong>Claude Desktop</strong> &mdash; enable the developer menu in
+                  settings, then set the gateway to this server's address.
+                  <strong>Codex</strong> and <strong>Pi</strong> have their own launchers:
+                </p>
+                <pre><code>fcc-codex
+fcc-pi</code></pre>
+                <p>
+                  Use the address printed in the startup log. The proxy binds to loopback,
+                  so a client on another machine cannot reach it.
+                </p>
+
+                <h3 id="guide-websearch">Web search</h3>
+                <p>
+                  Claude Code's <code>web_search</code> is normally executed and billed by
+                  Anthropic. This proxy fulfils it locally against a provider you pick, so
+                  no Anthropic search credits are used and it works with any model provider.
+                </p>
+                <p>
+                  <code>WEB_SEARCH_PROVIDER=auto</code> works with <strong>zero
+                  configuration</strong> &mdash; with no keys set it falls back to keyless
+                  DuckDuckGo. Set a key for anything else and <code>auto</code> prefers it.
+                  A missing key always fails visibly rather than silently degrading.
+                </p>
+                <p>
+                  <strong>The setting most worth changing:</strong> by default most
+                  providers return a one or two sentence snippet. Several can return the
+                  extracted text of the page, which is the difference between the model
+                  guessing from a summary and actually reading the source.
+                </p>
+                <pre><code>EXA_CONTENTS=text
+TAVILY_INCLUDE_RAW_CONTENT=markdown
+FIRECRAWL_SCRAPE_FORMAT=markdown
+
+WEBSEARCH_DIGEST_CONTENT_CHARS=4000</code></pre>
+                <p>
+                  Extracted text has its own cap, separate from the snippet cap, so opting
+                  in is not trimmed back to snippet length. It costs more on most providers
+                  and adds input tokens to every search &mdash; each option's drawer states
+                  its cost. Jina, Parallel and Linkup return extracted text by default.
+                </p>
+                <p>
+                  Useful for coding work: <code>FIRECRAWL_CATEGORIES=github,research</code>
+                  restricts results to GitHub or papers, and
+                  <code>TAVILY_CHUNKS_PER_SOURCE=3</code> is the cheapest way to get more
+                  text out of Tavily.
+                </p>
+
+                <h3 id="guide-analytics">Analytics</h3>
+                <p>
+                  Two local SQLite stores under <code>~/.fcc/logs/</code>, both written by a
+                  background thread so they never block a request.
+                  <strong>Analytics</strong> covers model requests; <strong>Web
+                  Search</strong> has its own.
+                </p>
+                <p>Input tokens are reported in two parts:</p>
+                <ul>
+                  <li><strong>Input (uncached)</strong> &mdash; prompt tokens the provider
+                    actually processed.</li>
+                  <li><strong>Cached input</strong> &mdash; prompt tokens served from the
+                    provider's cache.</li>
+                  <li><strong>Cache hit rate</strong> &mdash; cached divided by total
+                    input.</li>
+                </ul>
+                <p class="guide-note">
+                  A hit rate of <strong>&mdash;</strong> means that provider never reported
+                  caching at all, which is different from a measured <strong>0.0%</strong>.
+                  Prompt caching is provider-dependent: OpenAI (prefixes of 1,024+ tokens)
+                  and DeepSeek report it. NVIDIA NIM's hosted endpoint does not do real
+                  prefix caching, so a near-zero rate there is accurate rather than a fault.
+                </p>
+                <p>
+                  Every row has a <em>View</em> dialog with the full exchange and the
+                  resolved configuration &mdash; usually the fastest way to see what
+                  actually happened. Web search analytics separate <em>logical searches</em>
+                  from <em>provider attempts</em>, so a fallback shows as one search and
+                  several attempts.
+                </p>
+                <p>
+                  Search content routinely includes private queries and page text. Setting
+                  <code>WEBSEARCH_LOG_CAPTURE_CONTENT=false</code> withholds the payloads
+                  <em>and</em> the query text, keeping only lengths and hashes. API keys are
+                  never written to either store &mdash; only masked labels.
+                </p>
+
+                <h3 id="guide-rotation">Key rotation</h3>
+                <p>
+                  Model and web search providers both accept several keys in one variable:
+                </p>
+                <pre><code>EXA_API_KEY="key-a,key-b,key-c"
+EXA_API_KEY_ROTATION=failover</code></pre>
+                <p>
+                  Policies are <code>single</code>, <code>round_robin</code>,
+                  <code>least_used</code> and <code>failover</code> &mdash; the default is
+                  <code>failover</code> with several keys, <code>single</code> with one.
+                </p>
+                <p>
+                  Health is tracked per key: repeated failures cool a key down on a rising
+                  ladder, sustained failures open a circuit, and auth failures lock it out
+                  for longer each time. A rate-limited key is benched for exactly as long as
+                  the provider asks via its <code>Retry-After</code> header, rather than an
+                  invented fixed delay.
+                </p>
+
+                <h3 id="guide-updates">Updating</h3>
+                <p>
+                  The version panel announces new releases with their notes inline.
+                  <em>Update now</em> downloads the wheel, verifies the SHA-256 that GitHub
+                  publishes for it, and installs it. A checksum mismatch aborts. Extras you
+                  installed, such as voice support, are preserved.
+                </p>
+                <p>
+                  Upgrading never restarts the server, so it cannot drop an in-flight
+                  stream &mdash; you restart when it suits you.
+                </p>
+                <p class="guide-note">
+                  <strong>On Windows the install is deferred.</strong> Windows holds the
+                  running interpreter open, so the environment cannot be replaced underneath
+                  a live process. The verified wheel is staged and a background helper
+                  installs it once you stop the server. Your working install is untouched
+                  until then, so a failed update cannot strand you.
+                </p>
+
+                <h3 id="guide-trouble">Troubleshooting</h3>
+                <ul>
+                  <li><strong><code>fcc-server</code> not found after installing</strong>
+                    &mdash; close and reopen your terminal. The installer extends
+                    <code>PATH</code>; an already-open shell will not see it.</li>
+                  <li><strong>Two configs on Windows</strong> &mdash; installing under both
+                    PowerShell and WSL gives you separate <code>.fcc</code> directories. The
+                    server prints which one it is using at startup.</li>
+                  <li><strong>Validation fails with 404</strong> &mdash; usually the model
+                    id, not the key.</li>
+                  <li><strong>Agent cannot reach the proxy</strong> &mdash; check the
+                    address in the startup log. The proxy is loopback-only by design.</li>
+                  <li><strong>Web search returns nothing useful</strong> &mdash; open the
+                    attempt detail in Web Search analytics; it shows exactly what was sent
+                    and returned.</li>
+                </ul>
+                <p class="guide-note">
+                  The full written guide, with screenshots, lives at
+                  <code>docs/USAGE.md</code> in the repository.
+                </p>
+              </article>
+            </div>
+          </section>
         </div>
       </main>
 
