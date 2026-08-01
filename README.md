@@ -14,7 +14,7 @@ An Anthropic-compatible local proxy for Claude Code, Codex, Pi, and their IDE ex
 
 Run your coding agents with free, paid, or local models. Choose and validate providers from one local Admin UI.
 
-[Features](#features) · [Quick Start](#quick-start) · [Model Providers](#model-providers) · [Web Search](#web-search) · [Admin Dashboard](#admin-dashboard) · [Updates](#version--updates) · [Clients](#connect-your-client) · [Integrations](#optional-integrations) · [Manage](#manage-your-installation)
+[Usage Guide](docs/USAGE.md) · [Features](#features) · [Quick Start](#quick-start) · [Model Providers](#model-providers) · [Web Search](#web-search) · [Admin Dashboard](#admin-dashboard) · [Updates](#version--updates) · [Clients](#connect-your-client) · [Integrations](#optional-integrations) · [Manage](#manage-your-installation)
 
 </div>
 
@@ -59,6 +59,8 @@ Run your coding agents with free, paid, or local models. Choose and validate pro
 | **Security** | Optional token authentication for the local proxy. |
 
 Everything is configured through the same `.env` file (see [.env.example](.env.example)) and the Admin UI.
+
+> **New here?** The [Usage Guide](docs/USAGE.md) walks through install, adding keys, mapping models, connecting Claude Code and Claude Desktop, web search, and analytics — with screenshots.
 
 ## Quick Start
 

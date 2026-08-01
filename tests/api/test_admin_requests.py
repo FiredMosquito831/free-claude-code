@@ -157,6 +157,7 @@ def test_stats_endpoint_filter_changes_cards_breakdowns_series_and_errors(
             "tokens_out": 4,
             "cache_read_tokens": 0,
             "cache_write_tokens": 0,
+            "cache_reported": 0,
             "errors": 1,
             "avg_duration_ms": 500.0,
         }

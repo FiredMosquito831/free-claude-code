@@ -321,6 +321,7 @@ def test_stats_applies_all_list_filters_to_every_aggregate(
             "tokens_out": 8,
             "cache_read_tokens": 0,
             "cache_write_tokens": 0,
+            "cache_reported": 0,
             "errors": 1,
             "avg_duration_ms": 60.0,
         }
@@ -333,6 +334,7 @@ def test_stats_applies_all_list_filters_to_every_aggregate(
             "tokens_out": 8,
             "cache_read_tokens": 0,
             "cache_write_tokens": 0,
+            "cache_reported": 0,
             "errors": 1,
             "avg_duration_ms": 60.0,
         }
@@ -745,3 +747,22 @@ class TestCacheTokenAnalytics:
             )
         assert rows["legacy"] is None  # pre-existing row survives, value unset
         assert rows["fresh"] == 7
+
+
+def test_cache_reported_distinguishes_unsupported_from_zero(tmp_path) -> None:
+    """A provider that never reports caching must not look like 0% caching."""
+
+    store = RequestLogStore(tmp_path / "requests.db")
+    store.enqueue(_record("silent", provider="nvidia_nim"))  # no cache fields
+    store.enqueue(
+        _record("reports", provider="deepseek", tokens_in=10, cache_read_tokens=0)
+    )
+    store.close()
+
+    store = RequestLogStore(tmp_path / "requests.db")
+    rows = {r["key"]: r for r in store.stats()["by_provider"]}
+    # nvidia_nim said nothing about caching at all...
+    assert rows["nvidia_nim"]["cache_reported"] == 0
+    # ...whereas deepseek actively reported zero cached tokens.
+    assert rows["deepseek"]["cache_reported"] == 1
+    store.close()
