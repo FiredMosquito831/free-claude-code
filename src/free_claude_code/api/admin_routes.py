@@ -3,6 +3,7 @@
 import asyncio
 import ipaddress
 import time
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
@@ -112,6 +113,14 @@ def require_loopback_admin(request: Request) -> None:
         raise HTTPException(status_code=403, detail="Admin UI is local-only")
 
 
+@lru_cache(maxsize=1)
+def _bundled_image_names() -> frozenset[str]:
+    directory = Path(__file__).parent / "admin_static" / "img"
+    if not directory.is_dir():
+        return frozenset()
+    return frozenset(p.name for p in directory.iterdir() if p.suffix == ".png")
+
+
 def _asset_response(filename: str) -> FileResponse:
     path = STATIC_DIR / filename
     if not path.is_file():
@@ -131,6 +140,20 @@ async def admin_asset(filename: str, request: Request):
     if filename not in {"admin.css", "admin.js"}:
         raise HTTPException(status_code=404, detail="Admin asset not found")
     return _asset_response(filename)
+
+
+@router.get("/admin/img/{filename}", include_in_schema=False)
+async def admin_image(filename: str, request: Request):
+    """Serve bundled guide screenshots.
+
+    Names are matched against the files actually shipped rather than joined
+    onto a path, so a crafted filename cannot escape the directory.
+    """
+
+    require_loopback_admin(request)
+    if filename not in _bundled_image_names():
+        raise HTTPException(status_code=404, detail="Admin image not found")
+    return _asset_response(f"img/{filename}")
 
 
 @router.get("/admin/api/config")
