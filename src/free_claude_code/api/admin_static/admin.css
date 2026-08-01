@@ -1813,3 +1813,35 @@ textarea:focus-visible,
   background: rgba(255, 255, 255, 0.03);
   color: var(--muted);
 }
+
+.guide-shot {
+  display: block;
+  width: 100%;
+  margin: 4px 0 16px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.guide-table {
+  width: 100%;
+  margin: 0 0 16px;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.guide-table th,
+.guide-table td {
+  text-align: left;
+  padding: 7px 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+  vertical-align: top;
+}
+
+.guide-table th {
+  color: var(--text-strong);
+  font-weight: 600;
+}
+
+.guide-table td {
+  color: var(--muted);
+}

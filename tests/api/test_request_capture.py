@@ -497,3 +497,74 @@ async def test_capture_records_the_credential_across_the_streaming_response() ->
     assert row is not None
     assert row["key_index"] == 2
     assert row["key_label"] == "abcd…wxyz"
+
+
+class TestCacheUsageCapture:
+    """Cache counters arrive on different events depending on the upstream."""
+
+    @pytest.mark.asyncio
+    async def test_reads_cache_counters_from_message_delta(self, store) -> None:
+        """OpenAI-shaped providers only learn them from the final usage chunk.
+
+        Verified against live OpenRouter: 4011 prompt tokens of which 3968 were
+        served from cache. Reading only message_start recorded nothing at all.
+        """
+
+        frames = _events(
+            (
+                "message_start",
+                {"type": "message_start", "message": {"usage": {"input_tokens": 4011}}},
+            ),
+            (
+                "message_delta",
+                {
+                    "type": "message_delta",
+                    "usage": {"output_tokens": 4, "cache_read_input_tokens": 3968},
+                },
+            ),
+        )
+        capture = _make_capture(store)
+
+        async def body() -> AsyncIterator[str]:
+            for frame in frames:
+                yield frame
+
+        await _collect(capture.wrap(body()))
+        store.close()
+
+        row = _final_row(store)
+        assert row["tokens_in"] == 4011
+        assert row["cache_read_tokens"] == 3968
+
+    @pytest.mark.asyncio
+    async def test_reads_cache_counters_from_message_start(self, store) -> None:
+        """Anthropic-native upstreams report them up front instead."""
+
+        frames = _events(
+            (
+                "message_start",
+                {
+                    "type": "message_start",
+                    "message": {
+                        "usage": {
+                            "input_tokens": 100,
+                            "cache_read_input_tokens": 900,
+                            "cache_creation_input_tokens": 50,
+                        }
+                    },
+                },
+            ),
+            ("message_delta", {"type": "message_delta", "usage": {"output_tokens": 7}}),
+        )
+        capture = _make_capture(store)
+
+        async def body() -> AsyncIterator[str]:
+            for frame in frames:
+                yield frame
+
+        await _collect(capture.wrap(body()))
+        store.close()
+
+        row = _final_row(store)
+        assert row["cache_read_tokens"] == 900
+        assert row["cache_write_tokens"] == 50

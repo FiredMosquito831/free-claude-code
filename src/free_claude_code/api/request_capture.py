@@ -175,12 +175,7 @@ class RequestCapture:
                 usage = message.get("usage")
                 if isinstance(usage, dict):
                     self._tokens_in = _int_or_none(usage.get("input_tokens"))
-                    self._cache_read_tokens = _int_or_none(
-                        usage.get("cache_read_input_tokens")
-                    )
-                    self._cache_write_tokens = _int_or_none(
-                        usage.get("cache_creation_input_tokens")
-                    )
+                    self._read_cache_usage(usage)
         elif event_type == "content_block_delta":
             delta = payload.get("delta")
             if isinstance(delta, dict) and delta.get("type") == "text_delta":
@@ -193,6 +188,12 @@ class RequestCapture:
                 output_tokens = _int_or_none(usage.get("output_tokens"))
                 if output_tokens is not None:
                     self._tokens_out = output_tokens
+                # Anthropic-native upstreams report cache counters up front on
+                # message_start, but everything translated from an OpenAI-shaped
+                # provider only learns them from the final usage chunk, so they
+                # arrive here. Reading both is what makes the figure appear for
+                # OpenRouter, DeepSeek and the rest.
+                self._read_cache_usage(usage)
         elif event_type == "error":
             error = payload.get("error")
             if isinstance(error, dict):
@@ -202,6 +203,16 @@ class RequestCapture:
                     kind if isinstance(kind, str) else "api_error",
                     message if isinstance(message, str) else "Stream error.",
                 )
+
+    def _read_cache_usage(self, usage: dict[str, object]) -> None:
+        """Record cache counters from whichever usage payload carries them."""
+
+        cache_read = _int_or_none(usage.get("cache_read_input_tokens"))
+        if cache_read is not None:
+            self._cache_read_tokens = cache_read
+        cache_write = _int_or_none(usage.get("cache_creation_input_tokens"))
+        if cache_write is not None:
+            self._cache_write_tokens = cache_write
 
     def _append_output(self, text: str) -> None:
         self._output_chars += len(text)

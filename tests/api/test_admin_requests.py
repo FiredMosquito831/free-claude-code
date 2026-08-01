@@ -1,6 +1,8 @@
 """Admin API tests for the request log endpoints."""
 
+import re
 import time
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -206,3 +208,24 @@ def test_admin_requests_loopback_guard(seeded_store) -> None:
     assert remote.get("/admin/api/requests/stats").status_code == 403
     assert remote.get("/admin/api/requests/r0").status_code == 403
     assert remote.request("DELETE", "/admin/api/requests").status_code == 403
+
+
+def test_admin_serves_only_bundled_guide_images(tmp_path) -> None:
+    """The image route matches shipped names; it must not join paths."""
+
+    from free_claude_code.api import admin_routes as ar
+
+    names = ar._bundled_image_names()
+    assert names, "guide screenshots should ship with the package"
+    assert all(n.endswith(".png") for n in names)
+    # Every image the guide references must actually be bundled.
+    index = (Path(ar.__file__).parent / "admin_static" / "index.html").read_text(
+        encoding="utf-8"
+    )
+    referenced = set(re.findall(r'src="/admin/img/([^"]+)"', index))
+    assert referenced <= names, (
+        f"guide references unbundled images: {referenced - names}"
+    )
+    # Traversal attempts are rejected because they are not in the name set.
+    for hostile in ("../admin.js", "..\admin.js", "/etc/passwd", "nope.png"):
+        assert hostile not in names
