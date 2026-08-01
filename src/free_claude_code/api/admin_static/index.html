@@ -488,9 +488,12 @@
                     or set <code>ANTHROPIC_BASE_URL</code> yourself.</li>
                 </ol>
                 <p class="guide-note">
-                  The proxy has to stay running for your agent to work. It is a server, not
-                  a library. This dashboard is loopback-only and never exposed to your
-                  network.
+                  The proxy has to stay running for your agent to work. It is a server,
+                  not a library. This dashboard is restricted to loopback callers, but the
+                  proxy API itself binds to all interfaces by default &mdash; set
+                  <code>HOST=127.0.0.1</code> to keep it local, and change
+                  <code>ANTHROPIC_AUTH_TOKEN</code> from the default if anything else can
+                  reach the machine.
                 </p>
 
                 <h3 id="guide-keys">API keys</h3>
@@ -524,27 +527,40 @@
                 </p>
 
                 <h3 id="guide-clients">Connect a client</h3>
-                <p><strong>Claude Code (CLI)</strong> &mdash; easiest path:</p>
-                <pre><code>fcc-claude</code></pre>
-                <p>Or set it up by hand:</p>
-                <pre><code>export ANTHROPIC_BASE_URL="http://127.0.0.1:8082"
-export ANTHROPIC_AUTH_TOKEN="any-value"
-claude</code></pre>
                 <p>
-                  The token only matters if you enabled one on the proxy; otherwise any
-                  non-empty value works, because the real credentials live server-side.
+                  <strong>Claude Code (CLI).</strong> Configure it through its settings
+                  file, not shell variables &mdash; <code>~/.claude/settings.json</code>
+                  (<code>%USERPROFILE%\.claude\settings.json</code> on Windows) wins over
+                  exported environment variables. Merge these two entries into any
+                  <code>env</code> block you already have:
+                </p>
+                <pre><code>{
+  "env": {
+    "ANTHROPIC_AUTH_TOKEN": "freecc",
+    "ANTHROPIC_BASE_URL": "http://127.0.0.1:8082"
+  }
+}</code></pre>
+                <p>
+                  The token authenticates your agent to this proxy and must match the
+                  server's <code>ANTHROPIC_AUTH_TOKEN</code> (shipped as
+                  <code>freecc</code>). It is not a provider key. Restart Claude Code and
+                  check <code>/status</code> &mdash; it should report the base URL above.
+                  Prefer not to edit files? Run <code>fcc-claude</code> instead.
                 </p>
                 <p>
-                  <strong>Claude Desktop</strong> &mdash; enable the developer menu in
-                  settings, then set the gateway to this server's address.
-                  <strong>Codex</strong> and <strong>Pi</strong> have their own launchers:
+                  <strong>Claude Desktop</strong> has a native gateway setting. Open
+                  <em>Help &rarr; Troubleshooting &rarr; Enable Developer Mode</em>, then
+                  <em>Developer &rarr; Configure Third-Party Inference&hellip;</em> and set
+                  Connection to <code>Gateway</code>, base URL to
+                  <code>http://127.0.0.1:8082</code>, API key to <code>freecc</code>, auth
+                  scheme to <code>bearer</code>, credential kind to
+                  <code>Static API key</code>, and Model discovery on. Use
+                  <em>Test connection</em> before restarting &mdash; the server has to be
+                  running. With a gateway active the app runs local sessions only.
                 </p>
+                <p><strong>Codex</strong> and <strong>Pi</strong> have their own launchers:</p>
                 <pre><code>fcc-codex
 fcc-pi</code></pre>
-                <p>
-                  Use the address printed in the startup log. The proxy binds to loopback,
-                  so a client on another machine cannot reach it.
-                </p>
 
                 <h3 id="guide-websearch">Web search</h3>
                 <p>

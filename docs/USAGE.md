@@ -1,67 +1,82 @@
 # Free Claude Code — Complete Usage Guide
 
-Everything from a fresh install to tuning providers, web search, and analytics.
+From a fresh machine to a tuned setup: installing, connecting Claude Code and Claude Desktop, adding providers, routing models, web search, and analytics.
 
-For the short version, see the [README](../README.md). This page is the long one.
+The [README](../README.md) is the overview. This is the long-form manual.
 
 ---
 
 ## Contents
 
-1. [What this actually does](#1-what-this-actually-does)
-2. [Install](#2-install)
-3. [First run](#3-first-run)
-4. [Adding API keys](#4-adding-api-keys)
-5. [Choosing models](#5-choosing-models)
-6. [Connecting Claude Code (CLI)](#6-connecting-claude-code-cli)
-7. [Connecting Claude Desktop](#7-connecting-claude-desktop)
-8. [Connecting Codex and Pi](#8-connecting-codex-and-pi)
-9. [Web search](#9-web-search)
-10. [Analytics](#10-analytics)
-11. [Multi-key rotation](#11-multi-key-rotation)
-12. [Updating](#12-updating)
-13. [Troubleshooting](#13-troubleshooting)
+- [1. How it works](#1-how-it-works)
+- [2. Install](#2-install)
+- [3. First run](#3-first-run)
+- [4. Tutorial: connect Claude Code (CLI)](#4-tutorial-connect-claude-code-cli)
+- [5. Tutorial: connect Claude Desktop](#5-tutorial-connect-claude-desktop)
+- [6. Tutorial: connect Codex and Pi](#6-tutorial-connect-codex-and-pi)
+- [7. Providers and API keys](#7-providers-and-api-keys)
+- [8. Model tiers and routing](#8-model-tiers-and-routing)
+- [9. Web search](#9-web-search)
+- [10. Analytics](#10-analytics)
+- [11. Multi-key rotation](#11-multi-key-rotation)
+- [12. Updating](#12-updating)
+- [13. Security and networking](#13-security-and-networking)
+- [14. Troubleshooting](#14-troubleshooting)
 
 ---
 
-## 1. What this actually does
+## 1. How it works
 
-Free Claude Code is a **local proxy that speaks Anthropic's API**. Your coding agent thinks it's talking to Anthropic; the proxy forwards the request to whichever provider you configured — NVIDIA NIM, OpenRouter, a local Ollama, 27 of them — and translates the response back into Anthropic's format.
+Free Claude Code is a **local server that speaks Anthropic's API**. Your coding agent believes it is talking to Anthropic. The proxy receives that request, forwards it to whichever provider you configured — NVIDIA NIM, OpenRouter, a local Ollama, 27 of them — and translates the response back into Anthropic's wire format.
 
-That means streaming, tool use, reasoning and image input keep working, while the model behind them is whatever you chose.
+<div align="center">
+  <img src="../assets/how-it-works.svg" alt="Request flow from agent through the proxy to a provider" width="760">
+</div>
 
-Two things follow from this design and are worth internalising early:
+Because the translation happens at the protocol level, streaming, tool use, reasoning blocks and image input keep working. Your agent doesn't know or care.
 
-- **The proxy must be running** for your agent to work. It's a server, not a library.
-- **Your agent's model picker lists FCC's catalog**, not Anthropic's. Picking "Opus" routes to whatever you mapped Opus to.
+Three consequences worth internalising before you start:
+
+1. **The server must be running.** It's a daemon, not a library. Close the terminal and your agent stops working.
+2. **Your agent's model picker lists FCC's catalog**, not Anthropic's. Selecting "Sonnet" routes to whatever *you* mapped Sonnet to.
+3. **Credentials live server-side.** Your agent holds a token that only authenticates it to the proxy; the real provider keys never leave your machine.
+
+<div align="center">
+  <img src="../assets/pic.png" alt="Claude Code running through the Free Claude Code proxy" width="720">
+  <p><em>Claude Code, running normally, backed by a provider of your choosing.</em></p>
+</div>
 
 ---
 
 ## 2. Install
 
-Pick **one** environment and stay in it. On Windows you can install under PowerShell *or* WSL — both work, but they keep separate configs (`C:\Users\<you>\.fcc` versus `~/.fcc` inside WSL), and installing in both is the most common way to end up editing one config while the server reads the other.
-
+> **Pick one environment and stay in it.** On Windows you can install under PowerShell *or* WSL. Both work — but they keep **separate configs** (`C:\Users\<you>\.fcc` versus `~/.fcc` inside WSL). Installing in both is the most common way to end up editing one config while the server reads the other.
+>
 > Already develop inside WSL? Install in WSL. Otherwise use PowerShell.
 
-**Windows (PowerShell)** — no admin rights needed:
+### Windows (PowerShell)
+
+No admin rights needed:
 
 ```powershell
 & ([scriptblock]::Create((irm "https://raw.githubusercontent.com/FiredMosquito831/free-claude-code/main/scripts/install.ps1")))
 ```
 
-If PowerShell blocks it, allow it for this session only:
+If PowerShell blocks the script, allow it for this session only:
 
 ```powershell
 Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 ```
 
-**WSL, Linux, macOS:**
+### WSL, Linux, macOS
 
 ```bash
 curl -fsSL "https://raw.githubusercontent.com/FiredMosquito831/free-claude-code/main/scripts/install.sh" | sh
 ```
 
-**Then close and reopen your terminal.** The installer adds `~/.local/bin` to your `PATH`, and an already-open shell won't see it. This is the single most common reason `fcc-server` looks "not found" immediately after a successful install.
+### Then reopen your terminal
+
+**This step catches almost everyone.** The installer appends `~/.local/bin` to your `PATH`, and an already-open shell will never see it. If `fcc-server` appears "not found" immediately after a successful install, this is why.
 
 Verify:
 
@@ -69,19 +84,21 @@ Verify:
 fcc-server --version
 ```
 
-### What the installer does, and doesn't
+### What the installer does — and doesn't
 
-It installs `uv`, downloads the **latest** release wheel, verifies the SHA-256 that GitHub publishes for that asset, and puts `fcc-server`, `fcc-claude`, `fcc-codex` and `fcc-pi` on your `PATH`.
+1. Installs `uv` (the Python tool runner) if missing or too old.
+2. Looks up the **latest** release, downloads its wheel, and **verifies the SHA-256 that GitHub publishes for that asset**. A mismatch aborts rather than running unverified code.
+3. Installs the package and puts `fcc-server`, `fcc-claude`, `fcc-codex` and `fcc-pi` on your `PATH`.
 
-**It does not install Claude Code, Codex, or Pi.** Those are separate third-party tools and the proxy doesn't need any of them. Install whichever you actually use, yourself — the `fcc-*` launchers just point an agent you already have at the proxy.
+**It does not install Claude Code, Codex, or Pi.** Those are separate third-party tools and the proxy doesn't need any of them to run. Install whichever you actually use, yourself — the `fcc-*` launchers simply point an agent you already have at the proxy.
 
-To pin a version instead of taking the newest:
+Pin a specific version instead of the newest:
 
 ```bash
 sh install.sh --version 4.16.0      # PowerShell: -Version 4.16.0
 ```
 
-Add `--dry-run` (`-DryRun`) to see what it would do without changing anything.
+Add `--dry-run` (`-DryRun`) to print what it would do without changing anything. Both scripts are readable before you run them: [install.sh](../scripts/install.sh), [install.ps1](../scripts/install.ps1).
 
 ---
 
@@ -91,155 +108,287 @@ Add `--dry-run` (`-DryRun`) to see what it would do without changing anything.
 fcc-server
 ```
 
-Keep this running. The Admin UI opens in your browser once the server is healthy, and its address is always printed in the startup log — by default <http://127.0.0.1:8082/admin>.
+Keep this process running. Once healthy, the Admin UI opens in your browser automatically (disable with `FCC_OPEN_BROWSER=0`). The address is always printed in the startup log — by default:
 
-<div align="center">
-  <img src="../assets/admin-page.png" alt="Admin dashboard overview" width="820">
-</div>
-
-The Admin UI is **loopback-only**: it binds to `127.0.0.1` and rejects non-local callers. Nothing here is exposed to your network.
-
-Everything on this page can also be set by editing `~/.fcc/.env` directly — see [.env.example](../.env.example) for the full annotated list. The UI writes to that same file.
-
----
-
-## 4. Adding API keys
-
-Open **Providers**. Each provider card has a field for its key, a **Validate** button that makes a real call, and **Apply** to save.
-
-<div align="center">
-  <img src="../assets/admin-requests.png" alt="Provider configuration" width="820">
-</div>
-
-The practical workflow:
-
-1. Paste the key into the provider you want.
-2. Press **Validate** — this actually calls the provider. A green result means the key works *and* the model you have selected is reachable with it.
-3. Press **Apply**.
-4. Set that provider as active.
-
-Validation failing is informative: a 401 means the key is wrong, a 404 usually means the key is fine but the *model id* isn't available on your account.
-
-Prefer the file? Set the matching variable in `~/.fcc/.env`:
-
-```bash
-NVIDIA_NIM_API_KEY="nvapi-..."
-OPEN_ROUTER_API_KEY="sk-or-..."
+```text
+http://127.0.0.1:8082/admin
 ```
 
-Restart `fcc-server` after editing the file by hand — it reads config at startup.
+<div align="center">
+  <img src="../assets/admin-page.png" alt="Admin dashboard overview" width="860">
+</div>
+
+The dashboard is where everything is configured. Every setting maps to a variable in `~/.fcc/.env`, and the UI writes to that same file — see [.env.example](../.env.example) for the fully annotated list. If you edit the file by hand, restart the server, because configuration is read at startup.
+
+There is also a **Guide** tab inside the dashboard with a condensed version of this document, available offline.
+
+### The two addresses that matter
+
+| What | Default | Who uses it |
+| --- | --- | --- |
+| **Proxy API** | `http://127.0.0.1:8082` | your coding agent |
+| **Admin UI** | `http://127.0.0.1:8082/admin` | you, in a browser |
+
+Same port. The Admin UI is additionally restricted to loopback callers — see [Security and networking](#13-security-and-networking).
 
 ---
 
-## 5. Choosing models
+## 4. Tutorial: connect Claude Code (CLI)
 
-Open **Model Config**. FCC routes by *tier* rather than by a single model: Fable, Opus, Sonnet, Haiku and a fallback each map to a real model on your provider.
+Claude Code is configured through its **settings file**, not shell variables. This matters: `~/.claude/settings.json` takes precedence over exported environment variables, so `export ANTHROPIC_BASE_URL=...` in your shell will appear to do nothing if the settings file says otherwise.
+
+### Step 1 — open the settings file
+
+| Platform | Path |
+| --- | --- |
+| macOS / Linux / WSL | `~/.claude/settings.json` |
+| Windows | `%USERPROFILE%\.claude\settings.json` |
+
+If the file doesn't exist yet, create it.
+
+### Step 2 — add the `env` block
+
+```json
+{
+  "env": {
+    "ANTHROPIC_AUTH_TOKEN": "freecc",
+    "ANTHROPIC_BASE_URL": "http://127.0.0.1:8082"
+  }
+}
+```
+
+**Keep any other keys you already have** — merge these two entries into the existing `env` object rather than replacing the file.
+
+- `ANTHROPIC_BASE_URL` points Claude Code at your local server.
+- `ANTHROPIC_AUTH_TOKEN` is sent as a bearer token. It must match the proxy's own `ANTHROPIC_AUTH_TOKEN`, which ships as `freecc` in `.env.example`. If you changed it in the Admin UI, use your value here.
+
+> **On the token:** it authenticates your agent *to the proxy*, nothing more. It is not a provider key. If you clear `ANTHROPIC_AUTH_TOKEN` on the server, the proxy stops requiring authentication altogether — convenient on a single-user machine, but read [Security and networking](#13-security-and-networking) first.
+
+### Step 3 — restart Claude Code and verify
+
+Restart the app, then run:
+
+```text
+/status
+```
+
+It should report:
+
+```text
+Anthropic base URL: http://127.0.0.1:8082
+```
+
+If it still shows Anthropic's own endpoint, the settings file wasn't picked up — check you edited the right path for your platform and that the JSON is valid.
+
+### Step 4 — pick a model
+
+No model overrides are needed. FCC exposes native **Fable / Opus / Sonnet / Haiku** tier models, so Claude Code's built-in picker works as-is:
 
 <div align="center">
-  <img src="../assets/admin-model-config.png" alt="Model tier configuration" width="820">
+  <img src="../assets/cc-model-picker.png" alt="Claude Code model picker showing FCC gateway models" width="720">
+  <p><em><code>/model</code> in Claude Code, listing the FCC catalog.</em></p>
 </div>
 
-So when Claude Code asks for "Sonnet", it gets whatever you mapped Sonnet to. This is why your agent's own `/model` picker shows FCC's catalog:
+### Shortcut
 
-<div align="center">
-  <img src="../assets/cc-model-picker.png" alt="Claude Code model picker showing FCC gateway models" width="700">
-</div>
-
-Practical advice: map **Haiku to something cheap and fast**. Agents use the small tier constantly for internal bookkeeping, and a slow model there makes the whole session feel sluggish even if your main model is quick.
-
----
-
-## 6. Connecting Claude Code (CLI)
-
-Easiest path — the launcher sets the environment for you:
+If you'd rather not edit the file, the bundled launcher sets everything for the session:
 
 ```bash
 fcc-claude
 ```
 
-That starts Claude Code pointed at the proxy. Its `/model` picker will show the FCC catalog.
-
-Doing it manually is just two environment variables:
-
-```bash
-export ANTHROPIC_BASE_URL="http://127.0.0.1:8082"
-export ANTHROPIC_AUTH_TOKEN="any-value"     # or your FCC token if you set one
-claude
-```
-
-The auth token only matters if you enabled `ANTHROPIC_AUTH_TOKEN` on the proxy; otherwise any non-empty value works, because the real credentials live server-side.
+Official references: [Claude Code LLM gateway docs](https://code.claude.com/docs/en/llm-gateway-connect) · [settings.json reference](https://code.claude.com/docs/en/settings)
 
 ---
 
-## 7. Connecting Claude Desktop
+## 5. Tutorial: connect Claude Desktop
 
-Claude Desktop can point at the proxy too. Enable developer settings first:
+The desktop app has a **native gateway setting** — no file editing required. Its *Code* tab also honours the `~/.claude/settings.json` above, but the gateway configuration below is the supported path for the app itself.
+
+Menu labels shift slightly between app versions; this is the currently documented route.
+
+### Step 1 — enable Developer Mode
+
+**Help → Troubleshooting → Enable Developer Mode**
+
+The app restarts and gains a **Developer** menu.
+
+> On older builds the path is **Settings → enable Developer mode**, which exposes **Settings → Developer** instead.
+
+### Step 2 — open the inference settings
+
+**Developer → Configure Third-Party Inference…**
 
 <div align="center">
-  <img src="../assets/claude-desktop-developer-menu.png" alt="Claude Desktop developer menu" width="700">
+  <img src="../assets/claude-desktop-developer-menu.png" alt="Claude Desktop Developer menu with Configure Third-Party Inference highlighted" width="780">
 </div>
 
-Then set the gateway to your local proxy address:
+### Step 3 — fill in the Connection section
+
+| Field | Value |
+| --- | --- |
+| **Connection** | `Gateway` |
+| **Gateway base URL** | `http://127.0.0.1:8082` |
+| **Gateway API key** | `freecc` |
+| **Gateway auth scheme** | `bearer` |
+| **Credential kind** | `Static API key` |
+| **Model discovery** | on |
 
 <div align="center">
-  <img src="../assets/claude-desktop-gateway-config.png" alt="Claude Desktop gateway configuration" width="700">
+  <img src="../assets/claude-desktop-gateway-config.png" alt="Claude Desktop third-party inference settings filled in for Free Claude Code" width="780">
 </div>
 
-Use the same address the server printed at startup (`http://127.0.0.1:8082` by default). If Desktop is running on a different machine from the proxy, `127.0.0.1` won't reach it — the proxy binds locally on purpose.
+Then click **Apply Changes**.
+
+Use the port from your server's startup log if it isn't `8082`, and match the API key to your `ANTHROPIC_AUTH_TOKEN` if you changed it from `freecc`.
+
+### Step 4 — test before restarting
+
+The dialog has **Test connection** and **Test model discovery**. Both hit your running FCC server, so use them to confirm the setup *before* restarting — **the server must be running** or they will fail.
+
+### Step 5 — restart the app
+
+With **Model discovery** on, the app populates its picker from FCC's `/v1/models` at launch, so you can leave **Model list** empty.
+
+**Two things to expect:**
+
+- The **initial warning dialog can be safely ignored.** The picker fills in once discovery completes.
+- With a gateway active, the desktop app runs **local sessions only** — no Anthropic-hosted cloud environments.
 
 ---
 
-## 8. Connecting Codex and Pi
+## 6. Tutorial: connect Codex and Pi
+
+Both have launchers that configure the environment for you:
 
 ```bash
 fcc-codex      # Codex CLI against the local FCC Responses provider
 fcc-pi         # Pi
 ```
 
-Codex's own model picker reads a catalog FCC generates:
+Codex reads a model catalog that FCC generates, so its own picker works normally:
 
 <div align="center">
-  <img src="../assets/codex-model-picker.png" alt="Codex model picker with the generated FCC catalog" width="700">
+  <img src="../assets/codex-model-picker.png" alt="Codex model picker with the generated FCC catalog" width="720">
 </div>
 
-Editor integrations work the same way: Claude Code and Codex in VS Code, or Claude Code through JetBrains ACP — point them at the proxy address and they behave normally.
+<div align="center">
+  <img src="../assets/codex.png" alt="Codex CLI running through Free Claude Code" width="720">
+</div>
+
+**Editor integrations** work the same way — Claude Code and Codex in VS Code, or Claude Code through JetBrains ACP. Point them at the proxy address and they behave normally.
+
+---
+
+## 7. Providers and API keys
+
+Open the **Providers** tab. Each provider has a card with a credential field, a **Validate** button, and **Apply**.
+
+<div align="center">
+  <img src="../assets/admin-requests.png" alt="Provider configuration in the Admin UI" width="860">
+</div>
+
+### The workflow
+
+1. **Paste the key** into the provider you want to use.
+2. **Validate** — this makes a real API call. A green result means the key works *and* the model currently selected is reachable with it.
+3. **Apply** to save.
+4. **Select** that provider as the active one.
+
+### Reading validation failures
+
+| Result | Almost always means |
+| --- | --- |
+| **401 / 403** | The key is wrong, expired, or revoked. |
+| **404** | The key is fine — the **model id** isn't available on your account. |
+| **402** | Billing: no credit, or plan quota exhausted. |
+| **Timeout** | Network, or a self-hosted endpoint that isn't running. |
+
+That 404 case trips people up constantly. If validation fails with 404, check the exact model id against the provider's own model list before assuming the key is bad.
+
+### Doing it by file instead
+
+Set the matching variable in `~/.fcc/.env`:
+
+```bash
+NVIDIA_NIM_API_KEY="nvapi-..."
+OPEN_ROUTER_API_KEY="sk-or-..."
+```
+
+Restart `fcc-server` afterwards.
+
+### Local providers
+
+LM Studio, llama.cpp and Ollama need a base URL rather than a key:
+
+```bash
+LM_STUDIO_BASE_URL="http://127.0.0.1:1234/v1"
+OLLAMA_BASE_URL="http://127.0.0.1:11434"
+```
+
+These take no credentials — the key field stays empty and validation just checks reachability.
+
+---
+
+## 8. Model tiers and routing
+
+FCC routes by **tier**, not by a single model. Fable, Opus, Sonnet, Haiku and a fallback each map to a real model on your provider.
+
+<div align="center">
+  <img src="../assets/admin-model-config.png" alt="Model tier configuration" width="860">
+</div>
+
+So when Claude Code requests "Sonnet", it receives whatever you mapped Sonnet to. This is the mechanism that lets an unmodified agent run on any backend.
+
+### Practical advice
+
+**Map Haiku to something cheap and fast.** Agents use the small tier constantly for internal bookkeeping — summarising, classifying, deciding what to do next. A slow model there makes the entire session feel sluggish even when your main model is quick. This single choice affects perceived speed more than anything else in this document.
+
+**Reserve the big tier for actual work.** Opus/Fable should be your strongest available model; you'll hit it far less often than you expect.
+
+**Set the fallback deliberately.** It catches requests for models you haven't mapped. Pointing it at something cheap avoids nasty surprises.
+
+### Reasoning control
+
+Providers expose reasoning differently. FCC resolves your intent once at the boundary and each provider adapter translates it, so you configure it in one place rather than per provider. See the Model Config tab.
 
 ---
 
 ## 9. Web search
 
-Claude Code's `web_search` is an Anthropic **server tool** — normally Anthropic runs the search and bills you for it. FCC fulfils it locally instead, against a provider you pick, so no Anthropic search credits are used and it works with any model provider.
+Claude Code's `web_search` is an Anthropic **server tool**: normally Anthropic executes the search and bills you for it. FCC intercepts and fulfils it locally against a provider you choose, so **no Anthropic search credits are used**, and it works with any model provider.
 
 <div align="center">
-  <img src="../assets/admin-websearch.png" alt="Web search configuration and analytics" width="820">
+  <img src="../assets/admin-websearch.png" alt="Web search configuration and analytics" width="860">
 </div>
 
-### Picking a provider
-
-Set `WEB_SEARCH_PROVIDER`, or use the Web Search tab. It accepts `auto` (default), `off`, `disabled`, or one of 14 provider ids.
-
-**`auto` works with zero configuration** — with no keys set it falls back to keyless DuckDuckGo, so search works out of the box. Set a key for anything else and `auto` prefers it.
+### Choosing a provider
 
 ```bash
-WEB_SEARCH_PROVIDER=auto
+WEB_SEARCH_PROVIDER=auto            # auto | off | disabled | <provider id>
 WEB_SEARCH_FALLBACK_POLICY=auto     # auto | none | ddgs | legacy
-TAVILY_API_KEY="tvly-..."
 ```
 
-A missing API key always fails **visibly** rather than silently falling back — an unconfigured provider is an operator error, not an outage.
+**`auto` works with zero configuration.** With no keys set it falls back to keyless DuckDuckGo, so search works out of the box. Set any provider key and `auto` prefers it.
 
-### Getting full page text instead of snippets
+A missing API key on an explicitly selected provider **fails visibly** rather than silently degrading — an unconfigured provider is an operator mistake, not an outage.
 
-This is the highest-value setting and it's off by default. Most providers return a one-or-two sentence snippet; several can return the **extracted text of the page**, which is the difference between the model guessing from a summary and actually reading the source.
+14 backends are supported. Free tiers worth knowing: Exa ($10/month ongoing), Tavily (1,000 credits/month), Brave ($5/month), Serper (2,500 one-time), Linkup ($20 topped up monthly), and DuckDuckGo (keyless, unlimited, lower quality).
+
+### The setting most worth changing
+
+By default most providers return a one-or-two sentence **snippet**. Several can return the **extracted text of the page** — the difference between the model guessing from a summary and actually reading the source.
+
+Turn it on for your provider, then give it room to reach the model:
 
 ```bash
-# Turn it on for whichever provider you use:
+# Pick the one matching your provider:
 EXA_CONTENTS=text                    # or highlights+text, full
 TAVILY_INCLUDE_RAW_CONTENT=markdown  # or text
 FIRECRAWL_SCRAPE_FORMAT=markdown     # or summary
 BRAVE_EXTRA_SNIPPETS=true            # plan-gated
 
-# Then give it room to reach the model:
+# How much of it actually reaches the model:
 WEBSEARCH_DIGEST_CONTENT_CHARS=4000
 ```
 
@@ -247,18 +396,23 @@ Jina, Parallel and Linkup return extracted text by default and need no switch.
 
 Extracted text has its **own cap**, separate from the snippet cap, so opting in isn't silently trimmed back to snippet length. Set it to `0` to keep snippets only.
 
-> **Cost:** content options bill more on most providers and increase input tokens on every search. Each option's drawer in the Admin UI states its cost.
+> **Cost:** content options bill more on most providers — Firecrawl multiplies credits per result, Exa charges per content type — and they increase input tokens on **every** search. Each option's drawer in the Admin UI states its cost.
 
-### Restricting to specific sites
+### Restricting searches to specific sites
 
-Claude Code declares `allowed_domains`, `blocked_domains` and `max_uses` on its `web_search` tool; FCC forwards them:
+Claude Code declares `allowed_domains`, `blocked_domains` and `max_uses` on its `web_search` tool. FCC reads them and forwards them:
 
 ```json
-{ "type": "web_search_20250305", "name": "web_search",
-  "allowed_domains": ["docs.python.org"] }
+{
+  "type": "web_search_20250305",
+  "name": "web_search",
+  "allowed_domains": ["docs.python.org", "peps.python.org"]
+}
 ```
 
-That filters **server-side** on Exa, Tavily, Firecrawl, Linkup, Perplexity and Parallel — you pay for relevant results instead of filtering afterwards. Providers without native support search normally; every recorded attempt shows `supports_domain_filters` so you can tell which happened.
+This filters **server-side** on Exa, Tavily, Firecrawl, Linkup, Perplexity and Parallel — you pay for relevant results instead of filtering after the fact. Providers without native support search normally and drop the filters; every recorded attempt shows `supports_domain_filters`, so the analytics detail tells you which happened.
+
+Anthropic rejects requests carrying both lists, so if both arrive the allow list wins rather than being silently intersected.
 
 ### Safe search, locale, freshness
 
@@ -266,115 +420,220 @@ That filters **server-side** on Exa, Tavily, Firecrawl, Linkup, Perplexity and P
 BRAVE_SAFESEARCH=strict       # off | moderate | strict
 SEARXNG_SAFESEARCH=2          # 0 | 1 | 2
 SERPAPI_SAFE=active
-FIRECRAWL_COUNTRY=DE          # Firecrawl defaults to US results otherwise
-TAVILY_START_DATE=2026-01-01  # precise window, not just "past week"
+SEARCHAPI_SAFE=active
+DDGS_SAFESEARCH=strict
 ```
 
-Two worth knowing for coding work: `TAVILY_CHUNKS_PER_SOURCE=3` is the cheapest way to get more text out of Tavily, and `FIRECRAWL_CATEGORIES=github,research` restricts to GitHub or papers.
+Locale matters if you're not in the US — **Firecrawl returns US results unless told otherwise**:
 
-All 66 advanced options are editable from the Web Search tab's **Advanced options** drawers, and every one states what leaving it blank does.
+```bash
+FIRECRAWL_COUNTRY=DE
+TAVILY_COUNTRY=germany
+BRAVE_COUNTRY=DE
+SERPER_GL=de                  # SERPAPI_GL / SEARCHAPI_GL / JINA_GL are equivalent
+```
+
+Freshness uses each provider's own vocabulary (`BRAVE_FRESHNESS=pw`, `TAVILY_TIME_RANGE=week`, `SERPER_TBS=qdr:w`). For a precise window rather than a relative one:
+
+```bash
+TAVILY_START_DATE=2026-01-01
+TAVILY_END_DATE=2026-06-30
+LINKUP_FROM_DATE=2026-01-01
+EXA_START_PUBLISHED_DATE=2026-01-01
+```
+
+### Two options especially useful for coding
+
+```bash
+FIRECRAWL_CATEGORIES=github,research   # restrict to GitHub or papers
+TAVILY_CHUNKS_PER_SOURCE=3             # more text per source, cheaply
+```
+
+All **66** advanced options are editable from the Web Search tab's **Advanced options** drawers, and every one states what leaving it blank does.
 
 ---
 
 ## 10. Analytics
 
-Two separate stores, both local SQLite under `~/.fcc/logs/`, both non-blocking.
+Two separate local SQLite stores under `~/.fcc/logs/`, both written by a background thread so they never block a request.
 
 ### Model requests
 
 <div align="center">
-  <img src="../assets/admin-analytics.png" alt="Model request analytics" width="820">
+  <img src="../assets/admin-analytics.png" alt="Model request analytics" width="860">
 </div>
 
-Cards cover request volume, success and error rate, latency percentiles, TTFT, and token usage. Below that: requests over time, tokens by model, and per-provider and per-key tables.
+Summary cards cover volume, success and error rate, latency percentiles, time-to-first-token and token usage. Below: requests over time, tokens by model, and per-provider and per-key tables.
 
 <div align="center">
-  <img src="../assets/admin-key-performance.png" alt="Per-key performance breakdown" width="820">
+  <img src="../assets/admin-key-performance.png" alt="Per-key performance breakdown" width="860">
 </div>
 
-**Reading the token columns.** Input is reported in two parts:
+#### Reading the token columns
+
+Input is reported in two parts, because cached and uncached prompt tokens bill differently:
 
 | Column | Meaning |
 | --- | --- |
-| Input (uncached) | prompt tokens the provider actually processed |
-| Cached input | prompt tokens served from the provider's cache |
-| Cache hit rate | cached ÷ total input |
-| Cache writes | tokens written into the cache |
+| **Input (uncached)** | prompt tokens the provider actually processed |
+| **Cached input** | prompt tokens served from the provider's cache |
+| **Cache hit rate** | cached ÷ total input |
+| **Cache writes** | tokens written into the cache |
 
-A cache hit rate of **—** means that provider never reported caching at all, which is different from a measured **0.0%**. Prompt caching is provider-dependent: OpenAI (prefixes ≥1,024 tokens) and DeepSeek report it; NVIDIA NIM's hosted endpoint does not do meaningful prefix caching, so a near-zero rate there is accurate rather than a fault.
+> **A hit rate of `—` means that provider never reported caching at all** — which is different from a measured `0.0%`.
+>
+> Prompt caching is provider-dependent. OpenAI reports it for prefixes of 1,024+ tokens; DeepSeek reports it with its own fields. **NVIDIA NIM's hosted endpoint does not do real prefix caching** — it returns a small constant regardless of repetition — so a near-zero rate there is accurate rather than a fault. NVIDIA exposes prefix caching as a self-hosted deployment toggle (`NIM_ENABLE_KV_CACHE_REUSE`), not on the shared API.
 
-Every row has a **View** dialog with the full request and response, the resolved configuration, and timing.
+Every row has a **View** dialog showing the full request and response, the resolved configuration, and timing. It's usually the fastest way to see what actually happened.
 
 ```bash
 REQUEST_LOG_ENABLED=true
-REQUEST_LOG_MAX_ROWS=50000       # oldest rows pruned beyond this
+REQUEST_LOG_MAX_ROWS=50000        # oldest rows pruned beyond this
 ```
 
-### Web search
+### Web search analytics
 
-The Web Search tab has its own analytics with the same shape, plus two levels made explicit: **logical searches** (one per `web_search` call) and **provider attempts** (one per try, so a fallback produces more than one).
+The Web Search tab has its own analytics with an important distinction made explicit:
+
+- **Logical searches** — one per `web_search` call.
+- **Provider attempts** — one per try. A fallback produces several attempts for one search.
+
+The two are shown in separate tables so the numbers reconcile.
 
 ```bash
 WEBSEARCH_LOG_ENABLED=true
 WEBSEARCH_LOG_MAX_ROWS=50000
-WEBSEARCH_LOG_CAPTURE_CONTENT=true    # false = lengths and hashes only
+WEBSEARCH_LOG_CAPTURE_CONTENT=true      # false = lengths and hashes only
+WEBSEARCH_LOG_CONTENT_MAX_CHARS=50000
 ```
 
-**Privacy:** search content routinely includes private queries, result URLs and page text. `WEBSEARCH_LOG_CAPTURE_CONTENT=false` withholds the captured payloads **and the query text itself**, keeping only lengths and SHA-256 hashes. API keys are never written to either store — only masked `first4…last4` labels.
+> **Privacy.** Search content routinely includes private queries, result URLs and page text. `WEBSEARCH_LOG_CAPTURE_CONTENT=false` withholds the captured payloads **and the query text itself**, keeping only lengths and SHA-256 hashes.
+>
+> API keys are never written to either store — only masked `first4…last4` labels. Proxy credentials are stripped from recorded URLs.
 
 ---
 
 ## 11. Multi-key rotation
 
-Both model providers and web search providers accept multiple keys in the same variable:
+Both model and web search providers accept several keys in one variable:
 
 ```bash
 EXA_API_KEY="key-a,key-b,key-c"
-EXA_API_KEY_ROTATION=failover     # single | round_robin | least_used | failover
+EXA_API_KEY_ROTATION=failover
 ```
 
-`failover` is the default with multiple keys, `single` with one.
+| Policy | Behaviour |
+| --- | --- |
+| `single` | Only the first key. Default with one key. |
+| `round_robin` | Even spread across healthy keys. |
+| `least_used` | Prefers the key with fewest requests. |
+| `failover` | First healthy key; move on when it fails. Default with several keys. |
 
-Health is tracked per key: repeated failures cool a key down on a rising ladder, sustained failures open a circuit, and auth failures lock the key out for longer each time. A rate-limited key is benched for **exactly as long as the provider says** via its `Retry-After` or reset headers, rather than an invented fixed delay.
+### Health tracking
 
-Per-key state is visible in the Admin UI, including which keys served which requests.
+Each key carries its own state. Repeated failures cool a key down on a rising ladder; sustained failures open a circuit; auth failures lock the key out for progressively longer.
+
+A **rate-limited key is benched for exactly as long as the provider says** — parsed from `Retry-After`, `retry-after-ms` or `x-ratelimit-reset-*` — rather than an invented fixed delay. A key that resets in one second isn't idled for a minute, and one that needs an hour isn't hammered.
+
+Per-key state, usage and health are visible in the Admin UI, including which key served which request.
 
 ---
 
 ## 12. Updating
 
-The dashboard shows your running version, announces new releases with the release notes inline, and installs them for you.
-
 <div align="center">
-  <img src="../assets/admin-version.png" alt="Version panel" width="820">
+  <img src="../assets/admin-version.png" alt="Version panel" width="860">
 </div>
 
+The dashboard shows your running version, checks the release feed (cached for six hours), and announces new releases with **the release notes inline** — expand *What changed* to decide whether an update matters to you.
+
 <div align="center">
-  <img src="../assets/admin-update-banner.png" alt="Update available banner" width="820">
+  <img src="../assets/admin-update-banner.png" alt="Update available banner" width="860">
 </div>
 
-**Update now** downloads the wheel, verifies its SHA-256 against the digest GitHub publishes, and installs it with `uv`. A checksum mismatch aborts. Extras you originally installed (voice support, for instance) are detected and preserved.
+**Update now** downloads the release wheel, verifies its SHA-256 against the digest GitHub publishes for that asset, and installs it with `uv`. A checksum mismatch aborts. Extras you originally installed — voice support, for instance — are detected and preserved.
 
-**Upgrading never restarts the server** — a running process keeps serving the code it already loaded, so an upgrade can't drop an in-flight stream. You get a *restart required* banner and restart when it suits you.
+**Upgrading never restarts the server.** A running process keeps serving the code it already loaded, so an upgrade can't drop an in-flight stream. You get a *restart required* banner and restart when convenient.
 
-**On Windows the install is deferred.** Windows holds the running interpreter and its DLLs open, so the environment can't be replaced underneath a live process. FCC stages the verified wheel and a background helper installs it once you stop the server: you'll see *"Update staged — stop the server to finish installing"*. Stop `fcc-server`, the update applies itself, start it again. Your working install is untouched until that moment, so a failed update can't strand you.
+### Windows: the install is deferred
 
-Re-running the install command does the same thing from the command line.
+Windows holds a running executable and its loaded DLLs open, so the environment **cannot** be replaced underneath a live process — attempting it fails partway and leaves a broken install.
+
+So on Windows, **Update now** downloads and verifies the wheel, then hands it to a background helper that waits for the server to exit and installs it then. You'll see:
+
+> *Update staged — stop the server to finish installing*
+
+Stop `fcc-server`, the update applies itself, start it again on the new version. **Your working install is untouched until that moment**, so a failed update can't strand you. If the deferred install does fail, the dashboard reports it on the next start.
+
+WSL, Linux and macOS install in place, because they can replace files that are still open.
+
+### From the command line
+
+Re-running the install command does exactly the same thing and always fetches the newest release.
 
 ---
 
-## 13. Troubleshooting
+## 13. Security and networking
 
-**`fcc-server: command not found` right after installing.** Close and reopen your terminal. The installer extends `PATH`; an existing shell won't see it.
+Worth understanding before you expose anything.
 
-**Two configs on Windows.** If you installed in both PowerShell and WSL you have `C:\Users\<you>\.fcc` and `~/.fcc` inside WSL. Check which one your running server uses — `fcc-server` prints its config directory at startup.
+### What binds where
 
-**Provider validation fails with 404.** Usually the key is fine but the model id isn't available on your account. Check the exact id against the provider's model list.
+| Surface | Default bind | Access control |
+| --- | --- | --- |
+| **Proxy API** (`/v1/...`) | `0.0.0.0:8082` | Bearer token, if `ANTHROPIC_AUTH_TOKEN` is set |
+| **Admin UI** (`/admin`) | same port | **Loopback callers only**, always |
 
-**Agent can't reach the proxy.** Confirm `fcc-server` is running and the address matches what it printed. The proxy binds to loopback, so another machine can't reach it.
+The proxy binds to **all interfaces** by default, so another machine on your network can reach it. The Admin UI is separately restricted to loopback and cannot be reached remotely regardless of bind address.
 
-**Web search returns nothing useful.** Check the Web Search analytics — the attempt detail shows exactly what was sent and what came back, including whether your domain filters were applied or dropped.
+### The auth token
 
-**Update did nothing on Windows.** Versions below 4.21.5 had a bug where the deferred installer could stall. A self-updater can't fix its own updater, so update once from the install script; after that the button works.
+`ANTHROPIC_AUTH_TOKEN` ships as `freecc` in `.env.example`. It is compared in constant time against the bearer token your agent sends.
 
-**Something else.** The request analytics **View** dialog shows the full exchange for any request, which is usually the fastest way to see what actually happened.
+**If you clear it, authentication is disabled entirely** — any caller that can reach the port can spend your provider credits. That is fine on a single-user laptop behind a firewall; it is not fine on a shared or exposed network. Change it from the default if anything other than you can route to the machine.
+
+To bind loopback-only instead, set `HOST=127.0.0.1`.
+
+### What never leaves the machine
+
+Provider API keys are never sent to your agent, never written to the analytics stores, and never included in configuration snapshots — only masked `first4…last4` labels. Proxy credentials are stripped from any recorded URL.
+
+---
+
+## 14. Troubleshooting
+
+**`fcc-server: command not found` right after installing.**
+Close and reopen your terminal. The installer extends `PATH`; an existing shell won't see it. This is the single most common install issue.
+
+**Two configs on Windows.**
+If you installed under both PowerShell and WSL you have `C:\Users\<you>\.fcc` *and* `~/.fcc` inside WSL. The server prints which config directory it is using at startup — check that against the one you've been editing.
+
+**Claude Code still talks to Anthropic.**
+`~/.claude/settings.json` wins over shell exports. Confirm with `/status` — it should show `http://127.0.0.1:8082`. Check the JSON is valid and that you edited the path for your platform.
+
+**401 from the proxy.**
+Your agent's `ANTHROPIC_AUTH_TOKEN` doesn't match the server's. Compare the value in `~/.claude/settings.json` — or the Desktop gateway API key — against the server's setting.
+
+**Provider validation fails with 404.**
+Usually the model id, not the key. Check the exact id against the provider's model list.
+
+**Claude Desktop's test buttons fail.**
+The server must be running for **Test connection** and **Test model discovery** to succeed — they make real calls.
+
+**Desktop shows a warning dialog on launch.**
+Expected with model discovery on; the picker fills in once discovery completes.
+
+**Agent can't reach the proxy from another machine.**
+The proxy binds `0.0.0.0`, so it should be reachable — check your firewall. The *Admin UI* is loopback-only by design and will refuse remote callers no matter what.
+
+**Web search returns nothing useful.**
+Open the attempt detail in Web Search analytics. It shows exactly what was sent upstream and what came back, including whether your domain filters were applied or dropped.
+
+**Cache hit rate shows `—`.**
+That provider doesn't report prompt caching. Not a fault — see [Reading the token columns](#reading-the-token-columns).
+
+**Update did nothing on Windows.**
+Versions below 4.21.5 had a defect where the deferred installer could stall. A self-updater can't fix its own updater, so update once from the install script; after that the dashboard button works.
+
+**Anything else.**
+The request analytics **View** dialog shows the complete exchange for any request — request body, response, resolved provider and model, timing, and errors. Start there.
