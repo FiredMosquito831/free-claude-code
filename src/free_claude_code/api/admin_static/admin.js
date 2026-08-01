@@ -14,6 +14,10 @@ function formatCacheHitRate(row) {
   const total = Number(row?.tokens_in || 0);
   const cached = Number(row?.cache_read_tokens || 0);
   if (!total) return "—";
+  // Not every upstream reports prompt caching. Showing 0.0% for those reads as
+  // "caching is broken" rather than "this provider never told us", so an em
+  // dash is reserved for the case where nothing reported a figure at all.
+  if (row?.cache_reported === 0) return "—";
   return `${((cached / total) * 100).toFixed(1)}%`;
 }
 

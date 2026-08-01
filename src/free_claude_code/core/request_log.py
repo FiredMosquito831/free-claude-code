@@ -628,6 +628,8 @@ class RequestLogStore:
                        COALESCE(SUM(tokens_out), 0) AS tokens_out,
                        COALESCE(SUM(cache_read_tokens), 0) AS cache_read_tokens,
                        COALESCE(SUM(cache_write_tokens), 0) AS cache_write_tokens,
+                       SUM(CASE WHEN cache_read_tokens IS NOT NULL THEN 1 ELSE 0 END)
+                           AS cache_reported,
                        AVG(duration_ms) AS avg_duration_ms,
                        AVG(ttft_ms) AS avg_ttft_ms
                 FROM requests{where}
@@ -670,6 +672,7 @@ class RequestLogStore:
             "tokens_out": totals["tokens_out"] or 0,
             "cache_read_tokens": totals["cache_read_tokens"] or 0,
             "cache_write_tokens": totals["cache_write_tokens"] or 0,
+            "cache_reported": totals["cache_reported"] or 0,
             "avg_duration_ms": _rounded(totals["avg_duration_ms"]),
             "p50_duration_ms": _rounded(_percentile(durations, 0.50)),
             "p95_duration_ms": _rounded(_percentile(durations, 0.95)),
@@ -694,6 +697,8 @@ class RequestLogStore:
             " COALESCE(SUM(tokens_out),0) AS tokens_out,"
             " COALESCE(SUM(cache_read_tokens),0) AS cache_read_tokens,"
             " COALESCE(SUM(cache_write_tokens),0) AS cache_write_tokens,"
+            " SUM(CASE WHEN cache_read_tokens IS NOT NULL THEN 1 ELSE 0 END)"
+            " AS cache_reported,"
             " SUM(CASE WHEN status='error' THEN 1 ELSE 0 END) AS errors,"
             " AVG(duration_ms) AS avg_duration_ms"
             f" FROM requests{where} GROUP BY key ORDER BY requests DESC",
@@ -707,6 +712,7 @@ class RequestLogStore:
                 "tokens_out": row["tokens_out"],
                 "cache_read_tokens": row["cache_read_tokens"],
                 "cache_write_tokens": row["cache_write_tokens"],
+                "cache_reported": row["cache_reported"],
                 "errors": row["errors"],
                 "avg_duration_ms": _rounded(row["avg_duration_ms"]),
             }
