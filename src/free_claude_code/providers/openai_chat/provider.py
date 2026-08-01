@@ -59,6 +59,7 @@ from .tool_calls import (
 from .usage import (
     clone_without_stream_usage,
     is_stream_usage_rejection,
+    prompt_tokens_details,
     request_stream_usage,
     usage_int,
 )
@@ -175,8 +176,21 @@ class OpenAIChatProvider(BaseProvider):
         return {}
 
     def _anthropic_usage_fields(self, usage_info: Any) -> dict[str, int]:
-        """Return provider-specific Anthropic usage fields for final SSE usage."""
-        return {}
+        """Return provider-specific Anthropic usage fields for final SSE usage.
+
+        The OpenAI schema reports cache hits under
+        ``usage.prompt_tokens_details.cached_tokens``, and every
+        OpenAI-compatible upstream that supports prompt caching uses it --
+        NVIDIA NIM included. Reading it here means the whole family reports
+        cache usage instead of each provider re-implementing the same lookup.
+
+        Note ``prompt_tokens`` already *includes* the cached tokens, so this is
+        a breakdown of the existing input count, not an addition to it.
+        """
+        cached = usage_int(prompt_tokens_details(usage_info), "cached_tokens")
+        if cached is None:
+            return {}
+        return {"cache_read_input_tokens": cached}
 
     async def _create_stream(self, body: dict) -> tuple[Any, dict]:
         """Create a streaming chat completion with bounded request fallbacks."""

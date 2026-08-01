@@ -96,3 +96,18 @@ def _error_text(error: Exception) -> str:
         if isinstance(text, str) and text:
             parts.append(text)
     return " ".join(parts).lower()
+
+
+def prompt_tokens_details(usage_info: Any) -> Any:
+    """Return ``usage.prompt_tokens_details`` from an SDK object or a dict."""
+
+    if usage_info is None:
+        return None
+    if isinstance(usage_info, Mapping):
+        return usage_info.get("prompt_tokens_details")
+    details = getattr(usage_info, "prompt_tokens_details", None)
+    if details is None:
+        extra = getattr(usage_info, "model_extra", None)
+        if isinstance(extra, Mapping):
+            return extra.get("prompt_tokens_details")
+    return details

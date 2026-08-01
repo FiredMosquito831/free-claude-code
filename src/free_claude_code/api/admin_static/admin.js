@@ -1,13 +1,20 @@
 
-// Anthropic reports tokens_in as the *uncached* portion, so total prompt input
-// is uncached + cache reads + cache writes. Anything else understates the rate.
+// tokens_in is the upstream's total prompt count and already includes any cached
+// tokens: OpenAI's prompt_tokens works that way, and so does DeepSeek's
+// prompt_cache_hit + miss. The uncached portion is therefore the remainder, and
+// the hit rate divides by tokens_in -- adding cache reads on top of it would
+// count them twice and understate the rate.
+function uncachedInputTokens(row) {
+  const total = Number(row?.tokens_in || 0);
+  const cached = Number(row?.cache_read_tokens || 0);
+  return Math.max(0, total - cached);
+}
+
 function formatCacheHitRate(row) {
-  const uncached = Number(row?.tokens_in || 0);
-  const read = Number(row?.cache_read_tokens || 0);
-  const written = Number(row?.cache_write_tokens || 0);
-  const total = uncached + read + written;
+  const total = Number(row?.tokens_in || 0);
+  const cached = Number(row?.cache_read_tokens || 0);
   if (!total) return "—";
-  return `${((read / total) * 100).toFixed(1)}%`;
+  return `${((cached / total) * 100).toFixed(1)}%`;
 }
 
 const state = {
@@ -3189,7 +3196,7 @@ function renderRequestStatsCards(stats) {
     ["Success rate", `${successRate}%`],
     ["Error rate", `${((stats.error_rate || 0) * 100).toFixed(1)}%`],
     ["Cancelled", stats.cancelled],
-    ["Input (uncached)", formatAnalyticsNumber(stats.tokens_in || 0)],
+    ["Input (uncached)", formatAnalyticsNumber(uncachedInputTokens(stats))],
     ["Cached input", formatAnalyticsNumber(stats.cache_read_tokens || 0)],
     ["Cache hit rate", formatCacheHitRate(stats)],
     ["Cache writes", formatAnalyticsNumber(stats.cache_write_tokens || 0)],
@@ -3235,7 +3242,7 @@ function renderRequestProviderBreakdown(rows) {
           row.key || "unknown",
           formatAnalyticsNumber(requests),
           requests ? `${((errors / requests) * 100).toFixed(1)}%` : "0%",
-          formatAnalyticsNumber(Number(row.tokens_in || 0)),
+          formatAnalyticsNumber(uncachedInputTokens(row)),
           formatAnalyticsNumber(Number(row.cache_read_tokens || 0)),
           formatCacheHitRate(row),
           formatAnalyticsNumber(Number(row.tokens_out || 0)),
@@ -3269,7 +3276,7 @@ function renderRequestKeyBreakdown(rows) {
           row.key || "unknown",
           formatAnalyticsNumber(requests),
           requests ? `${((errors / requests) * 100).toFixed(1)}%` : "0%",
-          formatAnalyticsNumber(Number(row.tokens_in || 0)),
+          formatAnalyticsNumber(uncachedInputTokens(row)),
           formatAnalyticsNumber(Number(row.cache_read_tokens || 0)),
           formatCacheHitRate(row),
           formatAnalyticsNumber(Number(row.tokens_out || 0)),
