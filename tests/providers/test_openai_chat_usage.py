@@ -222,3 +222,46 @@ async def test_openai_chat_stream_retries_without_usage_when_option_is_rejected(
     assert create.await_args_list[0].kwargs["stream_options"] == {"include_usage": True}
     assert "stream_options" not in create.await_args_list[1].kwargs
     assert "stream_options" not in used_body
+
+
+class TestPromptCacheUsage:
+    """OpenAI-compatible upstreams report cache hits in prompt_tokens_details."""
+
+    def _provider(self):
+        return OpenAIChatProvider.__new__(OpenAIChatProvider)
+
+    def test_cached_tokens_become_cache_read_input_tokens(self) -> None:
+        """Verified against a live NVIDIA NIM response, which reports this."""
+
+        usage = {
+            "prompt_tokens": 1243,
+            "completion_tokens": 2,
+            "prompt_tokens_details": {"audio_tokens": None, "cached_tokens": 32},
+        }
+        assert self._provider()._anthropic_usage_fields(usage) == {
+            "cache_read_input_tokens": 32
+        }
+
+    def test_absent_details_yield_no_fields(self) -> None:
+        """Providers that do not report caching must not fabricate a zero."""
+
+        assert self._provider()._anthropic_usage_fields({"prompt_tokens": 10}) == {}
+        assert self._provider()._anthropic_usage_fields(None) == {}
+        assert (
+            self._provider()._anthropic_usage_fields(
+                {"prompt_tokens_details": {"audio_tokens": None}}
+            )
+            == {}
+        )
+
+    def test_reads_details_from_sdk_objects(self) -> None:
+        class _Details:
+            cached_tokens = 7
+
+        class _Usage:
+            prompt_tokens = 100
+            prompt_tokens_details = _Details()
+
+        assert self._provider()._anthropic_usage_fields(_Usage()) == {
+            "cache_read_input_tokens": 7
+        }
