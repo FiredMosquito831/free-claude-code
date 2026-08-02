@@ -61,6 +61,10 @@ _LIST_METADATA_COLUMNS = (
     "headers",
     "key_index",
     "key_label",
+    # Shape of the assistant turn. These are counts, not bodies, so list views
+    # can show what a turn contained without loading the transcript.
+    "thinking_chars",
+    "tool_call_count",
 )
 
 _SCHEMA = """
@@ -91,7 +95,11 @@ CREATE TABLE IF NOT EXISTS requests (
     error_message TEXT,
     headers TEXT,
     key_index INTEGER,
-    key_label TEXT
+    key_label TEXT,
+    thinking_text TEXT,
+    thinking_chars INTEGER,
+    tool_calls TEXT,
+    tool_call_count INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_requests_ts ON requests(ts_epoch);
 CREATE INDEX IF NOT EXISTS idx_requests_status ON requests(status);
@@ -109,6 +117,10 @@ _ADDED_COLUMNS = (
         "cache_write_tokens",
         "ALTER TABLE requests ADD COLUMN cache_write_tokens INTEGER",
     ),
+    ("thinking_text", "ALTER TABLE requests ADD COLUMN thinking_text TEXT"),
+    ("thinking_chars", "ALTER TABLE requests ADD COLUMN thinking_chars INTEGER"),
+    ("tool_calls", "ALTER TABLE requests ADD COLUMN tool_calls TEXT"),
+    ("tool_call_count", "ALTER TABLE requests ADD COLUMN tool_call_count INTEGER"),
 )
 
 # Indexes over post-release columns, created only once those columns exist.
@@ -168,6 +180,14 @@ class RequestRecord:
     # ``first4…last4`` label. The raw key is never stored.
     key_index: int | None = None
     key_label: str | None = None
+    # An assistant turn streams three kinds of block. ``output_text`` holds only
+    # the model's prose; reasoning and tool calls are kept apart so the detail
+    # view can show each for what it is, and so a tool-only turn (the common
+    # case under Claude Code) still records what the model actually did.
+    thinking_text: str | None = None
+    thinking_chars: int | None = None
+    tool_calls: list[dict[str, Any]] | None = None
+    tool_call_count: int | None = None
 
     @property
     def ts_iso(self) -> str:
@@ -386,8 +406,9 @@ class RequestLogStore:
                         reasoning, params, tokens_in, tokens_out,
                         cache_read_tokens, cache_write_tokens, ttft_ms,
                         duration_ms, status, error_kind, error_message, headers,
-                        key_index, key_label
-                    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                        key_index, key_label, thinking_text, thinking_chars,
+                        tool_calls, tool_call_count
+                    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                     """,
                     rows,
                 )
@@ -431,6 +452,10 @@ class RequestLogStore:
             json.dumps(record.headers) if record.headers else None,
             record.key_index,
             record.key_label,
+            cap_text(record.thinking_text),
+            record.thinking_chars,
+            json.dumps(record.tool_calls) if record.tool_calls else None,
+            record.tool_call_count,
         )
 
     def close(self, *, timeout: float = 5.0) -> None:
@@ -559,7 +584,14 @@ class RequestLogStore:
     ) -> dict[str, Any]:
         data = dict(row)
         data["stream"] = bool(data["stream"])
-        for key in ("input_text", "output_text"):
+        # ``thinking_text`` is only projected by the detail query; list views
+        # carry ``thinking_chars`` instead, so skip whatever is absent.
+        body_keys = [
+            key
+            for key in ("input_text", "output_text", "thinking_text")
+            if key in data or f"{key}_length" in data
+        ]
+        for key in body_keys:
             # List queries project a SQL-side preview plus the untruncated
             # length, so the full body never reaches Python.
             length = data.pop(f"{key}_length", None)
@@ -578,7 +610,7 @@ class RequestLogStore:
                 data[f"{key}_truncated"] = True
             else:
                 data[f"{key}_truncated"] = False
-        for key in ("params", "headers"):
+        for key in ("params", "headers", "tool_calls"):
             raw = data.get(key)
             if isinstance(raw, str):
                 try:

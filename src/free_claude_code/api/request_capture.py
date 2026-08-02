@@ -11,6 +11,7 @@ import hashlib
 import json
 import time
 from collections.abc import AsyncIterator
+from dataclasses import dataclass
 from typing import Any, Literal
 
 from free_claude_code.application.routing import RoutedMessagesRequest
@@ -53,6 +54,13 @@ class RequestCapture:
         self._output_parts: list[str] = []
         self._output_chars = 0
         self._stored_chars = 0
+        self._thinking_parts: list[str] = []
+        self._thinking_chars = 0
+        self._stored_thinking_chars = 0
+        # Streamed tool calls arrive as a ``content_block_start`` naming the
+        # tool followed by ``input_json_delta`` fragments, both keyed by block
+        # index, so the partial arguments are accumulated per index.
+        self._tool_blocks: dict[int, dict[str, Any]] = {}
         self._tokens_in: int | None = None
         self._cache_read_tokens: int | None = None
         self._cache_write_tokens: int | None = None
@@ -102,6 +110,21 @@ class RequestCapture:
         """Finalize a non-streamed (short-circuited) successful response."""
         if output_text:
             self._append_output(output_text)
+        self._finalize("success")
+
+    def finish_success_from_message(self, message: Any) -> None:
+        """Finalize from a complete message, keeping its blocks apart."""
+        turn = extract_turn_from_message(message)
+        if turn.text:
+            self._append_output(turn.text)
+        if turn.thinking:
+            self._append_thinking(turn.thinking)
+        for index, call in enumerate(turn.tool_calls):
+            name = call.get("name")
+            self._tool_blocks[index] = {
+                "name": name if isinstance(name, str) else "(unnamed tool)",
+                "parts": [json.dumps(call.get("input") or {})],
+            }
         self._finalize("success")
 
     def wrap(self, body: AsyncIterator[str]) -> AsyncIterator[str]:
@@ -176,12 +199,10 @@ class RequestCapture:
                 if isinstance(usage, dict):
                     self._tokens_in = _int_or_none(usage.get("input_tokens"))
                     self._read_cache_usage(usage)
+        elif event_type == "content_block_start":
+            self._start_content_block(payload)
         elif event_type == "content_block_delta":
-            delta = payload.get("delta")
-            if isinstance(delta, dict) and delta.get("type") == "text_delta":
-                text = delta.get("text")
-                if isinstance(text, str):
-                    self._append_output(text)
+            self._consume_content_delta(payload)
         elif event_type == "message_delta":
             usage = payload.get("usage")
             if isinstance(usage, dict):
@@ -204,6 +225,41 @@ class RequestCapture:
                     message if isinstance(message, str) else "Stream error.",
                 )
 
+    def _start_content_block(self, payload: dict[str, Any]) -> None:
+        """Note a tool_use block so its streamed arguments can be attributed."""
+        block = payload.get("content_block")
+        if not isinstance(block, dict) or block.get("type") != "tool_use":
+            return
+        index = _int_or_none(payload.get("index"))
+        if index is None:
+            return
+        name = block.get("name")
+        self._tool_blocks[index] = {
+            "name": name if isinstance(name, str) else "(unnamed tool)",
+            "parts": [],
+        }
+
+    def _consume_content_delta(self, payload: dict[str, Any]) -> None:
+        """Route a block delta to prose, reasoning, or tool arguments."""
+        delta = payload.get("delta")
+        if not isinstance(delta, dict):
+            return
+        delta_type = delta.get("type")
+        if delta_type == "text_delta":
+            text = delta.get("text")
+            if isinstance(text, str):
+                self._append_output(text)
+        elif delta_type == "thinking_delta":
+            thinking = delta.get("thinking")
+            if isinstance(thinking, str):
+                self._append_thinking(thinking)
+        elif delta_type == "input_json_delta":
+            index = _int_or_none(payload.get("index"))
+            block = self._tool_blocks.get(index) if index is not None else None
+            partial = delta.get("partial_json")
+            if block is not None and isinstance(partial, str):
+                block["parts"].append(partial)
+
     def _read_cache_usage(self, usage: dict[str, object]) -> None:
         """Record cache counters from whichever usage payload carries them."""
 
@@ -220,6 +276,29 @@ class RequestCapture:
         if remaining > 0:
             self._output_parts.append(text[:remaining])
             self._stored_chars += min(remaining, len(text))
+
+    def _append_thinking(self, text: str) -> None:
+        self._thinking_chars += len(text)
+        remaining = MAX_TEXT_CHARS - self._stored_thinking_chars
+        if remaining > 0:
+            self._thinking_parts.append(text[:remaining])
+            self._stored_thinking_chars += min(remaining, len(text))
+
+    def _collected_tool_calls(self) -> list[dict[str, Any]]:
+        """Return the streamed tool calls in block order, arguments parsed."""
+        calls: list[dict[str, Any]] = []
+        for index in sorted(self._tool_blocks):
+            block = self._tool_blocks[index]
+            raw = "".join(block["parts"])
+            call: dict[str, Any] = {"name": block["name"]}
+            # A cancelled or truncated stream leaves the argument JSON
+            # incomplete; keep the fragment rather than dropping the call.
+            try:
+                call["input"] = json.loads(raw) if raw else {}
+            except json.JSONDecodeError:
+                call["input_partial"] = raw[:MAX_TEXT_CHARS]
+            calls.append(call)
+        return calls
 
     def _finalize(self, status: Literal["success", "error", "cancelled"]) -> None:
         if self._finalized or self._store is None:
@@ -240,6 +319,14 @@ class RequestCapture:
             record.output_text = output_text or None
         elif output_text:
             record.output_sha256 = _sha256(output_text)
+        tool_calls = self._collected_tool_calls()
+        record.tool_call_count = len(tool_calls) or None
+        record.thinking_chars = self._thinking_chars or None
+        # Reasoning text and tool arguments are request bodies, so they follow
+        # the same capture switch; the counts above stay either way.
+        if self._capture_bodies:
+            record.thinking_text = "".join(self._thinking_parts) or None
+            record.tool_calls = tool_calls or None
         if self._error is not None:
             record.error_kind, record.error_message = self._error
         record.key_index = self._credential.index
@@ -333,30 +420,59 @@ def _int_or_none(value: Any) -> int | None:
     return value
 
 
-def extract_output_text_from_message(message: Any) -> str | None:
-    """Extract assistant text from a complete Anthropic message payload."""
+@dataclass(frozen=True, slots=True)
+class MessageTurn:
+    """The three kinds of block a complete assistant message can carry."""
+
+    text: str | None
+    thinking: str | None
+    tool_calls: list[dict[str, Any]]
+
+
+def extract_turn_from_message(message: Any) -> MessageTurn:
+    """Split a complete Anthropic message into prose, reasoning and tool calls."""
+    blocks = _message_content_blocks(message)
+    text_parts: list[str] = []
+    thinking_parts: list[str] = []
+    tool_calls: list[dict[str, Any]] = []
+    for block in blocks:
+        block_type = block.get("type")
+        if block_type == "text" and isinstance(block.get("text"), str):
+            text_parts.append(block["text"])
+        elif block_type == "thinking" and isinstance(block.get("thinking"), str):
+            thinking_parts.append(block["thinking"])
+        elif block_type == "tool_use":
+            name = block.get("name")
+            tool_calls.append(
+                {
+                    "name": name if isinstance(name, str) else "(unnamed tool)",
+                    "input": block.get("input") or {},
+                }
+            )
+    return MessageTurn(
+        text="\n".join(text_parts) or None,
+        thinking="\n".join(thinking_parts) or None,
+        tool_calls=tool_calls,
+    )
+
+
+def _message_content_blocks(message: Any) -> list[dict[str, Any]]:
     model_dump = getattr(message, "model_dump", None)
     if callable(model_dump):
         message = model_dump(mode="json")
     if not isinstance(message, dict):
-        return None
+        return []
     content = message.get("content")
     if not isinstance(content, list):
-        return None
-    parts = [
-        block["text"]
-        for block in content
-        if isinstance(block, dict)
-        and block.get("type") == "text"
-        and isinstance(block.get("text"), str)
-    ]
-    return "\n".join(parts) or None
+        return []
+    return [block for block in content if isinstance(block, dict)]
 
 
 __all__ = [
+    "MessageTurn",
     "RequestCapture",
     "build_capture",
     "extract_input_text",
-    "extract_output_text_from_message",
     "extract_request_params",
+    "extract_turn_from_message",
 ]

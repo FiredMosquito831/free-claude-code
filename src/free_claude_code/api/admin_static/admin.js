@@ -3325,7 +3325,7 @@ function renderRequestsTable(rows) {
   if (rows.length === 0) {
     const tr = document.createElement("tr");
     const td = document.createElement("td");
-    td.colSpan = 10;
+    td.colSpan = 11;
     td.className = "analytics-empty";
     td.textContent = "No requests match the current filters.";
     tr.appendChild(td);
@@ -3342,11 +3342,18 @@ function renderRequestsTable(rows) {
       row.key_label || "",
       row.resolved_model || row.requested_model || "",
       row.status,
+    ];
+    cells.forEach((text) => {
+      const td = document.createElement("td");
+      td.textContent = text;
+      tr.appendChild(td);
+    });
+    tr.appendChild(buildTurnShapeCell(row));
+    [
       `${row.tokens_in ?? "—"}/${row.tokens_out ?? "—"}`,
       row.ttft_ms != null ? `${Math.round(row.ttft_ms)} ms` : "—",
       row.duration_ms != null ? `${Math.round(row.duration_ms)} ms` : "—",
-    ];
-    cells.forEach((text) => {
+    ].forEach((text) => {
       const td = document.createElement("td");
       td.textContent = text;
       tr.appendChild(td);
@@ -3364,6 +3371,37 @@ function renderRequestsTable(rows) {
   });
 }
 
+/**
+ * Show what the assistant turn actually contained. A row with tools and no
+ * reply is the normal shape under Claude Code, and it used to look identical
+ * to a row that returned nothing at all.
+ */
+function buildTurnShapeCell(row) {
+  const td = document.createElement("td");
+  const wrap = document.createElement("div");
+  wrap.className = "turn-chips";
+  const chips = [];
+  if (row.thinking_chars) chips.push(["thinking", "thinking"]);
+  if (row.tool_call_count) {
+    chips.push(["tools", row.tool_call_count === 1 ? "1 tool" : `${row.tool_call_count} tools`]);
+  }
+  if (row.output_chars) chips.push(["response", "reply"]);
+  if (chips.length === 0) {
+    td.className = "turn-chips-empty";
+    td.textContent = "—";
+    return td;
+  }
+  chips.forEach(([kind, label]) => {
+    const chip = document.createElement("span");
+    chip.className = "turn-chip";
+    chip.dataset.kind = kind;
+    chip.textContent = label;
+    wrap.appendChild(chip);
+  });
+  td.appendChild(wrap);
+  return td;
+}
+
 function renderReqPager() {
   const start = reqState.total === 0 ? 0 : reqState.offset + 1;
   const end = Math.min(reqState.offset + reqState.limit, reqState.total);
@@ -3372,29 +3410,83 @@ function renderReqPager() {
   byId("reqNextPage").disabled = end >= reqState.total;
 }
 
-function drawBarChart(canvas, labels, series) {
+/** Read a design token so the charts stay on the same palette as the UI. */
+function token(name, fallback) {
+  const value = getComputedStyle(document.documentElement)
+    .getPropertyValue(name)
+    .trim();
+  return value || fallback;
+}
+
+/**
+ * Size a canvas to its rendered box at the display's pixel density.
+ *
+ * The markup pins width/height attributes, so on any HiDPI screen the bitmap
+ * was being stretched and every label came out soft.
+ */
+function prepareCanvas(canvas) {
+  const ratio = window.devicePixelRatio || 1;
+  // clientWidth/Height are the content box, so the border is not counted twice.
+  const width = canvas.clientWidth || canvas.width;
+  const height = canvas.clientHeight || canvas.height;
+  if (canvas.width !== width * ratio || canvas.height !== height * ratio) {
+    canvas.width = width * ratio;
+    canvas.height = height * ratio;
+  }
   const ctx = canvas.getContext("2d");
-  const { width, height } = canvas;
+  ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
   ctx.clearRect(0, 0, width, height);
-  const pad = 24;
+  return { ctx, width, height };
+}
+
+function compactNumber(value) {
+  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`;
+  if (value >= 1_000) return `${(value / 1_000).toFixed(1)}k`;
+  return String(Math.round(value));
+}
+
+function drawBarChart(canvas, labels, series) {
+  const { ctx, width, height } = prepareCanvas(canvas);
+  const padX = 40;
+  const padY = 22;
   const max = Math.max(1, ...series.flatMap((s) => s.values));
   const groups = labels.length || 1;
-  const groupWidth = (width - pad * 2) / groups;
-  const colors = ["#4f8ef7", "#e05d5d"];
+  const groupWidth = (width - padX - 12) / groups;
+  const plotHeight = height - padY * 2;
+  const colors = [token("--accent", "#10b981"), token("--error", "#ef4444")];
+  const muted = token("--muted", "#9ca3af");
+  const line = token("--line", "rgba(255,255,255,0.06)");
+
+  // A value scale: the bars were previously unreadable in absolute terms.
+  ctx.font = "10px system-ui, sans-serif";
+  ctx.textBaseline = "middle";
+  [0, 0.5, 1].forEach((fraction) => {
+    const y = height - padY - plotHeight * fraction;
+    ctx.strokeStyle = line;
+    ctx.beginPath();
+    ctx.moveTo(padX, y + 0.5);
+    ctx.lineTo(width - 8, y + 0.5);
+    ctx.stroke();
+    ctx.fillStyle = muted;
+    ctx.textAlign = "right";
+    ctx.fillText(compactNumber(max * fraction), padX - 6, y);
+  });
+
   series.forEach((s, seriesIndex) => {
     ctx.fillStyle = colors[seriesIndex % colors.length];
     s.values.forEach((value, i) => {
       const barWidth = groupWidth / (series.length + 1);
-      const x = pad + i * groupWidth + seriesIndex * barWidth;
-      const barHeight = ((height - pad * 2) * value) / max;
-      ctx.fillRect(x, height - pad - barHeight, barWidth * 0.8, barHeight);
+      const x = padX + i * groupWidth + seriesIndex * barWidth;
+      const barHeight = (plotHeight * value) / max;
+      ctx.fillRect(x, height - padY - barHeight, Math.max(1, barWidth * 0.8), barHeight);
     });
   });
-  ctx.fillStyle = "#888";
-  ctx.font = "10px sans-serif";
+
+  ctx.fillStyle = muted;
+  ctx.textAlign = "left";
   labels.forEach((label, i) => {
     if (labels.length > 12 && i % Math.ceil(labels.length / 12) !== 0) return;
-    ctx.fillText(label, pad + i * groupWidth, height - 8);
+    ctx.fillText(label, padX + i * groupWidth, height - padY / 2);
   });
 }
 
@@ -3409,19 +3501,29 @@ function renderReqSeriesChart(series) {
 function renderReqModelChart(byModel) {
   const top = byModel.slice(0, 10);
   const canvas = document.getElementById("reqModelChart");
-  const ctx = canvas.getContext("2d");
-  const { width, height } = canvas;
-  ctx.clearRect(0, 0, width, height);
+  const { ctx, width, height } = prepareCanvas(canvas);
+  if (top.length === 0) return;
   const max = Math.max(1, ...top.map((m) => m.tokens_in + m.tokens_out));
-  const rowHeight = Math.min(20, (height - 10) / Math.max(1, top.length));
+  const labelWidth = 150;
+  const valueWidth = 52;
+  const rowHeight = Math.min(20, height / top.length);
+  const accent = token("--accent", "#10b981");
+  const muted = token("--muted", "#9ca3af");
+  ctx.font = "10px system-ui, sans-serif";
+  ctx.textBaseline = "middle";
   top.forEach((model, i) => {
     const tokens = model.tokens_in + model.tokens_out;
-    const barWidth = ((width - 180) * tokens) / max;
-    ctx.fillStyle = "#4f8ef7";
-    ctx.fillRect(160, 5 + i * rowHeight, barWidth, rowHeight - 4);
-    ctx.fillStyle = "#888";
-    ctx.font = "10px sans-serif";
-    ctx.fillText(model.key.slice(0, 24), 4, 14 + i * rowHeight);
+    const y = i * rowHeight;
+    const mid = y + rowHeight / 2;
+    const barWidth = ((width - labelWidth - valueWidth) * tokens) / max;
+    ctx.fillStyle = accent;
+    ctx.fillRect(labelWidth, y + 2, Math.max(1, barWidth), rowHeight - 5);
+    ctx.fillStyle = muted;
+    ctx.textAlign = "right";
+    ctx.fillText(model.key.slice(0, 26), labelWidth - 8, mid);
+    // The bar shows proportion; the number is what people actually quote.
+    ctx.textAlign = "left";
+    ctx.fillText(compactNumber(tokens), labelWidth + barWidth + 6, mid);
   });
 }
 
@@ -3456,10 +3558,114 @@ async function openRequestDetail(requestId) {
     dd.textContent = value;
     meta.append(dt, dd);
   });
-  byId("reqDetailInput").textContent = row.input_text || "(not captured)";
-  byId("reqDetailOutput").textContent = row.output_text || "(not captured)";
+  renderTurnTranscript(row);
   byId("reqDetailModal").hidden = false;
   byId("reqDetailClose").focus();
+}
+
+function formatChars(count) {
+  if (!count) return "";
+  return `${count.toLocaleString()} chars`;
+}
+
+/**
+ * Fill the prompt / reasoning / tool calls / response panes.
+ *
+ * Emptiness is not one condition. A pane can be empty because the turn had
+ * nothing of that kind, or because body capture is off — those need different
+ * words, and the character counts are recorded either way, so we can tell.
+ */
+function renderTurnTranscript(row) {
+  const setBody = (bodyId, metaId, text, chars, emptyText) => {
+    const body = byId(bodyId);
+    const captured = typeof text === "string" && text !== "";
+    body.textContent = captured
+      ? text
+      : chars
+        ? `${chars.toLocaleString()} characters were recorded but not stored. Set REQUEST_LOG_CAPTURE_BODIES=true to keep the text.`
+        : emptyText;
+    body.classList.toggle("turn-empty-body", !captured);
+    byId(metaId).textContent = formatChars(chars);
+  };
+
+  setBody(
+    "reqDetailInput",
+    "reqDetailInputMeta",
+    row.input_text,
+    row.input_chars,
+    "No prompt text recorded.",
+  );
+  setBody(
+    "reqDetailOutput",
+    "reqDetailOutputMeta",
+    row.output_text,
+    row.output_chars,
+    row.tool_call_count
+      ? "This turn called tools without writing a reply."
+      : "No reply text in this turn.",
+  );
+
+  const thinkingPane = byId("reqDetailThinkingPane");
+  thinkingPane.hidden = !row.thinking_chars;
+  if (row.thinking_chars) {
+    thinkingPane.open = false;
+    setBody(
+      "reqDetailThinking",
+      "reqDetailThinkingMeta",
+      row.thinking_text,
+      row.thinking_chars,
+      "No reasoning recorded.",
+    );
+  }
+
+  renderToolCalls(row);
+}
+
+function renderToolCalls(row) {
+  const pane = byId("reqDetailToolsPane");
+  const list = byId("reqDetailTools");
+  list.replaceChildren();
+  const count = row.tool_call_count || 0;
+  pane.hidden = count === 0;
+  if (count === 0) return;
+  byId("reqDetailToolsMeta").textContent = count === 1 ? "1 call" : `${count} calls`;
+
+  const calls = Array.isArray(row.tool_calls) ? row.tool_calls : null;
+  if (!calls) {
+    const note = document.createElement("p");
+    note.className = "turn-empty";
+    note.textContent =
+      "Arguments were not stored. Set REQUEST_LOG_CAPTURE_BODIES=true to keep them.";
+    list.append(note);
+    return;
+  }
+
+  calls.forEach((call) => {
+    const item = document.createElement("li");
+    item.className = "tool-call";
+
+    const head = document.createElement("div");
+    head.className = "tool-call-head";
+    const ordinal = document.createElement("span");
+    ordinal.className = "tool-call-ordinal";
+    const name = document.createElement("code");
+    name.className = "tool-call-name";
+    name.textContent = call.name || "(unnamed tool)";
+    head.append(ordinal, name);
+
+    const args = document.createElement("pre");
+    args.className = "tool-call-args";
+    if (typeof call.input_partial === "string") {
+      // The stream ended mid-arguments, so this is a fragment, not JSON.
+      args.classList.add("tool-call-partial");
+      args.textContent = `${call.input_partial}\n\n— arguments incomplete, the stream ended early —`;
+    } else {
+      args.textContent = JSON.stringify(call.input ?? {}, null, 2);
+    }
+
+    item.append(head, args);
+    list.append(item);
+  });
 }
 
 function clearChart(canvas) {
@@ -3480,9 +3686,17 @@ function trapRequestDetailFocus(event) {
   if (event.key !== "Tab" || modal.hidden) return;
   const focusable = Array.from(
     modal.querySelectorAll(
-      'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+      // `summary` is tabbable without carrying a tabindex attribute, so it has
+      // to be named explicitly or the reasoning pane becomes unreachable.
+      'button:not([disabled]), summary, [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
     ),
-  ).filter((element) => element instanceof HTMLElement && !element.hidden);
+  ).filter(
+    (element) =>
+      element instanceof HTMLElement &&
+      !element.hidden &&
+      // Panes are hidden when the turn had no reasoning or no tool calls.
+      element.closest("[hidden]") === null,
+  );
   if (focusable.length === 0) {
     event.preventDefault();
     return;

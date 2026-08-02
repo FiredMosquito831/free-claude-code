@@ -39,7 +39,13 @@
   --neutral-border: rgba(107, 114, 128, 0.25);
   
   --info: #3b82f6;
-  
+
+  /* Reasoning: the only content in the dashboard that is not operational
+     data, so it gets the one hue reserved for the model's interior voice. */
+  --reasoning: #a78bfa;
+  --reasoning-bg: rgba(167, 139, 250, 0.07);
+  --reasoning-border: rgba(167, 139, 250, 0.28);
+
   /* Box Shadow & Glows */
   --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.2);
   --shadow: 0 12px 34px rgba(0, 0, 0, 0.5);
@@ -1150,12 +1156,13 @@ textarea:focus-visible,
   border-radius: 2px;
 }
 
+/* These must track the chart series colours in drawBarChart(). */
 .legend-swatch.requests {
-  background: #4f8ef7;
+  background: var(--accent);
 }
 
 .legend-swatch.errors {
-  background: #e05d5d;
+  background: var(--error);
 }
 
 /* Tablet Layout Optimization */
@@ -1351,9 +1358,12 @@ textarea:focus-visible,
 .requests-chart canvas {
   display: block;
   width: 100%;
-  border: 1px solid var(--border, #333);
-  border-radius: 8px;
-  background: var(--panel, #1b1b1b);
+  /* Pinned in CSS on purpose: the script resizes the bitmap for the display's
+     pixel density, and without this the element would grow with it. */
+  height: 180px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--card);
 }
 
 .requests-breakdowns {
@@ -1421,13 +1431,14 @@ textarea:focus-visible,
 }
 
 .requests-modal-card {
-  width: min(760px, 92vw);
-  max-height: 86vh;
+  width: min(980px, 94vw);
+  max-height: 88vh;
   overflow: auto;
   padding: 20px;
-  border: 1px solid var(--border, #333);
-  border-radius: 10px;
-  background: var(--bg, #111);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-lg);
+  background: var(--panel);
+  box-shadow: var(--shadow);
 }
 
 .requests-modal-header {
@@ -1453,15 +1464,234 @@ textarea:focus-visible,
 }
 
 .requests-detail-body {
-  max-height: 220px;
+  max-height: 260px;
   overflow: auto;
-  padding: 10px;
-  border: 1px solid var(--border, #333);
-  border-radius: 8px;
-  background: var(--panel, #1b1b1b);
+  margin: 0;
+  padding: 12px;
+  border-radius: var(--radius-sm);
+  background: var(--input);
   white-space: pre-wrap;
   word-break: break-word;
   font-size: 12px;
+  line-height: 1.55;
+}
+
+/* ---- Turn transcript -----------------------------------------------------
+   An assistant turn is three different kinds of speech: the model reasons,
+   it acts, then it answers. Each pane is keyed by a coloured rule so the
+   kind is readable before a single word is. */
+
+.transcript {
+  display: grid;
+  gap: 12px;
+  margin-top: 18px;
+}
+
+.turn-pane {
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--neutral);
+  border-radius: var(--radius-md);
+  background: var(--card);
+}
+
+.turn-pane[data-kind="thinking"] {
+  border-left-color: var(--reasoning);
+  background: var(--reasoning-bg);
+}
+
+.turn-pane[data-kind="tools"] {
+  border-left-color: var(--warn);
+}
+
+.turn-pane[data-kind="response"] {
+  border-left-color: var(--accent);
+}
+
+.turn-pane-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.turn-pane-head h4 {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-strong);
+}
+
+.turn-pane[data-kind="thinking"] .turn-pane-head h4 {
+  color: var(--reasoning);
+}
+
+.turn-pane-meta {
+  font-size: 11px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Reasoning is long and usually noise, so it opens on demand. */
+details.turn-pane > summary {
+  cursor: pointer;
+  list-style: none;
+  margin-bottom: 0;
+}
+
+details.turn-pane > summary::-webkit-details-marker {
+  display: none;
+}
+
+details.turn-pane > summary h4::before {
+  content: "▸";
+  display: inline-block;
+  margin-right: 8px;
+  color: var(--reasoning);
+  transition: transform var(--transition-fast);
+}
+
+details.turn-pane[open] > summary h4::before {
+  transform: rotate(90deg);
+}
+
+details.turn-pane[open] > summary {
+  margin-bottom: 10px;
+}
+
+details.turn-pane > summary:focus-visible {
+  outline: 2px solid var(--reasoning);
+  outline-offset: 3px;
+  border-radius: var(--radius-sm);
+}
+
+/* The pane is already a container; the body should not draw a second one. */
+.turn-pane .requests-detail-body {
+  padding: 0;
+  background: transparent;
+}
+
+.turn-pane[data-kind="thinking"] .requests-detail-body {
+  color: #d5c9f5;
+}
+
+.turn-empty {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+/* An absent body reads as a note, not as content. */
+.requests-detail-body.turn-empty-body {
+  color: var(--muted);
+  background: transparent;
+  padding: 0;
+}
+
+.turn-chips-empty {
+  color: var(--muted);
+}
+
+/* ---- Tool calls ---- */
+
+.tool-calls {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  counter-reset: toolcall;
+}
+
+.tool-call {
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--input);
+}
+
+.tool-call-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.tool-call-ordinal {
+  counter-increment: toolcall;
+  font-size: 11px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.tool-call-ordinal::before {
+  content: counter(toolcall);
+}
+
+.tool-call-name {
+  padding: 2px 8px;
+  border: 1px solid var(--warn-border);
+  border-radius: var(--radius-full);
+  background: var(--warn-bg);
+  color: var(--warn);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+}
+
+.tool-call-args {
+  max-height: 200px;
+  overflow: auto;
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--text);
+}
+
+.tool-call-partial {
+  color: var(--warn);
+}
+
+/* ---- Turn shape chips in the request table ---- */
+
+.turn-chips {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.turn-chip {
+  padding: 1px 7px;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--line-strong);
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.turn-chip[data-kind="thinking"] {
+  border-color: var(--reasoning-border);
+  color: var(--reasoning);
+}
+
+.turn-chip[data-kind="tools"] {
+  border-color: var(--warn-border);
+  color: var(--warn);
+}
+
+.turn-chip[data-kind="response"] {
+  border-color: var(--accent-border);
+  color: var(--accent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  details.turn-pane > summary h4::before {
+    transition: none;
+  }
 }
 
 .websearch-detail-card {
