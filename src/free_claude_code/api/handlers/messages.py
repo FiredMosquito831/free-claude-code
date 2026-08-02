@@ -11,7 +11,6 @@ from free_claude_code.api.detection import is_safety_classifier_request
 from free_claude_code.api.optimization_handlers import try_optimizations
 from free_claude_code.api.request_capture import (
     build_capture,
-    extract_output_text_from_message,
 )
 from free_claude_code.api.request_errors import (
     http_status_for_unexpected_api_exception,
@@ -130,9 +129,7 @@ class MessagesHandler:
             if isinstance(result, _MessagesStreamResult):
                 result = _MessagesStreamResult(capture.wrap(result.body))
             else:
-                capture.finish_success(
-                    extract_output_text_from_message(result.response)
-                )
+                capture.finish_success_from_message(result.response)
             return await self._to_public_response(
                 result,
                 stream=request_data.stream,

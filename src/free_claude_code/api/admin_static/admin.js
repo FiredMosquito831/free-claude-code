@@ -3203,6 +3203,14 @@ function populateRequestFilterOptions(stats) {
   populate("reqKeyOptions", stats.by_key || [], reqState.keyOptions);
 }
 
+/** "412 (18.4%)" — the count and its share of the window, in one cell. */
+function formatTurnShare(count, total) {
+  const value = Number(count || 0);
+  const denominator = Number(total || 0);
+  if (!denominator) return "—";
+  return `${formatAnalyticsNumber(value)} (${((value / denominator) * 100).toFixed(1)}%)`;
+}
+
 function renderRequestStatsCards(stats) {
   const successRate = stats.total
     ? ((Number(stats.success || 0) / Number(stats.total)) * 100).toFixed(1)
@@ -3217,6 +3225,9 @@ function renderRequestStatsCards(stats) {
     ["Cache hit rate", formatCacheHitRate(stats)],
     ["Cache writes", formatAnalyticsNumber(stats.cache_write_tokens || 0)],
     ["Tokens out", formatAnalyticsNumber(stats.tokens_out || 0)],
+    ["Tool calls", formatAnalyticsNumber(stats.tool_calls || 0)],
+    ["Turns using tools", formatTurnShare(stats.turns_with_tools, stats.total)],
+    ["Turns with reasoning", formatTurnShare(stats.turns_with_reasoning, stats.total)],
     ["Avg duration", stats.avg_duration_ms != null ? `${stats.avg_duration_ms} ms` : "—"],
     ["p50 duration", stats.p50_duration_ms != null ? `${stats.p50_duration_ms} ms` : "—"],
     ["p95 duration", stats.p95_duration_ms != null ? `${stats.p95_duration_ms} ms` : "—"],
@@ -3325,7 +3336,7 @@ function renderRequestsTable(rows) {
   if (rows.length === 0) {
     const tr = document.createElement("tr");
     const td = document.createElement("td");
-    td.colSpan = 10;
+    td.colSpan = 11;
     td.className = "analytics-empty";
     td.textContent = "No requests match the current filters.";
     tr.appendChild(td);
@@ -3342,11 +3353,18 @@ function renderRequestsTable(rows) {
       row.key_label || "",
       row.resolved_model || row.requested_model || "",
       row.status,
+    ];
+    cells.forEach((text) => {
+      const td = document.createElement("td");
+      td.textContent = text;
+      tr.appendChild(td);
+    });
+    tr.appendChild(buildTurnShapeCell(row));
+    [
       `${row.tokens_in ?? "—"}/${row.tokens_out ?? "—"}`,
       row.ttft_ms != null ? `${Math.round(row.ttft_ms)} ms` : "—",
       row.duration_ms != null ? `${Math.round(row.duration_ms)} ms` : "—",
-    ];
-    cells.forEach((text) => {
+    ].forEach((text) => {
       const td = document.createElement("td");
       td.textContent = text;
       tr.appendChild(td);
@@ -3364,6 +3382,37 @@ function renderRequestsTable(rows) {
   });
 }
 
+/**
+ * Show what the assistant turn actually contained. A row with tools and no
+ * reply is the normal shape under Claude Code, and it used to look identical
+ * to a row that returned nothing at all.
+ */
+function buildTurnShapeCell(row) {
+  const td = document.createElement("td");
+  const wrap = document.createElement("div");
+  wrap.className = "turn-chips";
+  const chips = [];
+  if (row.thinking_chars) chips.push(["thinking", "thinking"]);
+  if (row.tool_call_count) {
+    chips.push(["tools", row.tool_call_count === 1 ? "1 tool" : `${row.tool_call_count} tools`]);
+  }
+  if (row.output_chars) chips.push(["response", "reply"]);
+  if (chips.length === 0) {
+    td.className = "turn-chips-empty";
+    td.textContent = "—";
+    return td;
+  }
+  chips.forEach(([kind, label]) => {
+    const chip = document.createElement("span");
+    chip.className = "turn-chip";
+    chip.dataset.kind = kind;
+    chip.textContent = label;
+    wrap.appendChild(chip);
+  });
+  td.appendChild(wrap);
+  return td;
+}
+
 function renderReqPager() {
   const start = reqState.total === 0 ? 0 : reqState.offset + 1;
   const end = Math.min(reqState.offset + reqState.limit, reqState.total);
@@ -3372,29 +3421,83 @@ function renderReqPager() {
   byId("reqNextPage").disabled = end >= reqState.total;
 }
 
-function drawBarChart(canvas, labels, series) {
+/** Read a design token so the charts stay on the same palette as the UI. */
+function token(name, fallback) {
+  const value = getComputedStyle(document.documentElement)
+    .getPropertyValue(name)
+    .trim();
+  return value || fallback;
+}
+
+/**
+ * Size a canvas to its rendered box at the display's pixel density.
+ *
+ * The markup pins width/height attributes, so on any HiDPI screen the bitmap
+ * was being stretched and every label came out soft.
+ */
+function prepareCanvas(canvas) {
+  const ratio = window.devicePixelRatio || 1;
+  // clientWidth/Height are the content box, so the border is not counted twice.
+  const width = canvas.clientWidth || canvas.width;
+  const height = canvas.clientHeight || canvas.height;
+  if (canvas.width !== width * ratio || canvas.height !== height * ratio) {
+    canvas.width = width * ratio;
+    canvas.height = height * ratio;
+  }
   const ctx = canvas.getContext("2d");
-  const { width, height } = canvas;
+  ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
   ctx.clearRect(0, 0, width, height);
-  const pad = 24;
+  return { ctx, width, height };
+}
+
+function compactNumber(value) {
+  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`;
+  if (value >= 1_000) return `${(value / 1_000).toFixed(1)}k`;
+  return String(Math.round(value));
+}
+
+function drawBarChart(canvas, labels, series) {
+  const { ctx, width, height } = prepareCanvas(canvas);
+  const padX = 40;
+  const padY = 22;
   const max = Math.max(1, ...series.flatMap((s) => s.values));
   const groups = labels.length || 1;
-  const groupWidth = (width - pad * 2) / groups;
-  const colors = ["#4f8ef7", "#e05d5d"];
+  const groupWidth = (width - padX - 12) / groups;
+  const plotHeight = height - padY * 2;
+  const colors = [token("--accent", "#10b981"), token("--error", "#ef4444")];
+  const muted = token("--muted", "#9ca3af");
+  const line = token("--line", "rgba(255,255,255,0.06)");
+
+  // A value scale: the bars were previously unreadable in absolute terms.
+  ctx.font = "10px system-ui, sans-serif";
+  ctx.textBaseline = "middle";
+  [0, 0.5, 1].forEach((fraction) => {
+    const y = height - padY - plotHeight * fraction;
+    ctx.strokeStyle = line;
+    ctx.beginPath();
+    ctx.moveTo(padX, y + 0.5);
+    ctx.lineTo(width - 8, y + 0.5);
+    ctx.stroke();
+    ctx.fillStyle = muted;
+    ctx.textAlign = "right";
+    ctx.fillText(compactNumber(max * fraction), padX - 6, y);
+  });
+
   series.forEach((s, seriesIndex) => {
     ctx.fillStyle = colors[seriesIndex % colors.length];
     s.values.forEach((value, i) => {
       const barWidth = groupWidth / (series.length + 1);
-      const x = pad + i * groupWidth + seriesIndex * barWidth;
-      const barHeight = ((height - pad * 2) * value) / max;
-      ctx.fillRect(x, height - pad - barHeight, barWidth * 0.8, barHeight);
+      const x = padX + i * groupWidth + seriesIndex * barWidth;
+      const barHeight = (plotHeight * value) / max;
+      ctx.fillRect(x, height - padY - barHeight, Math.max(1, barWidth * 0.8), barHeight);
     });
   });
-  ctx.fillStyle = "#888";
-  ctx.font = "10px sans-serif";
+
+  ctx.fillStyle = muted;
+  ctx.textAlign = "left";
   labels.forEach((label, i) => {
     if (labels.length > 12 && i % Math.ceil(labels.length / 12) !== 0) return;
-    ctx.fillText(label, pad + i * groupWidth, height - 8);
+    ctx.fillText(label, padX + i * groupWidth, height - padY / 2);
   });
 }
 
@@ -3409,19 +3512,29 @@ function renderReqSeriesChart(series) {
 function renderReqModelChart(byModel) {
   const top = byModel.slice(0, 10);
   const canvas = document.getElementById("reqModelChart");
-  const ctx = canvas.getContext("2d");
-  const { width, height } = canvas;
-  ctx.clearRect(0, 0, width, height);
+  const { ctx, width, height } = prepareCanvas(canvas);
+  if (top.length === 0) return;
   const max = Math.max(1, ...top.map((m) => m.tokens_in + m.tokens_out));
-  const rowHeight = Math.min(20, (height - 10) / Math.max(1, top.length));
+  const labelWidth = 150;
+  const valueWidth = 52;
+  const rowHeight = Math.min(20, height / top.length);
+  const accent = token("--accent", "#10b981");
+  const muted = token("--muted", "#9ca3af");
+  ctx.font = "10px system-ui, sans-serif";
+  ctx.textBaseline = "middle";
   top.forEach((model, i) => {
     const tokens = model.tokens_in + model.tokens_out;
-    const barWidth = ((width - 180) * tokens) / max;
-    ctx.fillStyle = "#4f8ef7";
-    ctx.fillRect(160, 5 + i * rowHeight, barWidth, rowHeight - 4);
-    ctx.fillStyle = "#888";
-    ctx.font = "10px sans-serif";
-    ctx.fillText(model.key.slice(0, 24), 4, 14 + i * rowHeight);
+    const y = i * rowHeight;
+    const mid = y + rowHeight / 2;
+    const barWidth = ((width - labelWidth - valueWidth) * tokens) / max;
+    ctx.fillStyle = accent;
+    ctx.fillRect(labelWidth, y + 2, Math.max(1, barWidth), rowHeight - 5);
+    ctx.fillStyle = muted;
+    ctx.textAlign = "right";
+    ctx.fillText(model.key.slice(0, 26), labelWidth - 8, mid);
+    // The bar shows proportion; the number is what people actually quote.
+    ctx.textAlign = "left";
+    ctx.fillText(compactNumber(tokens), labelWidth + barWidth + 6, mid);
   });
 }
 
@@ -3440,10 +3553,17 @@ async function openRequestDetail(requestId) {
     ["Resolved model", row.resolved_model],
     ["Status", row.status],
     ["Error", row.error_kind ? `${row.error_kind}: ${row.error_message || ""}` : ""],
-    ["Tokens", `${row.tokens_in ?? "—"} in / ${row.tokens_out ?? "—"} out`],
+    ["Key", row.key_label],
+    ["Input (uncached)", formatOptionalNumber(row.tokens_in)],
+    ["Cached input", formatOptionalNumber(row.cache_read_tokens)],
+    ["Cache writes", formatOptionalNumber(row.cache_write_tokens)],
+    ["Cache hit", formatRowCacheHit(row)],
+    ["Tokens out", formatOptionalNumber(row.tokens_out)],
+    ["Output rate", formatOutputRate(row)],
     ["TTFT", row.ttft_ms != null ? `${Math.round(row.ttft_ms)} ms` : "—"],
     ["Duration", row.duration_ms != null ? `${Math.round(row.duration_ms)} ms` : "—"],
-    ["Reasoning", row.reasoning],
+    ["Turn", formatTurnSummary(row)],
+    ["Reasoning policy", row.reasoning],
     ["Params", row.params ? JSON.stringify(row.params) : ""],
     ["Input SHA-256", row.input_sha256],
     ["Output SHA-256", row.output_sha256],
@@ -3456,10 +3576,147 @@ async function openRequestDetail(requestId) {
     dd.textContent = value;
     meta.append(dt, dd);
   });
-  byId("reqDetailInput").textContent = row.input_text || "(not captured)";
-  byId("reqDetailOutput").textContent = row.output_text || "(not captured)";
+  renderTurnTranscript(row);
   byId("reqDetailModal").hidden = false;
   byId("reqDetailClose").focus();
+}
+
+function formatChars(count) {
+  if (!count) return "";
+  return `${count.toLocaleString()} chars`;
+}
+
+function formatOptionalNumber(value) {
+  return value == null ? "—" : Number(value).toLocaleString();
+}
+
+/** Share of this request's input that the provider served from its cache. */
+function formatRowCacheHit(row) {
+  const cached = Number(row.cache_read_tokens || 0);
+  if (row.cache_read_tokens == null) return "not reported";
+  const total = Number(row.tokens_in || 0) + cached;
+  if (!total) return "—";
+  return `${((cached / total) * 100).toFixed(1)}%`;
+}
+
+/** Output tokens per second, excluding the wait before the first one. */
+function formatOutputRate(row) {
+  const tokens = Number(row.tokens_out || 0);
+  const duration = Number(row.duration_ms || 0);
+  const ttft = Number(row.ttft_ms || 0);
+  const generating = duration - ttft;
+  if (!tokens || generating <= 0) return "—";
+  return `${(tokens / (generating / 1000)).toFixed(1)} tok/s`;
+}
+
+function formatTurnSummary(row) {
+  const parts = [];
+  if (row.thinking_chars) parts.push(`${row.thinking_chars.toLocaleString()} chars reasoning`);
+  if (row.tool_call_count) {
+    parts.push(row.tool_call_count === 1 ? "1 tool call" : `${row.tool_call_count} tool calls`);
+  }
+  if (row.output_chars) parts.push(`${row.output_chars.toLocaleString()} chars reply`);
+  return parts.join(" · ");
+}
+
+/**
+ * Fill the prompt / reasoning / tool calls / response panes.
+ *
+ * Emptiness is not one condition. A pane can be empty because the turn had
+ * nothing of that kind, or because body capture is off — those need different
+ * words, and the character counts are recorded either way, so we can tell.
+ */
+function renderTurnTranscript(row) {
+  const setBody = (bodyId, metaId, text, chars, emptyText) => {
+    const body = byId(bodyId);
+    const captured = typeof text === "string" && text !== "";
+    body.textContent = captured
+      ? text
+      : chars
+        ? `${chars.toLocaleString()} characters were recorded but not stored. Set REQUEST_LOG_CAPTURE_BODIES=true to keep the text.`
+        : emptyText;
+    body.classList.toggle("turn-empty-body", !captured);
+    byId(metaId).textContent = formatChars(chars);
+  };
+
+  setBody(
+    "reqDetailInput",
+    "reqDetailInputMeta",
+    row.input_text,
+    row.input_chars,
+    "No prompt text recorded.",
+  );
+  setBody(
+    "reqDetailOutput",
+    "reqDetailOutputMeta",
+    row.output_text,
+    row.output_chars,
+    row.tool_call_count
+      ? "This turn called tools without writing a reply."
+      : "No reply text in this turn.",
+  );
+
+  const thinkingPane = byId("reqDetailThinkingPane");
+  thinkingPane.hidden = !row.thinking_chars;
+  if (row.thinking_chars) {
+    thinkingPane.open = false;
+    setBody(
+      "reqDetailThinking",
+      "reqDetailThinkingMeta",
+      row.thinking_text,
+      row.thinking_chars,
+      "No reasoning recorded.",
+    );
+  }
+
+  renderToolCalls(row);
+}
+
+function renderToolCalls(row) {
+  const pane = byId("reqDetailToolsPane");
+  const list = byId("reqDetailTools");
+  list.replaceChildren();
+  const count = row.tool_call_count || 0;
+  pane.hidden = count === 0;
+  if (count === 0) return;
+  byId("reqDetailToolsMeta").textContent = count === 1 ? "1 call" : `${count} calls`;
+
+  const calls = Array.isArray(row.tool_calls) ? row.tool_calls : null;
+  if (!calls) {
+    const note = document.createElement("p");
+    note.className = "turn-empty";
+    note.textContent =
+      "Arguments were not stored. Set REQUEST_LOG_CAPTURE_BODIES=true to keep them.";
+    list.append(note);
+    return;
+  }
+
+  calls.forEach((call) => {
+    const item = document.createElement("li");
+    item.className = "tool-call";
+
+    const head = document.createElement("div");
+    head.className = "tool-call-head";
+    const ordinal = document.createElement("span");
+    ordinal.className = "tool-call-ordinal";
+    const name = document.createElement("code");
+    name.className = "tool-call-name";
+    name.textContent = call.name || "(unnamed tool)";
+    head.append(ordinal, name);
+
+    const args = document.createElement("pre");
+    args.className = "tool-call-args";
+    if (typeof call.input_partial === "string") {
+      // The stream ended mid-arguments, so this is a fragment, not JSON.
+      args.classList.add("tool-call-partial");
+      args.textContent = `${call.input_partial}\n\n— arguments incomplete, the stream ended early —`;
+    } else {
+      args.textContent = JSON.stringify(call.input ?? {}, null, 2);
+    }
+
+    item.append(head, args);
+    list.append(item);
+  });
 }
 
 function clearChart(canvas) {
@@ -3480,9 +3737,17 @@ function trapRequestDetailFocus(event) {
   if (event.key !== "Tab" || modal.hidden) return;
   const focusable = Array.from(
     modal.querySelectorAll(
-      'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+      // `summary` is tabbable without carrying a tabindex attribute, so it has
+      // to be named explicitly or the reasoning pane becomes unreachable.
+      'button:not([disabled]), summary, [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
     ),
-  ).filter((element) => element instanceof HTMLElement && !element.hidden);
+  ).filter(
+    (element) =>
+      element instanceof HTMLElement &&
+      !element.hidden &&
+      // Panes are hidden when the turn had no reasoning or no tool calls.
+      element.closest("[hidden]") === null,
+  );
   if (focusable.length === 0) {
     event.preventDefault();
     return;
@@ -3584,3 +3849,103 @@ byId("reqClearButton").addEventListener("click", () => {
     })
     .catch((error) => showMessage(error.message, "error"));
 });
+
+/* ------------------------------------------------------------------ guide ---
+   Screenshots in the guide are dashboard captures, so at column width the UI
+   inside them is unreadable. They open at full size instead. */
+
+let guideLightboxReturnFocus = null;
+
+function openGuideLightbox(image) {
+  const lightbox = byId("guideLightbox");
+  const full = byId("guideLightboxImage");
+  guideLightboxReturnFocus = document.activeElement;
+  full.src = image.src;
+  full.alt = image.alt || "";
+  lightbox.hidden = false;
+  byId("guideLightboxClose").focus();
+}
+
+function closeGuideLightbox() {
+  const lightbox = byId("guideLightbox");
+  if (lightbox.hidden) return;
+  lightbox.hidden = true;
+  byId("guideLightboxImage").src = "";
+  if (guideLightboxReturnFocus instanceof HTMLElement) {
+    guideLightboxReturnFocus.focus();
+  }
+  guideLightboxReturnFocus = null;
+}
+
+function setupGuideScreenshots() {
+  document.querySelectorAll(".guide-shot").forEach((image) => {
+    image.tabIndex = 0;
+    image.setAttribute("role", "button");
+    image.setAttribute(
+      "aria-label",
+      `${image.alt || "Screenshot"} — open at full size`,
+    );
+    image.addEventListener("click", () => openGuideLightbox(image));
+    image.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter" && event.key !== " ") return;
+      event.preventDefault();
+      openGuideLightbox(image);
+    });
+    // The alt text already describes the shot; reuse it as a caption so the
+    // click affordance is stated rather than implied.
+    if (image.alt && !image.nextElementSibling?.classList.contains("guide-shot-caption")) {
+      const caption = document.createElement("p");
+      caption.className = "guide-shot-caption";
+      caption.textContent = `${image.alt} — click to enlarge`;
+      image.insertAdjacentElement("afterend", caption);
+    }
+  });
+  byId("guideLightbox").addEventListener("click", closeGuideLightbox);
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") closeGuideLightbox();
+  });
+}
+
+/** Mark the section currently being read in the guide's contents list. */
+function setupGuideScrollspy() {
+  const links = Array.from(document.querySelectorAll(".guide-toc a"));
+  if (links.length === 0) return;
+  const byHash = new Map(links.map((link) => [link.getAttribute("href"), link]));
+  const headings = links
+    .map((link) => document.querySelector(link.getAttribute("href")))
+    .filter(Boolean);
+  if (headings.length === 0) return;
+
+  const mark = (id) => {
+    byHash.forEach((link, hash) => {
+      if (hash === `#${id}`) {
+        link.setAttribute("aria-current", "true");
+      } else {
+        link.removeAttribute("aria-current");
+      }
+    });
+  };
+
+  const seen = new Set();
+  const observer = new IntersectionObserver(
+    (entries) => {
+      entries.forEach((entry) => {
+        if (entry.isIntersecting) {
+          seen.add(entry.target.id);
+        } else {
+          seen.delete(entry.target.id);
+        }
+      });
+      // Headings leave the band from the top as you scroll down, so the first
+      // one still inside it is the section you are reading.
+      const current = headings.find((heading) => seen.has(heading.id));
+      if (current) mark(current.id);
+    },
+    { rootMargin: "-8% 0px -70% 0px", threshold: 0 },
+  );
+  headings.forEach((heading) => observer.observe(heading));
+  mark(headings[0].id);
+}
+
+setupGuideScreenshots();
+setupGuideScrollspy();
