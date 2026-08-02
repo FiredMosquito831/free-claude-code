@@ -40,11 +40,11 @@
   
   --info: #3b82f6;
 
-  /* Reasoning: the only content in the dashboard that is not operational
-     data, so it gets the one hue reserved for the model's interior voice. */
-  --reasoning: #a78bfa;
-  --reasoning-bg: rgba(167, 139, 250, 0.07);
-  --reasoning-border: rgba(167, 139, 250, 0.28);
+  /* Reasoning panes reuse the existing info blue rather than introducing a
+     hue; the palette stays exactly as wide as it already was. */
+  --reasoning: var(--info);
+  --reasoning-bg: rgba(59, 130, 246, 0.06);
+  --reasoning-border: rgba(59, 130, 246, 0.28);
 
   /* Box Shadow & Glows */
   --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.2);
@@ -1575,7 +1575,7 @@ details.turn-pane > summary:focus-visible {
 }
 
 .turn-pane[data-kind="thinking"] .requests-detail-body {
-  color: #d5c9f5;
+  color: var(--text);
 }
 
 .turn-empty {
@@ -1943,14 +1943,15 @@ details.turn-pane > summary:focus-visible {
 
 .guide {
   display: grid;
-  grid-template-columns: 200px minmax(0, 1fr);
-  gap: 28px;
+  grid-template-columns: 224px minmax(0, 1fr);
+  gap: 40px;
   align-items: start;
 }
 
 @media (max-width: 900px) {
   .guide {
     grid-template-columns: minmax(0, 1fr);
+    gap: 20px;
   }
 }
 
@@ -1961,16 +1962,18 @@ details.turn-pane > summary:focus-visible {
   flex-direction: column;
   gap: 2px;
   padding: 12px;
-  border-radius: 10px;
-  background: var(--surface-2, rgba(255, 255, 255, 0.03));
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--card);
 }
 
 .guide-toc a {
   color: var(--muted);
   text-decoration: none;
   font-size: 13px;
-  padding: 6px 8px;
-  border-radius: 6px;
+  padding: 7px 10px;
+  border-left: 2px solid transparent;
+  border-radius: var(--radius-sm);
 }
 
 .guide-toc a:hover,
@@ -1979,22 +1982,52 @@ details.turn-pane > summary:focus-visible {
   background: rgba(255, 255, 255, 0.05);
 }
 
+/* Which section you are actually reading. */
+.guide-toc a[aria-current="true"] {
+  color: var(--accent);
+  border-left-color: var(--accent);
+  background: var(--accent-muted);
+}
+
+/* Prose wants a narrow measure; screenshots want every pixel available.
+   The column is wide, and only the running text is capped. */
 .guide-body {
-  max-width: 78ch;
+  max-width: 1180px;
   color: var(--text);
-  line-height: 1.65;
-  font-size: 14px;
+  line-height: 1.7;
+  font-size: 15px;
+}
+
+.guide-body > p,
+.guide-body > ul,
+.guide-body > ol,
+.guide-body > h3,
+.guide-body > h4,
+.guide-body > .guide-note {
+  max-width: 74ch;
 }
 
 .guide-body h3 {
   color: var(--text-strong);
-  font-size: 17px;
-  margin: 32px 0 10px;
-  scroll-margin-top: 16px;
+  font-size: 20px;
+  letter-spacing: -0.01em;
+  margin: 48px 0 12px;
+  padding-top: 20px;
+  border-top: 1px solid var(--line);
+  scroll-margin-top: 24px;
 }
 
 .guide-body h3:first-child {
   margin-top: 0;
+  padding-top: 0;
+  border-top: none;
+}
+
+.guide-body h4 {
+  color: var(--text-strong);
+  font-size: 15px;
+  margin: 24px 0 8px;
+  scroll-margin-top: 24px;
 }
 
 .guide-body p,
@@ -2021,35 +2054,102 @@ details.turn-pane > summary:focus-visible {
 }
 
 .guide-body pre {
-  margin: 0 0 14px;
-  padding: 12px 14px;
-  border-radius: 8px;
+  margin: 0 0 16px;
+  padding: 14px 16px;
+  border-radius: var(--radius-md);
   overflow-x: auto;
-  background: var(--surface-2, rgba(255, 255, 255, 0.03));
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: var(--input);
+  border: 1px solid var(--line);
+  font-size: 13px;
 }
 
 .guide-body pre code {
   background: none;
   padding: 0;
   color: var(--text);
-  line-height: 1.55;
+  line-height: 1.6;
 }
 
 .guide-note {
   border-left: 3px solid var(--accent);
-  padding: 10px 14px;
-  border-radius: 0 8px 8px 0;
-  background: rgba(255, 255, 255, 0.03);
-  color: var(--muted);
+  padding: 12px 16px;
+  margin: 0 0 16px;
+  border-radius: 0 var(--radius-md) var(--radius-md) 0;
+  background: var(--accent-muted);
+  /* Callouts carry the advice worth reading twice, so they are not dimmed. */
+  color: var(--text);
 }
 
+/* Screenshots are the whole point of a tutorial; they get the full column
+   width and open at full size on click. */
 .guide-shot {
   display: block;
   width: 100%;
-  margin: 4px 0 16px;
-  border-radius: 8px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  margin: 8px 0 8px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--line-strong);
+  background: var(--bg);
+  cursor: zoom-in;
+  transition: border-color var(--transition-fast);
+}
+
+.guide-shot:hover,
+.guide-shot:focus-visible {
+  border-color: var(--accent-border);
+}
+
+.guide-shot:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+
+.guide-shot-caption {
+  margin: 0 0 22px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+/* Full-size viewer */
+.guide-lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(0, 0, 0, 0.88);
+  cursor: zoom-out;
+}
+
+.guide-lightbox[hidden] {
+  display: none;
+}
+
+.guide-lightbox img {
+  max-width: 100%;
+  max-height: calc(100vh - 100px);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--line-strong);
+  box-shadow: var(--shadow);
+}
+
+.guide-lightbox-bar {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.guide-lightbox-hint {
+  position: absolute;
+  bottom: 18px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 12px;
+  color: var(--muted);
 }
 
 .guide-table {

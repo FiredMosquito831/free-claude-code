@@ -3203,6 +3203,14 @@ function populateRequestFilterOptions(stats) {
   populate("reqKeyOptions", stats.by_key || [], reqState.keyOptions);
 }
 
+/** "412 (18.4%)" — the count and its share of the window, in one cell. */
+function formatTurnShare(count, total) {
+  const value = Number(count || 0);
+  const denominator = Number(total || 0);
+  if (!denominator) return "—";
+  return `${formatAnalyticsNumber(value)} (${((value / denominator) * 100).toFixed(1)}%)`;
+}
+
 function renderRequestStatsCards(stats) {
   const successRate = stats.total
     ? ((Number(stats.success || 0) / Number(stats.total)) * 100).toFixed(1)
@@ -3217,6 +3225,9 @@ function renderRequestStatsCards(stats) {
     ["Cache hit rate", formatCacheHitRate(stats)],
     ["Cache writes", formatAnalyticsNumber(stats.cache_write_tokens || 0)],
     ["Tokens out", formatAnalyticsNumber(stats.tokens_out || 0)],
+    ["Tool calls", formatAnalyticsNumber(stats.tool_calls || 0)],
+    ["Turns using tools", formatTurnShare(stats.turns_with_tools, stats.total)],
+    ["Turns with reasoning", formatTurnShare(stats.turns_with_reasoning, stats.total)],
     ["Avg duration", stats.avg_duration_ms != null ? `${stats.avg_duration_ms} ms` : "—"],
     ["p50 duration", stats.p50_duration_ms != null ? `${stats.p50_duration_ms} ms` : "—"],
     ["p95 duration", stats.p95_duration_ms != null ? `${stats.p95_duration_ms} ms` : "—"],
@@ -3542,10 +3553,17 @@ async function openRequestDetail(requestId) {
     ["Resolved model", row.resolved_model],
     ["Status", row.status],
     ["Error", row.error_kind ? `${row.error_kind}: ${row.error_message || ""}` : ""],
-    ["Tokens", `${row.tokens_in ?? "—"} in / ${row.tokens_out ?? "—"} out`],
+    ["Key", row.key_label],
+    ["Input (uncached)", formatOptionalNumber(row.tokens_in)],
+    ["Cached input", formatOptionalNumber(row.cache_read_tokens)],
+    ["Cache writes", formatOptionalNumber(row.cache_write_tokens)],
+    ["Cache hit", formatRowCacheHit(row)],
+    ["Tokens out", formatOptionalNumber(row.tokens_out)],
+    ["Output rate", formatOutputRate(row)],
     ["TTFT", row.ttft_ms != null ? `${Math.round(row.ttft_ms)} ms` : "—"],
     ["Duration", row.duration_ms != null ? `${Math.round(row.duration_ms)} ms` : "—"],
-    ["Reasoning", row.reasoning],
+    ["Turn", formatTurnSummary(row)],
+    ["Reasoning policy", row.reasoning],
     ["Params", row.params ? JSON.stringify(row.params) : ""],
     ["Input SHA-256", row.input_sha256],
     ["Output SHA-256", row.output_sha256],
@@ -3566,6 +3584,39 @@ async function openRequestDetail(requestId) {
 function formatChars(count) {
   if (!count) return "";
   return `${count.toLocaleString()} chars`;
+}
+
+function formatOptionalNumber(value) {
+  return value == null ? "—" : Number(value).toLocaleString();
+}
+
+/** Share of this request's input that the provider served from its cache. */
+function formatRowCacheHit(row) {
+  const cached = Number(row.cache_read_tokens || 0);
+  if (row.cache_read_tokens == null) return "not reported";
+  const total = Number(row.tokens_in || 0) + cached;
+  if (!total) return "—";
+  return `${((cached / total) * 100).toFixed(1)}%`;
+}
+
+/** Output tokens per second, excluding the wait before the first one. */
+function formatOutputRate(row) {
+  const tokens = Number(row.tokens_out || 0);
+  const duration = Number(row.duration_ms || 0);
+  const ttft = Number(row.ttft_ms || 0);
+  const generating = duration - ttft;
+  if (!tokens || generating <= 0) return "—";
+  return `${(tokens / (generating / 1000)).toFixed(1)} tok/s`;
+}
+
+function formatTurnSummary(row) {
+  const parts = [];
+  if (row.thinking_chars) parts.push(`${row.thinking_chars.toLocaleString()} chars reasoning`);
+  if (row.tool_call_count) {
+    parts.push(row.tool_call_count === 1 ? "1 tool call" : `${row.tool_call_count} tool calls`);
+  }
+  if (row.output_chars) parts.push(`${row.output_chars.toLocaleString()} chars reply`);
+  return parts.join(" · ");
 }
 
 /**
@@ -3798,3 +3849,103 @@ byId("reqClearButton").addEventListener("click", () => {
     })
     .catch((error) => showMessage(error.message, "error"));
 });
+
+/* ------------------------------------------------------------------ guide ---
+   Screenshots in the guide are dashboard captures, so at column width the UI
+   inside them is unreadable. They open at full size instead. */
+
+let guideLightboxReturnFocus = null;
+
+function openGuideLightbox(image) {
+  const lightbox = byId("guideLightbox");
+  const full = byId("guideLightboxImage");
+  guideLightboxReturnFocus = document.activeElement;
+  full.src = image.src;
+  full.alt = image.alt || "";
+  lightbox.hidden = false;
+  byId("guideLightboxClose").focus();
+}
+
+function closeGuideLightbox() {
+  const lightbox = byId("guideLightbox");
+  if (lightbox.hidden) return;
+  lightbox.hidden = true;
+  byId("guideLightboxImage").src = "";
+  if (guideLightboxReturnFocus instanceof HTMLElement) {
+    guideLightboxReturnFocus.focus();
+  }
+  guideLightboxReturnFocus = null;
+}
+
+function setupGuideScreenshots() {
+  document.querySelectorAll(".guide-shot").forEach((image) => {
+    image.tabIndex = 0;
+    image.setAttribute("role", "button");
+    image.setAttribute(
+      "aria-label",
+      `${image.alt || "Screenshot"} — open at full size`,
+    );
+    image.addEventListener("click", () => openGuideLightbox(image));
+    image.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter" && event.key !== " ") return;
+      event.preventDefault();
+      openGuideLightbox(image);
+    });
+    // The alt text already describes the shot; reuse it as a caption so the
+    // click affordance is stated rather than implied.
+    if (image.alt && !image.nextElementSibling?.classList.contains("guide-shot-caption")) {
+      const caption = document.createElement("p");
+      caption.className = "guide-shot-caption";
+      caption.textContent = `${image.alt} — click to enlarge`;
+      image.insertAdjacentElement("afterend", caption);
+    }
+  });
+  byId("guideLightbox").addEventListener("click", closeGuideLightbox);
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") closeGuideLightbox();
+  });
+}
+
+/** Mark the section currently being read in the guide's contents list. */
+function setupGuideScrollspy() {
+  const links = Array.from(document.querySelectorAll(".guide-toc a"));
+  if (links.length === 0) return;
+  const byHash = new Map(links.map((link) => [link.getAttribute("href"), link]));
+  const headings = links
+    .map((link) => document.querySelector(link.getAttribute("href")))
+    .filter(Boolean);
+  if (headings.length === 0) return;
+
+  const mark = (id) => {
+    byHash.forEach((link, hash) => {
+      if (hash === `#${id}`) {
+        link.setAttribute("aria-current", "true");
+      } else {
+        link.removeAttribute("aria-current");
+      }
+    });
+  };
+
+  const seen = new Set();
+  const observer = new IntersectionObserver(
+    (entries) => {
+      entries.forEach((entry) => {
+        if (entry.isIntersecting) {
+          seen.add(entry.target.id);
+        } else {
+          seen.delete(entry.target.id);
+        }
+      });
+      // Headings leave the band from the top as you scroll down, so the first
+      // one still inside it is the section you are reading.
+      const current = headings.find((heading) => seen.has(heading.id));
+      if (current) mark(current.id);
+    },
+    { rootMargin: "-8% 0px -70% 0px", threshold: 0 },
+  );
+  headings.forEach((heading) => observer.observe(heading));
+  mark(headings[0].id);
+}
+
+setupGuideScreenshots();
+setupGuideScrollspy();

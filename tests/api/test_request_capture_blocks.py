@@ -238,6 +238,36 @@ async def test_complete_message_splits_its_blocks(store: RequestLogStore) -> Non
 
 
 @pytest.mark.asyncio
+async def test_stats_aggregate_turn_shape(store: RequestLogStore) -> None:
+    """The analytics cards count tool use and reasoning across the window."""
+    for index, frames in enumerate(
+        [
+            _events(
+                _tool_start(0, "Read"),
+                _delta(0, {"type": "input_json_delta", "partial_json": "{}"}),
+                _delta(1, {"type": "thinking_delta", "thinking": "hmm"}),
+            ),
+            _events(
+                _tool_start(0, "Grep"),
+                _delta(0, {"type": "input_json_delta", "partial_json": "{}"}),
+                _tool_start(1, "Bash"),
+                _delta(1, {"type": "input_json_delta", "partial_json": "{}"}),
+            ),
+            _events(_delta(0, {"type": "text_delta", "text": "plain reply"})),
+        ]
+    ):
+        capture = _make_capture(store, request_id=f"req_{index}")
+        await _run(capture, frames)
+    store.close()
+
+    stats = store.stats()
+    assert stats["total"] == 3
+    assert stats["tool_calls"] == 3
+    assert stats["turns_with_tools"] == 2
+    assert stats["turns_with_reasoning"] == 1
+
+
+@pytest.mark.asyncio
 async def test_list_view_exposes_turn_shape_without_bodies(
     store: RequestLogStore,
 ) -> None:

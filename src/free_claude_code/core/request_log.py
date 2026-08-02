@@ -662,6 +662,11 @@ class RequestLogStore:
                        COALESCE(SUM(cache_write_tokens), 0) AS cache_write_tokens,
                        SUM(CASE WHEN cache_read_tokens IS NOT NULL THEN 1 ELSE 0 END)
                            AS cache_reported,
+                       COALESCE(SUM(tool_call_count), 0) AS tool_calls,
+                       SUM(CASE WHEN tool_call_count > 0 THEN 1 ELSE 0 END)
+                           AS turns_with_tools,
+                       SUM(CASE WHEN thinking_chars > 0 THEN 1 ELSE 0 END)
+                           AS turns_with_reasoning,
                        AVG(duration_ms) AS avg_duration_ms,
                        AVG(ttft_ms) AS avg_ttft_ms
                 FROM requests{where}
@@ -705,6 +710,9 @@ class RequestLogStore:
             "cache_read_tokens": totals["cache_read_tokens"] or 0,
             "cache_write_tokens": totals["cache_write_tokens"] or 0,
             "cache_reported": totals["cache_reported"] or 0,
+            "tool_calls": totals["tool_calls"] or 0,
+            "turns_with_tools": totals["turns_with_tools"] or 0,
+            "turns_with_reasoning": totals["turns_with_reasoning"] or 0,
             "avg_duration_ms": _rounded(totals["avg_duration_ms"]),
             "p50_duration_ms": _rounded(_percentile(durations, 0.50)),
             "p95_duration_ms": _rounded(_percentile(durations, 0.95)),
