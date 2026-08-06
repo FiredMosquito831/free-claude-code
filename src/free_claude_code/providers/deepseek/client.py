@@ -43,11 +43,17 @@ class DeepSeekProvider(OpenAIChatProvider):
         )
 
     def _anthropic_usage_fields(self, usage_info: Any) -> dict[str, int]:
-        usage_fields: dict[str, int] = {}
+        """Map DeepSeek's hit/miss split onto Anthropic's cache fields.
+
+        ``prompt_cache_hit_tokens`` + ``prompt_cache_miss_tokens`` make up
+        ``prompt_tokens``. Reporting the hit count is enough: the streaming
+        path subtracts it from ``prompt_tokens`` to get Anthropic's
+        ``input_tokens``, which lands exactly on the miss count. Reporting the
+        misses again as cache *creation* would count that same slice twice --
+        a miss is a token the cache did not serve, not a token written at a
+        premium, which is what Anthropic's field means.
+        """
         cache_hit_tokens = usage_int(usage_info, "prompt_cache_hit_tokens")
-        if cache_hit_tokens is not None:
-            usage_fields["cache_read_input_tokens"] = cache_hit_tokens
-        cache_miss_tokens = usage_int(usage_info, "prompt_cache_miss_tokens")
-        if cache_miss_tokens is not None:
-            usage_fields["cache_creation_input_tokens"] = cache_miss_tokens
-        return usage_fields
+        if cache_hit_tokens is None:
+            return {}
+        return {"cache_read_input_tokens": cache_hit_tokens}
