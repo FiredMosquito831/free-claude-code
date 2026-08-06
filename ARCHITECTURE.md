@@ -898,6 +898,29 @@ Code proxy environment policies used by FCC-launched Claude processes:
 Both use the shared local-only sentinel for blank proxy auth so Claude Code
 reaches the proxy instead of stopping at its login gate.
 
+[config/claude_settings.py](src/free_claude_code/config/claude_settings.py) owns
+reading and patching Claude Code's own `settings.json` for the admin card. It
+merges the two proxy entries while preserving every other key, backs the file up
+once with a `.fcc-backup` suffix, and writes through a temp file plus
+`os.replace`. A document that does not parse as a JSON object — or whose `env`
+key is present but is not an object — is refused rather than overwritten, since
+replacing either would destroy user data.
+
+[config/paths.py](src/free_claude_code/config/paths.py) owns the location
+policy. `claude_settings_candidates()` returns the user-level settings files
+that could apply on the current machine, most likely first; under WSL that is
+both the Linux home and the Windows home, which are genuinely different files
+that different Claude Code installs read. `claude_managed_settings_paths()`
+returns the enterprise `managed-settings.json` and its drop-in fragments for the
+current platform only.
+
+Override detection covers managed/enterprise settings alone. It deliberately
+does not look for a sibling `settings.local.json`: measured against Claude Code
+2.1.223, a user-level `settings.local.json` is never read — that scope is
+repository-root only. Project-level files do outrank the user file, but the
+server cannot know which repository the user is in, so the UI states that as a
+caveat rather than scanning for it.
+
 [cli/launchers/claude.py](src/free_claude_code/cli/launchers/claude.py) owns the installed
 `fcc-claude` and `fcc-claude-old` launchers, sharing one internal launch
 helper parameterized by env builder:

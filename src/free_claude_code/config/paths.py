@@ -1,6 +1,7 @@
 """Shared filesystem paths for Free Claude Code configuration."""
 
 import os
+import sys
 from pathlib import Path
 
 FCC_CONFIG_DIRNAME = ".fcc"
@@ -15,9 +16,18 @@ AUTH_DIRNAME = "auth"
 CHATGPT_OAUTH_AUTH_FILENAME = "chatgpt-oauth.json"
 CLAUDE_CONFIG_DIRNAME = ".claude"
 CLAUDE_SETTINGS_FILENAME = "settings.json"
-CLAUDE_LOCAL_SETTINGS_FILENAME = "settings.local.json"
 WSL_OSRELEASE_PATH = "/proc/sys/kernel/osrelease"
 WSL_WINDOWS_USERS_DIR = "/mnt/c/Users"
+MACOS_MANAGED_SETTINGS_PATH = (
+    "/Library/Application Support/ClaudeCode/managed-settings.json"
+)
+MACOS_MANAGED_SETTINGS_DROPIN_DIR = (
+    "/Library/Application Support/ClaudeCode/managed-settings.d"
+)
+LINUX_MANAGED_SETTINGS_PATH = "/etc/claude-code/managed-settings.json"
+LINUX_MANAGED_SETTINGS_DROPIN_DIR = "/etc/claude-code/managed-settings.d"
+WINDOWS_MANAGED_SETTINGS_PATH = r"C:\Program Files\ClaudeCode\managed-settings.json"
+WINDOWS_MANAGED_SETTINGS_DROPIN_DIR = r"C:\Program Files\ClaudeCode\managed-settings.d"
 
 
 def config_dir_path() -> Path:
@@ -72,12 +82,6 @@ def claude_settings_path() -> Path:
     return Path.home() / CLAUDE_CONFIG_DIRNAME / CLAUDE_SETTINGS_FILENAME
 
 
-def claude_local_settings_path(settings_path: Path) -> Path:
-    """Return the sibling settings.local.json path for a given settings.json path."""
-
-    return settings_path.parent / CLAUDE_LOCAL_SETTINGS_FILENAME
-
-
 def _is_wsl() -> bool:
     """Return True when running inside WSL, detected via the kernel osrelease string."""
 
@@ -121,3 +125,62 @@ def windows_claude_settings_path() -> Path | None:
             pass
 
     return None
+
+
+def claude_settings_candidates() -> list[Path]:
+    """Return the user-level settings.json files that could apply on this machine.
+
+    Most likely to be in effect first: always the native ``claude_settings_path()``,
+    plus the Windows-side path when running under WSL and it resolves. Deduplicated,
+    order preserved. Never includes a path that is merely hypothetical for another OS.
+    """
+
+    candidates = [claude_settings_path()]
+
+    windows_path = windows_claude_settings_path()
+    if windows_path is not None and windows_path not in candidates:
+        candidates.append(windows_path)
+
+    return candidates
+
+
+def claude_managed_settings_paths() -> list[Path]:
+    """Return the enterprise managed-settings.json paths for the current platform.
+
+    Includes the top-level managed-settings.json plus every ``*.json`` file inside
+    the platform's drop-in directory, if present and readable. WSL is treated as
+    Linux. Never raises; returns an empty list when nothing is found or a
+    filesystem error occurs.
+    """
+
+    if sys.platform == "darwin":
+        managed_path = MACOS_MANAGED_SETTINGS_PATH
+        dropin_dir = MACOS_MANAGED_SETTINGS_DROPIN_DIR
+    elif sys.platform == "win32":
+        managed_path = WINDOWS_MANAGED_SETTINGS_PATH
+        dropin_dir = WINDOWS_MANAGED_SETTINGS_DROPIN_DIR
+    else:
+        managed_path = LINUX_MANAGED_SETTINGS_PATH
+        dropin_dir = LINUX_MANAGED_SETTINGS_DROPIN_DIR
+
+    paths: list[Path] = []
+
+    try:
+        if Path(managed_path).is_file():
+            paths.append(Path(managed_path))
+    except OSError:
+        pass
+
+    try:
+        dropin = Path(dropin_dir)
+        if dropin.is_dir():
+            for entry in sorted(dropin.iterdir()):
+                try:
+                    if entry.is_file() and entry.suffix == ".json":
+                        paths.append(entry)
+                except OSError:
+                    continue
+    except OSError:
+        pass
+
+    return paths

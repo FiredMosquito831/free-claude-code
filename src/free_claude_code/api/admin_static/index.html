@@ -87,12 +87,18 @@
                 <label for="claudeSettingsPath"><span>Settings file path</span></label>
                 <input id="claudeSettingsPath" type="text" autocomplete="off" />
               </div>
-              <div id="claudeSettingsSuggestions" class="claude-settings-suggestions"></div>
+              <div id="claudeSettingsTargets" class="claude-settings-targets"></div>
               <div
                 id="claudeSettingsStatus"
                 class="claude-settings-status"
                 aria-live="polite"
               ></div>
+              <div id="claudeSettingsOverrides" class="claude-settings-overrides"></div>
+              <p class="claude-settings-project-note">
+                Not detected here, but worth knowing: a <code>.claude/settings.json</code>
+                or <code>.claude/settings.local.json</code> in a project directory takes
+                precedence over the user file configured above.
+              </p>
             </section>
             <section class="provider-strip" aria-label="Provider status">
               <div class="strip-header">
@@ -635,9 +641,10 @@ OLLAMA_BASE_URL="http://127.0.0.1:11434"</code></pre>
                 <p>
                   <strong>1.</strong> Go to <strong>Providers &rarr; Claude Code settings
                   file</strong>. The path field is pre-filled with
-                  <code>~/.claude/settings.json</code> (and, if this server runs under WSL
-                  while Claude Code runs on Windows, a second suggested path for the
-                  Windows-side file &mdash; those are two different files).
+                  <code>~/.claude/settings.json</code>, and the card lists every settings
+                  file it can see on this machine &mdash; if this server runs under WSL
+                  while Claude Code runs on Windows, that includes the Windows-side file
+                  too, since those are two different files.
                 </p>
                 <p>
                   <strong>2.</strong> Press <strong>Configure</strong>. It writes
@@ -646,7 +653,9 @@ OLLAMA_BASE_URL="http://127.0.0.1:11434"</code></pre>
                   already there. The previous file is backed up next to it with a
                   <code>.fcc-backup</code> suffix the first time it writes. If the file
                   already points somewhere else, the status line shows what is there before
-                  you overwrite it; <strong>Remove</strong> deletes just those two keys.
+                  you overwrite it; <strong>Remove</strong> deletes just those two keys. If
+                  a higher-precedence file (like an enterprise managed settings file) also
+                  sets these variables, the card warns you which one wins.
                 </p>
                 <p>
                   <strong>3.</strong> Restart Claude Code and run <code>/status</code>. It

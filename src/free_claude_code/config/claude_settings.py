@@ -6,7 +6,9 @@ import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
-from free_claude_code.config.paths import claude_local_settings_path
+from free_claude_code.config.paths import (
+    claude_managed_settings_paths,
+)
 
 CLAUDE_BASE_URL_ENV = "ANTHROPIC_BASE_URL"
 CLAUDE_AUTH_TOKEN_ENV = "ANTHROPIC_AUTH_TOKEN"
@@ -15,6 +17,22 @@ CLAUDE_SETTINGS_BACKUP_SUFFIX = ".fcc-backup"
 
 class ClaudeSettingsError(Exception):
     """Raised when the Claude settings file cannot be read or written."""
+
+
+@dataclass(frozen=True)
+class ClaudeSettingsOverride:
+    """A settings file that takes precedence over the one being configured.
+
+    ``scope`` is currently always ``"managed"``: an enterprise
+    managed-settings.json or drop-in fragment, which outranks every other
+    settings file. It stays a string rather than a bool so project scope can be
+    added if the UI ever learns which repository the user is in.
+    ``variables`` lists which ``ANTHROPIC_*`` env keys the override sets, sorted.
+    """
+
+    path: str
+    scope: str
+    variables: list[str]
 
 
 @dataclass(frozen=True)
@@ -31,7 +49,7 @@ class ClaudeSettingsStatus:
     auth_token_present: bool
     auth_token_matches: bool
     expected_base_url: str
-    local_override: str | None
+    overrides: list[ClaudeSettingsOverride]
 
 
 def _load_document(path: Path) -> tuple[dict[str, object] | None, bool, str | None]:
@@ -67,14 +85,10 @@ def _env_block(data: dict[str, object]) -> dict[str, object]:
     return {str(key): value for key, value in env.items()}
 
 
-def _detect_local_override(path: Path) -> str | None:
-    """Return the sibling settings.local.json path if it also sets ANTHROPIC_* env keys."""
+def _override_from_document(path: Path, *, scope: str) -> ClaudeSettingsOverride | None:
+    """Return an override descriptor if the document sets ANTHROPIC_* env keys."""
 
-    local_path = claude_local_settings_path(path)
-    if not local_path.exists():
-        return None
-
-    data, parsed, _error = _load_document(local_path)
+    data, parsed, _error = _load_document(path)
     if not parsed or data is None:
         return None
 
@@ -82,10 +96,45 @@ def _detect_local_override(path: Path) -> str | None:
     if not isinstance(env, dict):
         return None
 
-    if CLAUDE_BASE_URL_ENV in env or CLAUDE_AUTH_TOKEN_ENV in env:
-        return str(local_path)
+    variables = sorted(
+        name for name in (CLAUDE_BASE_URL_ENV, CLAUDE_AUTH_TOKEN_ENV) if name in env
+    )
+    if not variables:
+        return None
 
-    return None
+    return ClaudeSettingsOverride(path=str(path), scope=scope, variables=variables)
+
+
+def _detect_overrides() -> list[ClaudeSettingsOverride]:
+    """Return settings files that take precedence over the user file, highest first.
+
+    Covers the one precedence layer above a user-level settings.json that sits at
+    a fixed, knowable location: managed/enterprise settings, including drop-in
+    fragments. Detection is advisory only: every read/parse error is swallowed
+    and the entry is simply omitted, never raised, and never affects
+    ``ClaudeSettingsStatus.state``.
+
+    Deliberately does NOT check a sibling ``settings.local.json``. Measured
+    against Claude Code 2.1.223: with identical content in a controlled home
+    directory, ``~/.claude/settings.json`` routed every request to the proxy
+    while ``~/.claude/settings.local.json`` routed none. The ``local`` scope is
+    repository-root only, so warning about a user-level one would be a warning
+    that can never be true.
+
+    Project-level ``.claude/settings.json`` and ``.claude/settings.local.json``
+    do outrank this file, but the server has no way to know which repository the
+    user is working in, so they are surfaced as a static note in the UI rather
+    than by scanning the filesystem.
+    """
+
+    overrides: list[ClaudeSettingsOverride] = []
+
+    for managed_path in claude_managed_settings_paths():
+        override = _override_from_document(managed_path, scope="managed")
+        if override is not None:
+            overrides.append(override)
+
+    return overrides
 
 
 def read_status(
@@ -107,7 +156,7 @@ def read_status(
             auth_token_present=False,
             auth_token_matches=False,
             expected_base_url=expected_base_url,
-            local_override=_detect_local_override(path),
+            overrides=_detect_overrides(),
         )
 
     data, parsed, error = _load_document(path)
@@ -123,7 +172,7 @@ def read_status(
             auth_token_present=False,
             auth_token_matches=False,
             expected_base_url=expected_base_url,
-            local_override=_detect_local_override(path),
+            overrides=_detect_overrides(),
         )
 
     try:
@@ -140,7 +189,7 @@ def read_status(
             auth_token_present=False,
             auth_token_matches=False,
             expected_base_url=expected_base_url,
-            local_override=_detect_local_override(path),
+            overrides=_detect_overrides(),
         )
 
     current_base_url = env.get(CLAUDE_BASE_URL_ENV)
@@ -177,7 +226,7 @@ def read_status(
         auth_token_present=auth_token_present,
         auth_token_matches=auth_token_matches,
         expected_base_url=expected_base_url,
-        local_override=_detect_local_override(path),
+        overrides=_detect_overrides(),
     )
 
 
