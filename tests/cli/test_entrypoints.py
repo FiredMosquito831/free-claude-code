@@ -8,6 +8,7 @@ import tomllib
 from collections.abc import Callable
 from pathlib import Path
 from types import SimpleNamespace
+from typing import cast
 from unittest.mock import MagicMock, patch
 from urllib.error import URLError
 from urllib.request import Request
@@ -569,6 +570,90 @@ def test_claude_minimal_child_env_uses_sentinel_for_blank_configured_auth_token(
     assert env["ANTHROPIC_AUTH_TOKEN"] == "fcc-no-auth"
 
 
+def test_claude_minimal_child_env_discovery_flag_adds_only_the_discovery_var() -> None:
+    """`enable_model_discovery=True` adds exactly one key relative to `False`."""
+    from free_claude_code.cli.claude_env import build_minimal_claude_proxy_env
+
+    base_env = {"PATH": "keep"}
+    kwargs = {
+        "proxy_root_url": "http://127.0.0.1:9090",
+        "auth_token": "proxy-token",
+        "base_env": base_env,
+    }
+
+    without_discovery = build_minimal_claude_proxy_env(
+        **kwargs, enable_model_discovery=False
+    )
+    with_discovery = build_minimal_claude_proxy_env(
+        **kwargs, enable_model_discovery=True
+    )
+
+    assert "CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY" not in without_discovery
+    assert set(with_discovery) - set(without_discovery) == {
+        "CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY"
+    }
+    assert with_discovery["CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY"] == "1"
+    for key in without_discovery:
+        assert with_discovery[key] == without_discovery[key]
+
+
+def test_claude_minimal_child_env_defaults_to_no_discovery_key() -> None:
+    """The default omits the discovery key entirely, not just falsy."""
+    from free_claude_code.cli.claude_env import build_minimal_claude_proxy_env
+
+    env = build_minimal_claude_proxy_env(
+        proxy_root_url="http://127.0.0.1:9090",
+        auth_token="proxy-token",
+        base_env={},
+    )
+
+    assert "CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY" not in env
+
+
+@pytest.mark.parametrize(
+    ("argv", "expected_found", "expected_remaining"),
+    [
+        ([], False, []),
+        (["-p", "hi"], False, ["-p", "hi"]),
+        (["--discover-models"], True, []),
+        (["--discover-models", "-p", "hi"], True, ["-p", "hi"]),
+        (["-p", "hi", "--discover-models"], True, ["-p", "hi"]),
+        (
+            ["--discover-models", "--discover-models", "-p", "hi"],
+            True,
+            ["-p", "hi"],
+        ),
+        (
+            ["--discover-models", "--", "--discover-models"],
+            True,
+            ["--", "--discover-models"],
+        ),
+        (
+            ["--", "--discover-models"],
+            False,
+            ["--", "--discover-models"],
+        ),
+        (
+            ["-p", "explain --discover-models"],
+            False,
+            ["-p", "explain --discover-models"],
+        ),
+        (["--", "-p", "hi"], False, ["--", "-p", "hi"]),
+    ],
+)
+def test_split_discover_models_flag_edge_cases(
+    argv: list[str],
+    expected_found: bool,
+    expected_remaining: list[str],
+) -> None:
+    from free_claude_code.cli.launchers.claude import _split_discover_models_flag
+
+    found, remaining = _split_discover_models_flag(argv)
+
+    assert found is expected_found
+    assert remaining == expected_remaining
+
+
 def test_launch_claude_uses_minimal_env_and_passes_args(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -619,6 +704,76 @@ def test_launch_claude_uses_minimal_env_and_passes_args(
     assert changed == {"ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN"}
     register_pid.assert_called_once_with(12345)
     unregister_pid.assert_called_once_with(12345)
+
+
+def test_launch_claude_discover_models_flag_strips_flag_and_enables_discovery(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`--discover-models` is not forwarded to Claude, but sets the env var."""
+    from free_claude_code.cli.launchers import claude as claude_launcher
+
+    settings = _launcher_settings(port=9191, token="proxy-token")
+    calls: list[dict[str, object]] = []
+
+    def fake_run_client_process(**kwargs: object) -> None:
+        calls.append(kwargs)
+        raise SystemExit(0)
+
+    with (
+        patch.object(claude_launcher, "get_settings", return_value=settings),
+        patch.object(claude_launcher, "preflight_proxy", return_value=None),
+        patch.object(
+            claude_launcher,
+            "resolve_client_binary",
+            return_value="resolved-claude.cmd",
+        ),
+        patch.object(
+            claude_launcher, "run_client_process", side_effect=fake_run_client_process
+        ),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        claude_launcher.launch(["--discover-models", "-p", "hi"])
+
+    assert exc_info.value.code == 0
+    assert len(calls) == 1
+    assert calls[0]["command"] == ["resolved-claude.cmd", "-p", "hi"]
+    env = cast(dict[str, str], calls[0]["env"])
+    assert env["CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY"] == "1"
+
+
+def test_launch_claude_without_flag_forwards_args_and_skips_discovery(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Without the flag, args pass through unchanged and no env var is set."""
+    from free_claude_code.cli.launchers import claude as claude_launcher
+
+    settings = _launcher_settings(port=9191, token="proxy-token")
+    calls: list[dict[str, object]] = []
+
+    def fake_run_client_process(**kwargs: object) -> None:
+        calls.append(kwargs)
+        raise SystemExit(0)
+
+    with (
+        patch.object(claude_launcher, "get_settings", return_value=settings),
+        patch.object(claude_launcher, "preflight_proxy", return_value=None),
+        patch.object(
+            claude_launcher,
+            "resolve_client_binary",
+            return_value="resolved-claude.cmd",
+        ),
+        patch.object(
+            claude_launcher, "run_client_process", side_effect=fake_run_client_process
+        ),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        claude_launcher.launch(["-p", "hi"])
+
+    assert exc_info.value.code == 0
+    assert len(calls) == 1
+    assert calls[0]["command"] == ["resolved-claude.cmd", "-p", "hi"]
+    env = cast(dict[str, str], calls[0]["env"])
+    assert "CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY" not in env
 
 
 def test_launch_claude_legacy_passes_args_and_full_child_env(

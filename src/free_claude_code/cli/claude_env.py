@@ -39,6 +39,7 @@ def build_minimal_claude_proxy_env(
     proxy_root_url: str,
     auth_token: str,
     base_env: Mapping[str, str],
+    enable_model_discovery: bool = False,
 ) -> dict[str, str]:
     """Return the inherited environment with only the proxy variables set.
 
@@ -48,9 +49,18 @@ def build_minimal_claude_proxy_env(
     builder is for users who have not: it sets exactly `ANTHROPIC_BASE_URL`
     and `ANTHROPIC_AUTH_TOKEN` on top of the inherited process environment,
     removing nothing and adding nothing else.
+
+    `enable_model_discovery` additionally sets
+    `CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1`, which makes Claude Code
+    fetch the FCC model catalog (`GET /v1/models`) on every launch so its
+    native model picker lists FCC's models. It defaults to `False` because
+    that fetch is an extra request to the proxy the minimal launcher
+    otherwise avoids.
     """
 
     env = dict(base_env)
     env["ANTHROPIC_BASE_URL"] = proxy_root_url
     env["ANTHROPIC_AUTH_TOKEN"] = proxy_auth_token(auth_token)
+    if enable_model_discovery:
+        env["CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY"] = "1"
     return env

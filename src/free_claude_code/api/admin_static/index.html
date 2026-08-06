@@ -562,8 +562,10 @@
                 <ul>
                   <li><strong>The server must stay running.</strong> It is a daemon, not a
                     library.</li>
-                  <li><strong>Your agent's model picker lists this catalog</strong>, not
-                    Anthropic's. Choosing Sonnet routes to whatever you mapped Sonnet to.</li>
+                  <li><strong>Your agent's model picker can list this catalog</strong>, not
+                    Anthropic's. Choosing Sonnet routes to whatever you mapped Sonnet to.
+                    Codex and Pi's pickers always do this; Claude Code's needs model
+                    discovery on (see the Claude Code section below).</li>
                   <li><strong>Provider keys never leave the machine.</strong> Your agent
                     only holds a token that authenticates it to this proxy.</li>
                 </ul>
@@ -652,19 +654,25 @@ OLLAMA_BASE_URL="http://127.0.0.1:11434"</code></pre>
                   it still shows Anthropic, the file was not picked up &mdash; check the
                   path and that the JSON is valid.
                 </p>
-                <p><strong>4.</strong> Pick a model. No overrides needed:</p>
+                <p>
+                  <strong>4.</strong> Pick a model. No overrides needed to select a tier by
+                  name — but the picker below only lists the FCC catalog once model
+                  discovery is on:
+                </p>
                 <img class="guide-shot" src="/admin/img/cc-model-picker.png"
                      alt="Claude Code model picker listing FCC models" loading="lazy">
                 <p>
-                  <code>fcc-claude</code> also sets everything for just the current shell
-                  session, without touching any file.
+                  <code>fcc-claude</code> sets the proxy variables for just the current
+                  shell session, without touching any file. Add <code>--discover-models</code>
+                  to also enable the picker above (an extra request to the proxy on every
+                  launch, so it is opt-in): <code>fcc-claude --discover-models</code>.
                 </p>
                 <details class="guide-note">
                   <summary>Editing the file by hand instead</summary>
                   <p>
                     Open <code>~/.claude/settings.json</code>
                     (<code>%USERPROFILE%\.claude\settings.json</code> on Windows), creating
-                    it if missing, and merge in these two entries, keeping anything else:
+                    it if missing, and merge in these entries, keeping anything else:
                   </p>
                   <pre><code>{
   "env": {
@@ -675,7 +683,9 @@ OLLAMA_BASE_URL="http://127.0.0.1:11434"</code></pre>
                   <p>
                     The token must match this server's <code>ANTHROPIC_AUTH_TOKEN</code>
                     (shipped as <code>freecc</code>). It authenticates your agent to the
-                    proxy and is not a provider key.
+                    proxy and is not a provider key. To also populate the native model
+                    picker, add <code>"CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY": "1"</code>
+                    to the same <code>env</code> block.
                   </p>
                 </details>
 
