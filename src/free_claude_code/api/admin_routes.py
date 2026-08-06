@@ -22,12 +22,25 @@ from free_claude_code.config.admin.manifest import FIELD_BY_KEY
 from free_claude_code.config.admin.persistence import validate_updates
 from free_claude_code.config.admin.sources import is_locked_source
 from free_claude_code.config.admin.values import load_config_response, load_value_state
+from free_claude_code.config.claude_settings import (
+    ClaudeSettingsError,
+    ClaudeSettingsStatus,
+    apply_proxy_env,
+    clear_proxy_env,
+    read_status,
+)
 from free_claude_code.config.constants import (
     CHATGPT_OAUTH_MANAGED_CREDENTIAL_REFERENCE,
 )
 from free_claude_code.config.credentials import parse_credential_keys
 from free_claude_code.config.model_refs import configured_chat_model_refs
+from free_claude_code.config.paths import (
+    claude_settings_path,
+    windows_claude_settings_path,
+)
 from free_claude_code.config.provider_catalog import PROVIDER_CATALOG
+from free_claude_code.config.proxy_auth import proxy_auth_token
+from free_claude_code.config.server_urls import local_proxy_root_url
 from free_claude_code.config.settings import Settings
 from free_claude_code.config.websearch_catalog import (
     WEBSEARCH_CATALOG,
@@ -80,6 +93,12 @@ class WebSearchKeyPayload(BaseModel):
     """Single web search credential key submitted by the admin UI."""
 
     key: str
+
+
+class ClaudeSettingsPathPayload(BaseModel):
+    """Optional target path submitted by the Claude settings admin card."""
+
+    path: str | None = None
 
 
 def _is_loopback_host(host: str | None) -> bool:
@@ -363,6 +382,107 @@ async def delete_credential_key(
         "removed": _mask_credential_key(removed),
         "restart": result.get("restart"),
     }
+
+
+# --------------------------------------------------------------------- claude settings file
+
+
+def _resolve_claude_settings_path(raw_path: str | None) -> Path:
+    """Expand, resolve and validate a caller-supplied Claude settings path."""
+
+    if raw_path is None:
+        return claude_settings_path()
+
+    path = Path(raw_path).expanduser()
+    if not path.is_absolute():
+        raise HTTPException(status_code=400, detail="Path must be absolute")
+    if path.suffix != ".json":
+        raise HTTPException(status_code=400, detail="Path must point at a .json file")
+    return path.resolve()
+
+
+def _claude_settings_expectations(settings: Settings) -> tuple[str, str]:
+    """Return the (base_url, auth_token) this proxy expects Claude Code to use."""
+
+    return (
+        local_proxy_root_url(settings),
+        proxy_auth_token(settings.anthropic_auth_token),
+    )
+
+
+def _claude_settings_status_response(status: ClaudeSettingsStatus) -> dict[str, Any]:
+    default_path = str(claude_settings_path())
+    windows_path = windows_claude_settings_path()
+    suggested_paths = [default_path]
+    if windows_path is not None and str(windows_path) not in suggested_paths:
+        suggested_paths.append(str(windows_path))
+    return {
+        "status": status,
+        "default_path": default_path,
+        "suggested_paths": suggested_paths,
+    }
+
+
+@router.get("/admin/api/claude-settings")
+async def get_claude_settings(
+    request: Request,
+    path: str | None = None,
+    settings: Settings = Depends(get_settings),
+):
+    require_loopback_admin(request)
+    target_path = _resolve_claude_settings_path(path)
+    expected_base_url, expected_auth_token = _claude_settings_expectations(settings)
+    status = await asyncio.to_thread(
+        read_status,
+        path=target_path,
+        expected_base_url=expected_base_url,
+        expected_auth_token=expected_auth_token,
+    )
+    return _claude_settings_status_response(status)
+
+
+@router.post("/admin/api/claude-settings/apply")
+async def apply_claude_settings(
+    payload: ClaudeSettingsPathPayload,
+    request: Request,
+    settings: Settings = Depends(get_settings),
+):
+    require_loopback_admin(request)
+    target_path = _resolve_claude_settings_path(payload.path)
+    expected_base_url, expected_auth_token = _claude_settings_expectations(settings)
+    try:
+        status = await asyncio.to_thread(
+            apply_proxy_env,
+            path=target_path,
+            base_url=expected_base_url,
+            auth_token=expected_auth_token,
+        )
+    except ClaudeSettingsError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return _claude_settings_status_response(status)
+
+
+@router.post("/admin/api/claude-settings/unset")
+async def unset_claude_settings(
+    payload: ClaudeSettingsPathPayload,
+    request: Request,
+    settings: Settings = Depends(get_settings),
+):
+    require_loopback_admin(request)
+    target_path = _resolve_claude_settings_path(payload.path)
+    # The expectations do not change what is removed; they keep the response
+    # able to describe what a re-apply would write.
+    expected_base_url, expected_auth_token = _claude_settings_expectations(settings)
+    try:
+        status = await asyncio.to_thread(
+            clear_proxy_env,
+            path=target_path,
+            expected_base_url=expected_base_url,
+            expected_auth_token=expected_auth_token,
+        )
+    except ClaudeSettingsError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return _claude_settings_status_response(status)
 
 
 @router.get("/admin/api/models")

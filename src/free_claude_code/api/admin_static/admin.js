@@ -44,6 +44,8 @@ const state = {
   editingCustomProviderId: null,
   versionInfo: null,
   versionUpgrading: false,
+  claudeSettings: null,
+  claudeSettingsBusy: false,
 };
 
 const MASKED_SECRET = "********";
@@ -168,6 +170,7 @@ async function load() {
   updateDirtyState();
   showMessage("");
   await loadVersionInfo();
+  await loadClaudeSettings();
 }
 
 function renderNav() {
@@ -3023,6 +3026,150 @@ byId("versionCheckButton").addEventListener("click", (event) =>
 byId("versionUpdateButton").addEventListener("click", (event) =>
   runVersionUpgrade(event.currentTarget),
 );
+
+/* --------------------------------------------------------------------- */
+/* Claude Code settings file                                               */
+/* --------------------------------------------------------------------- */
+
+const CLAUDE_SETTINGS_STATUS_CLASS = {
+  unset: "",
+  configured: "ok",
+  mismatch: "warn",
+  unreadable: "error",
+};
+
+function claudeSettingsPathInputValue() {
+  return byId("claudeSettingsPath").value.trim();
+}
+
+async function loadClaudeSettings(path) {
+  const input = byId("claudeSettingsPath");
+  if (!input) return;
+  const params = path ? `?path=${encodeURIComponent(path)}` : "";
+  try {
+    state.claudeSettings = await api(`/admin/api/claude-settings${params}`);
+    if (!input.value) {
+      input.value = state.claudeSettings.default_path;
+    }
+  } catch (error) {
+    state.claudeSettings = { error: error.message };
+  }
+  renderClaudeSettings();
+}
+
+function renderClaudeSettings() {
+  const suggestions = byId("claudeSettingsSuggestions");
+  const statusEl = byId("claudeSettingsStatus");
+  const applyButton = byId("claudeSettingsApplyButton");
+  const removeButton = byId("claudeSettingsRemoveButton");
+  if (!suggestions || !statusEl || !applyButton || !removeButton) return;
+
+  const info = state.claudeSettings;
+  applyButton.disabled = state.claudeSettingsBusy;
+  removeButton.disabled = state.claudeSettingsBusy;
+
+  suggestions.innerHTML = "";
+  const suggestedPaths = info?.suggested_paths || [];
+  if (suggestedPaths.length > 1) {
+    suggestedPaths.forEach((suggestedPath) => {
+      const chip = document.createElement("button");
+      chip.type = "button";
+      chip.className = "ghost-button";
+      chip.textContent = suggestedPath;
+      chip.addEventListener("click", () => {
+        byId("claudeSettingsPath").value = suggestedPath;
+        loadClaudeSettings(suggestedPath);
+      });
+      suggestions.appendChild(chip);
+    });
+  }
+
+  statusEl.innerHTML = "";
+  if (!info) return;
+
+  if (info.error && !info.status) {
+    statusEl.className = "claude-settings-status error";
+    statusEl.textContent = `Could not read Claude settings: ${info.error}`;
+    return;
+  }
+
+  const status = info.status;
+  statusEl.className = `claude-settings-status ${CLAUDE_SETTINGS_STATUS_CLASS[status.state] || ""}`.trim();
+
+  const summary = document.createElement("p");
+  summary.className = "claude-settings-summary";
+  if (status.state === "unset") {
+    summary.textContent = "Not configured";
+  } else if (status.state === "configured") {
+    summary.textContent = "Configured — pointing at this proxy";
+  } else if (status.state === "mismatch") {
+    const tokenNote = status.auth_token_present
+      ? status.auth_token_matches
+        ? "the token matches"
+        : "the token differs"
+      : "no token is set";
+    summary.textContent =
+      `Points elsewhere — current base URL is ${status.current_base_url || "(none)"}` +
+      `, and ${tokenNote}. Configure will overwrite this.`;
+  } else if (status.state === "unreadable") {
+    summary.textContent = `Cannot read this file: ${status.error || "unknown error"}. ` +
+      "Configure will refuse to overwrite it until this is fixed.";
+  }
+  statusEl.appendChild(summary);
+
+  if (status.local_override) {
+    const overrideNote = document.createElement("p");
+    overrideNote.className = "claude-settings-override";
+    overrideNote.textContent =
+      `${status.local_override} also sets ANTHROPIC_* variables and takes ` +
+      "precedence over the file above.";
+    statusEl.appendChild(overrideNote);
+  }
+}
+
+async function applyClaudeSettings() {
+  if (state.claudeSettingsBusy) return;
+  state.claudeSettingsBusy = true;
+  renderClaudeSettings();
+  try {
+    state.claudeSettings = await api("/admin/api/claude-settings/apply", {
+      method: "POST",
+      body: JSON.stringify({ path: claudeSettingsPathInputValue() || null }),
+    });
+    showMessage("Claude Code settings file configured", "ok");
+  } catch (error) {
+    showMessage(`Could not configure Claude settings: ${error.message}`, "error");
+    await loadClaudeSettings(claudeSettingsPathInputValue());
+  } finally {
+    state.claudeSettingsBusy = false;
+    renderClaudeSettings();
+  }
+}
+
+async function unsetClaudeSettings() {
+  if (state.claudeSettingsBusy) return;
+  state.claudeSettingsBusy = true;
+  renderClaudeSettings();
+  try {
+    state.claudeSettings = await api("/admin/api/claude-settings/unset", {
+      method: "POST",
+      body: JSON.stringify({ path: claudeSettingsPathInputValue() || null }),
+    });
+    showMessage("Claude Code settings file entries removed", "ok");
+  } catch (error) {
+    showMessage(`Could not remove Claude settings entries: ${error.message}`, "error");
+    await loadClaudeSettings(claudeSettingsPathInputValue());
+  } finally {
+    state.claudeSettingsBusy = false;
+    renderClaudeSettings();
+  }
+}
+
+byId("claudeSettingsApplyButton").addEventListener("click", () => applyClaudeSettings());
+byId("claudeSettingsRemoveButton").addEventListener("click", () => unsetClaudeSettings());
+byId("claudeSettingsPath").addEventListener("change", (event) => {
+  loadClaudeSettings(event.currentTarget.value.trim());
+});
 
 function downloadJson(filename, value) {
   const blob = new Blob([`${JSON.stringify(value, null, 2)}\n`], {

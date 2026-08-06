@@ -149,10 +149,10 @@ for real prompts against supported providers:
 
 - `fcc-server` and the local Admin UI for configuring supported providers,
   model routing, auth, server tools, messaging, and diagnostics.
-- `fcc-claude`, Claude Code, and the Anthropic-compatible proxy behavior Claude
-  Code relies on, including streaming text, native/interleaved thinking, tool
-  use/results, model discovery, token counting, retries/recovery, and supported
-  local server-tool behavior.
+- `fcc-claude`/`fcc-claude-old`, Claude Code, and the Anthropic-compatible proxy
+  behavior Claude Code relies on, including streaming text, native/interleaved
+  thinking, tool use/results, model discovery, token counting, retries/recovery,
+  and supported local server-tool behavior.
 - `fcc-codex`, Codex CLI/extensions, and the streaming OpenAI Responses behavior
   Codex relies on, including native/interleaved reasoning, function and custom
   tool calls, generated `/model` catalog support, Responses stream lifecycle
@@ -211,6 +211,7 @@ Console scripts are registered in [pyproject.toml](pyproject.toml):
 - `fcc-server` and `free-claude-code` call `free_claude_code.cli.entrypoints:serve`.
 - `fcc-init` calls `free_claude_code.cli.entrypoints:init`.
 - `fcc-claude` calls `free_claude_code.cli.launchers.claude:launch`.
+- `fcc-claude-old` calls `free_claude_code.cli.launchers.claude:launch_legacy`.
 - `fcc-codex` calls `free_claude_code.cli.launchers.codex:launch`.
 - `fcc-pi` calls `free_claude_code.cli.launchers.pi:launch`.
 
@@ -870,24 +871,38 @@ otherwise the Messages handler rejects them before provider execution.
 
 ## CLI Launchers And Managed Claude
 
-[cli/proxy_auth.py](src/free_claude_code/cli/proxy_auth.py) owns the neutral
-proxy-auth token policy shared by client launchers. A blank configured token
-becomes the local-only `fcc-no-auth` sentinel so clients cross their login gates
-while FCC continues to run without API authentication.
+[config/proxy_auth.py](src/free_claude_code/config/proxy_auth.py) owns the
+neutral proxy-auth token policy shared by client launchers and by the admin
+API. A blank configured token becomes the local-only `fcc-no-auth` sentinel so
+clients cross their login gates while FCC continues to run without API
+authentication. It lives under `config/` rather than `cli/` because `api/` is
+not permitted to depend on `cli/`.
 
-[cli/claude_env.py](src/free_claude_code/cli/claude_env.py) owns the canonical
-Claude Code proxy environment used by every FCC-launched Claude process. It
-strips inherited `ANTHROPIC_*` variables, sets `ANTHROPIC_BASE_URL`, enables
-gateway model discovery, configures the auto-compact window, disables
-nonessential Anthropic traffic, and always sets `ANTHROPIC_AUTH_TOKEN`. Blank
-proxy auth uses the shared local-only sentinel so Claude Code reaches the proxy
-instead of stopping at its login gate.
+[cli/claude_env.py](src/free_claude_code/cli/claude_env.py) owns the two Claude
+Code proxy environment policies used by FCC-launched Claude processes:
+
+- `build_minimal_claude_proxy_env` sets only `ANTHROPIC_BASE_URL` and
+  `ANTHROPIC_AUTH_TOKEN` on top of the inherited environment; nothing is
+  stripped or otherwise added. It exists because Claude Code's
+  `~/.claude/settings.json` takes precedence over environment variables, so
+  users who have configured that file don't need — and shouldn't have —
+  their environment rewritten.
+- `build_claude_proxy_env` is the legacy, more aggressive policy: it strips
+  inherited `ANTHROPIC_*` variables, sets `ANTHROPIC_BASE_URL`, enables gateway
+  model discovery, configures the auto-compact window, disables nonessential
+  Anthropic traffic, and always sets `ANTHROPIC_AUTH_TOKEN`.
+
+Both use the shared local-only sentinel for blank proxy auth so Claude Code
+reaches the proxy instead of stopping at its login gate.
 
 [cli/launchers/claude.py](src/free_claude_code/cli/launchers/claude.py) owns the installed
-`fcc-claude` launcher:
+`fcc-claude` and `fcc-claude-old` launchers, sharing one internal launch
+helper parameterized by env builder:
 
-- `fcc-claude` applies the shared proxy environment without changing the user's
-  Claude command arguments.
+- `fcc-claude` (`launch`) applies `build_minimal_claude_proxy_env` without
+  changing the user's Claude command arguments.
+- `fcc-claude-old` (`launch_legacy`) applies `build_claude_proxy_env`,
+  preserving the previous `fcc-claude` behavior under a new name.
 
 [cli/launchers/codex.py](src/free_claude_code/cli/launchers/codex.py) owns the installed
 `fcc-codex` launcher:

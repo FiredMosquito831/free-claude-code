@@ -1934,6 +1934,59 @@ details.turn-pane > summary:focus-visible {
   color: var(--warn);
 }
 
+.claude-settings-suggestions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.claude-settings-suggestions .ghost-button {
+  min-height: 28px;
+  padding: 3px 10px;
+  font-size: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-full);
+}
+
+.claude-settings-status {
+  margin-top: 14px;
+  padding: 10px 12px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--neutral-border);
+  background: var(--neutral-bg);
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.claude-settings-status.ok {
+  color: var(--ok);
+  background: var(--ok-bg);
+  border-color: var(--ok-border);
+}
+
+.claude-settings-status.warn {
+  color: var(--warn);
+  background: var(--warn-bg);
+  border-color: var(--warn-border);
+}
+
+.claude-settings-status.error {
+  color: var(--error);
+  background: var(--error-bg);
+  border-color: var(--error-border);
+}
+
+.claude-settings-status .claude-settings-summary {
+  margin: 0;
+}
+
+.claude-settings-status .claude-settings-override {
+  margin: 8px 0 0;
+  font-weight: 600;
+}
+
 .version-upgrade-log {
   margin-top: 16px;
   max-height: 180px;

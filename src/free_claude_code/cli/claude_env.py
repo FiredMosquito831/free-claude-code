@@ -2,7 +2,7 @@
 
 from collections.abc import Mapping
 
-from free_claude_code.cli.proxy_auth import proxy_auth_token
+from free_claude_code.config.proxy_auth import proxy_auth_token
 
 CLAUDE_CODE_AUTO_COMPACT_WINDOW = "190000"
 CLAUDE_BINARY_NAME = "claude"
@@ -31,4 +31,26 @@ def build_claude_proxy_env(
     env["DISABLE_FEEDBACK_COMMAND"] = "1"
     env["DISABLE_ERROR_REPORTING"] = "1"
     env["DISABLE_TELEMETRY"] = "1"
+    return env
+
+
+def build_minimal_claude_proxy_env(
+    *,
+    proxy_root_url: str,
+    auth_token: str,
+    base_env: Mapping[str, str],
+) -> dict[str, str]:
+    """Return the inherited environment with only the proxy variables set.
+
+    Claude Code's `~/.claude/settings.json` takes precedence over environment
+    variables, so `build_claude_proxy_env`'s aggressive stripping and extra
+    flags are wasted effort for users who already configured that file. This
+    builder is for users who have not: it sets exactly `ANTHROPIC_BASE_URL`
+    and `ANTHROPIC_AUTH_TOKEN` on top of the inherited process environment,
+    removing nothing and adding nothing else.
+    """
+
+    env = dict(base_env)
+    env["ANTHROPIC_BASE_URL"] = proxy_root_url
+    env["ANTHROPIC_AUTH_TOKEN"] = proxy_auth_token(auth_token)
     return env

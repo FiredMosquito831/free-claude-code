@@ -6,7 +6,7 @@ import sys
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
-from free_claude_code.cli.proxy_auth import proxy_auth_token
+from free_claude_code.config.proxy_auth import proxy_auth_token
 from free_claude_code.config.server_urls import local_proxy_root_url
 from free_claude_code.config.settings import get_settings
 

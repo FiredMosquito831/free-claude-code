@@ -1,12 +1,13 @@
-"""Installed `fcc-claude` launcher."""
+"""Installed `fcc-claude` and `fcc-claude-old` launchers."""
 
 import os
 import sys
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 
 from free_claude_code.cli.claude_env import (
     CLAUDE_BINARY_NAME,
     build_claude_proxy_env,
+    build_minimal_claude_proxy_env,
 )
 from free_claude_code.config.server_urls import local_proxy_root_url
 from free_claude_code.config.settings import get_settings
@@ -16,10 +17,26 @@ from .common import preflight_proxy, resolve_client_binary, run_client_process
 _DISPLAY_NAME = "Claude Code"
 _INSTALL_HINT = "Install Claude Code with: npm install -g @anthropic-ai/claude-code"
 
+_ClaudeEnvBuilder = Callable[..., dict[str, str]]
+
 
 def launch(argv: Sequence[str] | None = None) -> None:
-    """Launch Claude Code with Free Claude Code proxy environment variables."""
+    """Launch Claude Code with only the proxy URL and auth token set."""
 
+    _launch_claude(argv, build_env=build_minimal_claude_proxy_env)
+
+
+def launch_legacy(argv: Sequence[str] | None = None) -> None:
+    """Launch Claude Code with the full Free Claude Code proxy environment."""
+
+    _launch_claude(argv, build_env=build_claude_proxy_env)
+
+
+def _launch_claude(
+    argv: Sequence[str] | None,
+    *,
+    build_env: _ClaudeEnvBuilder,
+) -> None:
     settings = get_settings()
     proxy_root_url = local_proxy_root_url(settings)
     if error := preflight_proxy(proxy_root_url):
@@ -39,7 +56,7 @@ def launch(argv: Sequence[str] | None = None) -> None:
     args = list(sys.argv[1:] if argv is None else argv)
     run_client_process(
         command=build_claude_launcher_command(binary_path=binary_path, argv=args),
-        env=build_claude_proxy_env(
+        env=build_env(
             proxy_root_url=proxy_root_url,
             auth_token=settings.anthropic_auth_token,
             base_env=os.environ,

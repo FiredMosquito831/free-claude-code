@@ -1,6 +1,7 @@
 """Tests for installed CLI entrypoints, commands, and launchers."""
 
 import json
+import os
 import subprocess
 import sys
 import tomllib
@@ -180,6 +181,10 @@ def test_cli_scripts_are_registered() -> None:
     assert scripts["fcc-server"] == "free_claude_code.cli.entrypoints:serve"
     assert scripts["free-claude-code"] == "free_claude_code.cli.entrypoints:serve"
     assert scripts["fcc-claude"] == "free_claude_code.cli.launchers.claude:launch"
+    assert (
+        scripts["fcc-claude-old"]
+        == "free_claude_code.cli.launchers.claude:launch_legacy"
+    )
     assert scripts["fcc-codex"] == "free_claude_code.cli.launchers.codex:launch"
     assert scripts["fcc-pi"] == "free_claude_code.cli.launchers.pi:launch"
 
@@ -524,10 +529,102 @@ def test_claude_child_env_uses_sentinel_for_blank_configured_auth_token() -> Non
     assert "ANTHROPIC_API_KEY" not in env
 
 
-def test_launch_claude_passes_args_and_child_env(
+def test_claude_minimal_child_env_sets_only_proxy_variables() -> None:
+    from free_claude_code.cli.claude_env import build_minimal_claude_proxy_env
+
+    base_env = {
+        "PATH": "keep",
+        "ANTHROPIC_API_KEY": "official-key",
+        "ANTHROPIC_BASE_URL": "https://api.anthropic.com",
+        "CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY": "0",
+        "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "5000",
+    }
+
+    env = build_minimal_claude_proxy_env(
+        proxy_root_url="http://127.0.0.1:9090",
+        auth_token=" proxy-token ",
+        base_env=base_env,
+    )
+
+    assert env["ANTHROPIC_BASE_URL"] == "http://127.0.0.1:9090"
+    assert env["ANTHROPIC_AUTH_TOKEN"] == "proxy-token"
+    assert set(env) - set(base_env) == {"ANTHROPIC_AUTH_TOKEN"}
+    assert env["PATH"] == "keep"
+    assert env["ANTHROPIC_API_KEY"] == "official-key"
+    assert env["CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY"] == "0"
+    assert env["CLAUDE_CODE_AUTO_COMPACT_WINDOW"] == "5000"
+
+
+def test_claude_minimal_child_env_uses_sentinel_for_blank_configured_auth_token() -> (
+    None
+):
+    from free_claude_code.cli.claude_env import build_minimal_claude_proxy_env
+
+    env = build_minimal_claude_proxy_env(
+        proxy_root_url="http://127.0.0.1:8082",
+        auth_token="",
+        base_env={"ANTHROPIC_AUTH_TOKEN": "inherited-token"},
+    )
+
+    assert env["ANTHROPIC_AUTH_TOKEN"] == "fcc-no-auth"
+
+
+def test_launch_claude_uses_minimal_env_and_passes_args(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from free_claude_code.cli.launchers.claude import launch
+
+    monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://api.anthropic.com")
+    monkeypatch.setenv("ANTHROPIC_AUTH_TOKEN", "old-token")
+    monkeypatch.setenv("KEEP_ME", "yes")
+    settings = _launcher_settings(port=9191, token="proxy-token")
+    inherited_env = dict(os.environ)
+
+    with (
+        patch(
+            "free_claude_code.cli.launchers.claude.get_settings", return_value=settings
+        ),
+        patch(
+            "free_claude_code.cli.launchers.claude.preflight_proxy", return_value=None
+        ),
+        patch(
+            "free_claude_code.cli.launchers.common.shutil.which",
+            return_value="resolved-claude.cmd",
+        ),
+        patch("free_claude_code.cli.launchers.common.subprocess.Popen") as popen,
+        patch("free_claude_code.cli.launchers.common.register_pid") as register_pid,
+        patch("free_claude_code.cli.launchers.common.unregister_pid") as unregister_pid,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        process = popen.return_value
+        process.pid = 12345
+        process.wait.return_value = 7
+        launch(["--model", "sonnet"])
+
+    assert exc_info.value.code == 7
+    popen.assert_called_once()
+    assert popen.call_args.args[0] == ["resolved-claude.cmd", "--model", "sonnet"]
+    child_env = popen.call_args.kwargs["env"]
+    assert child_env["ANTHROPIC_BASE_URL"] == "http://127.0.0.1:9191"
+    assert child_env["ANTHROPIC_AUTH_TOKEN"] == "proxy-token"
+    assert child_env["KEEP_ME"] == "yes"
+    # Only the two proxy variables differ from the inherited environment;
+    # everything else — including anything already set by the caller's shell —
+    # is left exactly as it was.
+    changed = {
+        key
+        for key in set(inherited_env) | set(child_env)
+        if inherited_env.get(key) != child_env.get(key)
+    }
+    assert changed == {"ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN"}
+    register_pid.assert_called_once_with(12345)
+    unregister_pid.assert_called_once_with(12345)
+
+
+def test_launch_claude_legacy_passes_args_and_full_child_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from free_claude_code.cli.launchers.claude import launch_legacy
 
     monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://api.anthropic.com")
     monkeypatch.setenv("ANTHROPIC_AUTH_TOKEN", "old-token")
@@ -553,7 +650,7 @@ def test_launch_claude_passes_args_and_child_env(
         process = popen.return_value
         process.pid = 12345
         process.wait.return_value = 7
-        launch(["--model", "sonnet"])
+        launch_legacy(["--model", "sonnet"])
 
     assert exc_info.value.code == 7
     popen.assert_called_once()
