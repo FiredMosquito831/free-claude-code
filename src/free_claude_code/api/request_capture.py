@@ -209,6 +209,14 @@ class RequestCapture:
                 output_tokens = _int_or_none(usage.get("output_tokens"))
                 if output_tokens is not None:
                     self._tokens_out = output_tokens
+                # message_start carries our own pre-flight estimate, because
+                # the upstream has not reported anything yet. The real count
+                # arrives here, and it is the one worth keeping -- storing the
+                # estimate alongside a provider-reported cache figure produced
+                # rows where the cached tokens exceeded the whole input.
+                input_tokens = _int_or_none(usage.get("input_tokens"))
+                if input_tokens is not None:
+                    self._tokens_in = input_tokens
                 # Anthropic-native upstreams report cache counters up front on
                 # message_start, but everything translated from an OpenAI-shaped
                 # provider only learns them from the final usage chunk, so they

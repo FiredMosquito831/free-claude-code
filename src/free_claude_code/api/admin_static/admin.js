@@ -1,17 +1,21 @@
 
-// tokens_in is the upstream's total prompt count and already includes any cached
-// tokens: OpenAI's prompt_tokens works that way, and so does DeepSeek's
-// prompt_cache_hit + miss. The uncached portion is therefore the remainder, and
-// the hit rate divides by tokens_in -- adding cache reads on top of it would
-// count them twice and understate the rate.
+// tokens_in is Anthropic's input_tokens: the uncached portion only. Providers
+// translate their own accounting to that at the boundary, so total input is
+// tokens_in plus whatever the cache served and whatever it wrote.
 function uncachedInputTokens(row) {
-  const total = Number(row?.tokens_in || 0);
-  const cached = Number(row?.cache_read_tokens || 0);
-  return Math.max(0, total - cached);
+  return Math.max(0, Number(row?.tokens_in || 0));
+}
+
+function totalInputTokens(row) {
+  return (
+    Number(row?.tokens_in || 0) +
+    Number(row?.cache_read_tokens || 0) +
+    Number(row?.cache_write_tokens || 0)
+  );
 }
 
 function formatCacheHitRate(row) {
-  const total = Number(row?.tokens_in || 0);
+  const total = totalInputTokens(row);
   const cached = Number(row?.cache_read_tokens || 0);
   if (!total) return "—";
   // Not every upstream reports prompt caching. Showing 0.0% for those reads as
@@ -3220,6 +3224,7 @@ function renderRequestStatsCards(stats) {
     ["Success rate", `${successRate}%`],
     ["Error rate", `${((stats.error_rate || 0) * 100).toFixed(1)}%`],
     ["Cancelled", stats.cancelled],
+    ["Total input", formatAnalyticsNumber(totalInputTokens(stats))],
     ["Input (uncached)", formatAnalyticsNumber(uncachedInputTokens(stats))],
     ["Cached input", formatAnalyticsNumber(stats.cache_read_tokens || 0)],
     ["Cache hit rate", formatCacheHitRate(stats)],
@@ -3514,7 +3519,9 @@ function renderReqModelChart(byModel) {
   const canvas = document.getElementById("reqModelChart");
   const { ctx, width, height } = prepareCanvas(canvas);
   if (top.length === 0) return;
-  const max = Math.max(1, ...top.map((m) => m.tokens_in + m.tokens_out));
+  // Total input, not just the uncached slice, or a warm model reads as idle.
+  const modelTokens = (m) => totalInputTokens(m) + Number(m.tokens_out || 0);
+  const max = Math.max(1, ...top.map(modelTokens));
   const labelWidth = 150;
   const valueWidth = 52;
   const rowHeight = Math.min(20, height / top.length);
@@ -3523,7 +3530,7 @@ function renderReqModelChart(byModel) {
   ctx.font = "10px system-ui, sans-serif";
   ctx.textBaseline = "middle";
   top.forEach((model, i) => {
-    const tokens = model.tokens_in + model.tokens_out;
+    const tokens = modelTokens(model);
     const y = i * rowHeight;
     const mid = y + rowHeight / 2;
     const barWidth = ((width - labelWidth - valueWidth) * tokens) / max;
@@ -3554,6 +3561,7 @@ async function openRequestDetail(requestId) {
     ["Status", row.status],
     ["Error", row.error_kind ? `${row.error_kind}: ${row.error_message || ""}` : ""],
     ["Key", row.key_label],
+    ["Total input", formatAnalyticsNumber(totalInputTokens(row))],
     ["Input (uncached)", formatOptionalNumber(row.tokens_in)],
     ["Cached input", formatOptionalNumber(row.cache_read_tokens)],
     ["Cache writes", formatOptionalNumber(row.cache_write_tokens)],
@@ -3592,11 +3600,10 @@ function formatOptionalNumber(value) {
 
 /** Share of this request's input that the provider served from its cache. */
 function formatRowCacheHit(row) {
-  const cached = Number(row.cache_read_tokens || 0);
   if (row.cache_read_tokens == null) return "not reported";
-  const total = Number(row.tokens_in || 0) + cached;
+  const total = totalInputTokens(row);
   if (!total) return "—";
-  return `${((cached / total) * 100).toFixed(1)}%`;
+  return `${((Number(row.cache_read_tokens) / total) * 100).toFixed(1)}%`;
 }
 
 /** Output tokens per second, excluding the wait before the first one. */

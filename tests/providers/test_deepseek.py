@@ -942,12 +942,16 @@ async def test_stream_uses_chat_completions_and_maps_cache_usage(deepseek_provid
     usage = next(
         event.data["usage"] for event in parsed if event.event == "message_delta"
     )
+    # DeepSeek reported prompt_tokens=30 as hit=10 + miss=20. Anthropic's
+    # input_tokens is the uncached part, so the hit count comes out of it and
+    # input + cache_read reconstructs the 30 tokens actually sent. Reporting
+    # input_tokens=30 alongside both cache fields counted the prompt twice.
     assert usage == {
-        "input_tokens": 30,
+        "input_tokens": 20,
         "output_tokens": 3,
         "cache_read_input_tokens": 10,
-        "cache_creation_input_tokens": 20,
     }
+    assert usage["input_tokens"] + usage["cache_read_input_tokens"] == 30
 
 
 def test_preserves_extra_body_for_openai_chat_request(deepseek_provider):

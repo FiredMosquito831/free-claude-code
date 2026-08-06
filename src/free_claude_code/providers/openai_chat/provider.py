@@ -185,12 +185,21 @@ class OpenAIChatProvider(BaseProvider):
         cache usage instead of each provider re-implementing the same lookup.
 
         Note ``prompt_tokens`` already *includes* the cached tokens, so this is
-        a breakdown of the existing input count, not an addition to it.
+        a breakdown of the existing input count, not an addition to it. The
+        streaming path subtracts the read count back out before emitting
+        Anthropic's ``input_tokens``, which excludes it by definition.
         """
-        cached = usage_int(prompt_tokens_details(usage_info), "cached_tokens")
-        if cached is None:
-            return {}
-        return {"cache_read_input_tokens": cached}
+        details = prompt_tokens_details(usage_info)
+        fields: dict[str, int] = {}
+        cached = usage_int(details, "cached_tokens")
+        if cached is not None:
+            fields["cache_read_input_tokens"] = cached
+        # OpenRouter reports the write side here too, under the name Anthropic
+        # calls cache creation. Providers that never write leave it absent.
+        written = usage_int(details, "cache_write_tokens")
+        if written is not None:
+            fields["cache_creation_input_tokens"] = written
+        return fields
 
     async def _create_stream(self, body: dict) -> tuple[Any, dict]:
         """Create a streaming chat completion with bounded request fallbacks."""
@@ -636,9 +645,19 @@ class _OpenAIChatStreamRunner:
                 provider_input,
                 provider_input - self._input_tokens,
             )
+        usage_fields = self._provider._anthropic_usage_fields(usage_info)
         input_tokens = (
             provider_input if provider_input is not None else self._input_tokens
         )
+        cache_read = usage_fields.get("cache_read_input_tokens")
+        if provider_input is not None and isinstance(cache_read, int):
+            # The two protocols count this differently: an OpenAI-family
+            # ``prompt_tokens`` *includes* the tokens served from cache, while
+            # Anthropic's ``input_tokens`` excludes them and expects the caller
+            # to add ``cache_read_input_tokens`` back for the total. Emitting
+            # the OpenAI number under the Anthropic name double-counts every
+            # cache hit, which on a warm 268k-token prompt is nearly 2x.
+            input_tokens = max(0, provider_input - cache_read)
         trace_event(
             stage="provider",
             event="provider.response.completed",
