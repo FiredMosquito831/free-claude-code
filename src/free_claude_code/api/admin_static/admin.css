@@ -1934,19 +1934,57 @@ details.turn-pane > summary:focus-visible {
   color: var(--warn);
 }
 
-.claude-settings-suggestions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
+.claude-settings-targets {
   margin-top: 8px;
 }
 
-.claude-settings-suggestions .ghost-button {
+.claude-settings-targets-single {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 13px;
+  color: var(--muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+.claude-settings-targets-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+}
+
+.claude-settings-targets-list li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.claude-settings-targets-list .ghost-button {
   min-height: 28px;
   padding: 3px 10px;
   font-size: 12px;
   border: 1px solid var(--line);
   border-radius: var(--radius-full);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+.claude-settings-badge {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--neutral-border);
+  background: var(--neutral-bg);
+  color: var(--muted);
+}
+
+.claude-settings-badge.ok {
+  color: var(--ok);
+  background: var(--ok-bg);
+  border-color: var(--ok-border);
 }
 
 .claude-settings-status {
@@ -1982,9 +2020,25 @@ details.turn-pane > summary:focus-visible {
   margin: 0;
 }
 
-.claude-settings-status .claude-settings-override {
-  margin: 8px 0 0;
+.claude-settings-overrides {
+  margin-top: 10px;
+}
+
+.claude-settings-overrides .claude-settings-override {
+  margin: 0 0 6px;
+  padding: 8px 12px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--warn-border);
+  background: var(--warn-bg);
+  color: var(--warn);
+  font-size: 13px;
   font-weight: 600;
+}
+
+.claude-settings-project-note {
+  margin: 10px 0 0;
+  font-size: 12px;
+  color: var(--muted);
 }
 
 .version-upgrade-log {

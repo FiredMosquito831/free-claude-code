@@ -200,7 +200,14 @@ def test_clear_missing_file_returns_status_without_error(tmp_path: Path) -> None
     assert status.error is None
 
 
-def test_local_override_detected_when_sibling_sets_base_url(tmp_path: Path) -> None:
+def test_sibling_settings_local_json_is_not_reported_as_an_override(
+    tmp_path: Path,
+) -> None:
+    # Measured against Claude Code 2.1.223 with a controlled home directory:
+    # ~/.claude/settings.json routed every request to the proxy, while an
+    # identical ~/.claude/settings.local.json routed none. The `local` scope is
+    # repository-root only, so warning about a user-level sibling would be a
+    # warning that can never be true.
     path = tmp_path / "settings.json"
     path.write_text(json.dumps({}), encoding="utf-8")
     local_path = tmp_path / "settings.local.json"
@@ -213,7 +220,8 @@ def test_local_override_detected_when_sibling_sets_base_url(tmp_path: Path) -> N
         path=path, expected_base_url=BASE_URL, expected_auth_token=AUTH_TOKEN
     )
 
-    assert status.local_override == str(local_path)
+    assert status.overrides == []
+    assert status.state == "unset"
 
 
 def test_local_override_none_when_sibling_malformed(tmp_path: Path) -> None:
@@ -226,7 +234,95 @@ def test_local_override_none_when_sibling_malformed(tmp_path: Path) -> None:
         path=path, expected_base_url=BASE_URL, expected_auth_token=AUTH_TOKEN
     )
 
-    assert status.local_override is None
+    assert status.overrides == []
+
+
+def test_local_override_none_when_sibling_sets_no_anthropic_keys(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "settings.json"
+    path.write_text(json.dumps({}), encoding="utf-8")
+    local_path = tmp_path / "settings.local.json"
+    local_path.write_text(json.dumps({"env": {"OTHER_KEY": "value"}}), encoding="utf-8")
+
+    status = read_status(
+        path=path, expected_base_url=BASE_URL, expected_auth_token=AUTH_TOKEN
+    )
+
+    assert status.overrides == []
+
+
+def test_managed_overrides_are_reported_in_order(tmp_path: Path, monkeypatch) -> None:
+    from free_claude_code.config import claude_settings as claude_settings_module
+
+    path = tmp_path / "settings.json"
+    path.write_text(json.dumps({}), encoding="utf-8")
+
+    managed_path = tmp_path / "managed-settings.json"
+    managed_path.write_text(
+        json.dumps({"env": {CLAUDE_BASE_URL_ENV: "http://managed"}}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        claude_settings_module,
+        "claude_managed_settings_paths",
+        lambda: [managed_path],
+    )
+
+    status = read_status(
+        path=path, expected_base_url=BASE_URL, expected_auth_token=AUTH_TOKEN
+    )
+
+    assert [o.scope for o in status.overrides] == ["managed"]
+    assert status.overrides[0].path == str(managed_path)
+    assert status.overrides[0].variables == [CLAUDE_BASE_URL_ENV]
+
+
+def test_managed_override_malformed_produces_no_override_and_no_state_change(
+    tmp_path: Path, monkeypatch
+) -> None:
+    from free_claude_code.config import claude_settings as claude_settings_module
+
+    path = tmp_path / "settings.json"
+    path.write_text(json.dumps({}), encoding="utf-8")
+
+    managed_path = tmp_path / "managed-settings.json"
+    managed_path.write_text("{not valid json", encoding="utf-8")
+    monkeypatch.setattr(
+        claude_settings_module,
+        "claude_managed_settings_paths",
+        lambda: [managed_path],
+    )
+
+    status = read_status(
+        path=path, expected_base_url=BASE_URL, expected_auth_token=AUTH_TOKEN
+    )
+
+    assert status.overrides == []
+    assert status.state == "unset"
+
+
+def test_managed_override_with_no_anthropic_keys_produces_no_override(
+    tmp_path: Path, monkeypatch
+) -> None:
+    from free_claude_code.config import claude_settings as claude_settings_module
+
+    path = tmp_path / "settings.json"
+    path.write_text(json.dumps({}), encoding="utf-8")
+
+    managed_path = tmp_path / "managed-settings.json"
+    managed_path.write_text(json.dumps({"env": {"OTHER_KEY": "x"}}), encoding="utf-8")
+    monkeypatch.setattr(
+        claude_settings_module,
+        "claude_managed_settings_paths",
+        lambda: [managed_path],
+    )
+
+    status = read_status(
+        path=path, expected_base_url=BASE_URL, expected_auth_token=AUTH_TOKEN
+    )
+
+    assert status.overrides == []
 
 
 def test_no_status_field_ever_contains_raw_auth_token(tmp_path: Path) -> None:

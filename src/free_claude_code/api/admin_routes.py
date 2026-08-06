@@ -35,8 +35,8 @@ from free_claude_code.config.constants import (
 from free_claude_code.config.credentials import parse_credential_keys
 from free_claude_code.config.model_refs import configured_chat_model_refs
 from free_claude_code.config.paths import (
+    claude_settings_candidates,
     claude_settings_path,
-    windows_claude_settings_path,
 )
 from free_claude_code.config.provider_catalog import PROVIDER_CATALOG
 from free_claude_code.config.proxy_auth import proxy_auth_token
@@ -411,15 +411,28 @@ def _claude_settings_expectations(settings: Settings) -> tuple[str, str]:
 
 
 def _claude_settings_status_response(status: ClaudeSettingsStatus) -> dict[str, Any]:
-    default_path = str(claude_settings_path())
-    windows_path = windows_claude_settings_path()
-    suggested_paths = [default_path]
-    if windows_path is not None and str(windows_path) not in suggested_paths:
-        suggested_paths.append(str(windows_path))
     return {
         "status": status,
-        "default_path": default_path,
-        "suggested_paths": suggested_paths,
+        "default_path": str(claude_settings_path()),
+    }
+
+
+async def _claude_settings_target(
+    path: str, expected_base_url: str, expected_auth_token: str
+) -> dict[str, Any]:
+    """Evaluate a single detected settings candidate for the ``targets`` list."""
+
+    target_status = await asyncio.to_thread(
+        read_status,
+        path=Path(path),
+        expected_base_url=expected_base_url,
+        expected_auth_token=expected_auth_token,
+    )
+    return {
+        "path": path,
+        "exists": target_status.exists,
+        "state": target_status.state,
+        "is_default": Path(path) == claude_settings_path(),
     }
 
 
@@ -438,7 +451,16 @@ async def get_claude_settings(
         expected_base_url=expected_base_url,
         expected_auth_token=expected_auth_token,
     )
-    return _claude_settings_status_response(status)
+    candidates = await asyncio.to_thread(claude_settings_candidates)
+    targets = [
+        await _claude_settings_target(
+            str(candidate), expected_base_url, expected_auth_token
+        )
+        for candidate in candidates
+    ]
+    response = _claude_settings_status_response(status)
+    response["targets"] = targets
+    return response
 
 
 @router.post("/admin/api/claude-settings/apply")

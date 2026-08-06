@@ -3057,32 +3057,88 @@ async function loadClaudeSettings(path) {
   renderClaudeSettings();
 }
 
+function renderClaudeSettingsTargets(info) {
+  const targetsEl = byId("claudeSettingsTargets");
+  if (!targetsEl) return;
+
+  targetsEl.innerHTML = "";
+  const targets = info?.targets || [];
+  if (targets.length === 0) return;
+
+  if (targets.length === 1) {
+    const target = targets[0];
+    const line = document.createElement("p");
+    line.className = "claude-settings-targets-single";
+    line.textContent = target.path;
+    const badge = document.createElement("span");
+    badge.className = `claude-settings-badge ${target.state === "configured" ? "ok" : ""}`.trim();
+    badge.textContent = target.exists
+      ? target.state === "configured"
+        ? "configured"
+        : "exists"
+      : "not found";
+    line.appendChild(badge);
+    targetsEl.appendChild(line);
+    return;
+  }
+
+  const list = document.createElement("ul");
+  list.className = "claude-settings-targets-list";
+  targets.forEach((target) => {
+    const item = document.createElement("li");
+
+    const select = document.createElement("button");
+    select.type = "button";
+    select.className = "ghost-button";
+    select.textContent = target.is_default ? `${target.path} (default)` : target.path;
+    select.addEventListener("click", () => {
+      byId("claudeSettingsPath").value = target.path;
+      loadClaudeSettings(target.path);
+    });
+    item.appendChild(select);
+
+    const badge = document.createElement("span");
+    badge.className = `claude-settings-badge ${target.state === "configured" ? "ok" : ""}`.trim();
+    badge.textContent = target.exists
+      ? target.state === "configured"
+        ? "configured"
+        : "exists"
+      : "not found";
+    item.appendChild(badge);
+
+    list.appendChild(item);
+  });
+  targetsEl.appendChild(list);
+}
+
+function renderClaudeSettingsOverrides(status) {
+  const overridesEl = byId("claudeSettingsOverrides");
+  if (!overridesEl) return;
+
+  overridesEl.innerHTML = "";
+  const overrides = status?.overrides || [];
+  overrides.forEach((override) => {
+    const note = document.createElement("p");
+    note.className = "claude-settings-override";
+    const variables = override.variables.join(" and ");
+    note.textContent =
+      `${override.scope === "managed" ? "Enterprise managed settings" : "A higher-precedence settings file"} ` +
+      `at ${override.path} set ${variables} and override this file.`;
+    overridesEl.appendChild(note);
+  });
+}
+
 function renderClaudeSettings() {
-  const suggestions = byId("claudeSettingsSuggestions");
   const statusEl = byId("claudeSettingsStatus");
   const applyButton = byId("claudeSettingsApplyButton");
   const removeButton = byId("claudeSettingsRemoveButton");
-  if (!suggestions || !statusEl || !applyButton || !removeButton) return;
+  if (!statusEl || !applyButton || !removeButton) return;
 
   const info = state.claudeSettings;
   applyButton.disabled = state.claudeSettingsBusy;
   removeButton.disabled = state.claudeSettingsBusy;
 
-  suggestions.innerHTML = "";
-  const suggestedPaths = info?.suggested_paths || [];
-  if (suggestedPaths.length > 1) {
-    suggestedPaths.forEach((suggestedPath) => {
-      const chip = document.createElement("button");
-      chip.type = "button";
-      chip.className = "ghost-button";
-      chip.textContent = suggestedPath;
-      chip.addEventListener("click", () => {
-        byId("claudeSettingsPath").value = suggestedPath;
-        loadClaudeSettings(suggestedPath);
-      });
-      suggestions.appendChild(chip);
-    });
-  }
+  renderClaudeSettingsTargets(info);
 
   statusEl.innerHTML = "";
   if (!info) return;
@@ -3090,6 +3146,7 @@ function renderClaudeSettings() {
   if (info.error && !info.status) {
     statusEl.className = "claude-settings-status error";
     statusEl.textContent = `Could not read Claude settings: ${info.error}`;
+    renderClaudeSettingsOverrides(null);
     return;
   }
 
@@ -3117,14 +3174,7 @@ function renderClaudeSettings() {
   }
   statusEl.appendChild(summary);
 
-  if (status.local_override) {
-    const overrideNote = document.createElement("p");
-    overrideNote.className = "claude-settings-override";
-    overrideNote.textContent =
-      `${status.local_override} also sets ANTHROPIC_* variables and takes ` +
-      "precedence over the file above.";
-    statusEl.appendChild(overrideNote);
-  }
+  renderClaudeSettingsOverrides(status);
 }
 
 async function applyClaudeSettings() {
