@@ -545,7 +545,7 @@ function Configure-AndConfirmFreeClaudeCode {
     if ($DryRun) {
         Write-Host "+ uv tool update-shell"
         Write-Host "+ uv tool dir --bin"
-        Write-Host "+ verify fcc-server, fcc-claude, fcc-codex, and fcc-pi in the uv tool bin directory"
+        Write-Host "+ verify fcc-server, fcc-claude, fcc-claude-old, fcc-codex, and fcc-pi in the uv tool bin directory"
         Write-Host "+ fcc-server --version"
         return
     }
@@ -566,7 +566,7 @@ function Configure-AndConfirmFreeClaudeCode {
         [IO.Path]::AltDirectorySeparatorChar
     )
     $installedCommands = @{}
-    foreach ($commandName in @("fcc-server", "fcc-claude", "fcc-codex", "fcc-pi")) {
+    foreach ($commandName in @("fcc-server", "fcc-claude", "fcc-claude-old", "fcc-codex", "fcc-pi")) {
         $command = Get-ApplicationCommand $commandName
         if (-not $command) {
             throw "Free Claude Code installation did not create '$commandName'."
@@ -622,4 +622,6 @@ else {
     Write-Host ""
     Write-Host "If you use Claude Code, Codex, or Pi, launch them through the proxy"
     Write-Host "with fcc-claude, fcc-codex, or fcc-pi."
+    Write-Host "Need the previous fcc-claude behavior (gateway model discovery, auto-compact,"
+    Write-Host "telemetry disabled)? Use fcc-claude-old instead."
 }

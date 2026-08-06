@@ -447,7 +447,7 @@ configure_and_verify_free_claude_code() {
 
     if [ "$dry_run" -eq 1 ]; then
         print_command uv tool dir --bin
-        printf '+ verify fcc-server, fcc-claude, fcc-codex, and fcc-pi in the uv tool bin directory\n'
+        printf '+ verify fcc-server, fcc-claude, fcc-claude-old, fcc-codex, and fcc-pi in the uv tool bin directory\n'
         print_command fcc-server --version
         return 0
     fi
@@ -465,7 +465,7 @@ configure_and_verify_free_claude_code() {
     export PATH
     hash -r 2>/dev/null || true
 
-    for command_name in fcc-server fcc-claude fcc-codex fcc-pi; do
+    for command_name in fcc-server fcc-claude fcc-claude-old fcc-codex fcc-pi; do
         [ -x "$tool_bin/$command_name" ] || fail "Free Claude Code installation did not create $tool_bin/$command_name."
     done
 
@@ -506,4 +506,6 @@ else
     printf 'Start the proxy with: fcc-server\n'
     printf '\nIf you use Claude Code, Codex, or Pi, launch them through the proxy\n'
     printf 'with fcc-claude, fcc-codex, or fcc-pi.\n'
+    printf 'Need the previous fcc-claude behavior (gateway model discovery, auto-compact,\n'
+    printf 'telemetry disabled)? Use fcc-claude-old instead.\n'
 fi

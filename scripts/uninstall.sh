@@ -3,7 +3,7 @@ set -eu
 
 PACKAGE_NAME="free-claude-code"
 FCC_HOME_DIRNAME=".fcc"
-FCC_COMMANDS="fcc-server fcc-claude fcc-codex fcc-pi fcc-init free-claude-code"
+FCC_COMMANDS="fcc-server fcc-claude fcc-claude-old fcc-codex fcc-pi fcc-init free-claude-code"
 
 dry_run=0
 uv_tool_bin=""

@@ -50,6 +50,50 @@
               <div id="versionDetails" class="version-details"></div>
               <pre id="versionUpgradeLog" class="requests-detail-body version-upgrade-log" hidden></pre>
             </section>
+            <section
+              class="settings-section"
+              id="claudeSettingsPanel"
+              aria-label="Claude Code settings file"
+            >
+              <div class="section-heading">
+                <div>
+                  <h3>Claude Code settings file</h3>
+                  <p>
+                    Claude Code reads <code>settings.json</code> before it reads
+                    environment variables, so a stale file silently overrides
+                    <code>ANTHROPIC_BASE_URL</code>/<code>ANTHROPIC_AUTH_TOKEN</code> exports.
+                    The previous file is backed up next to it with a
+                    <code>.fcc-backup</code> suffix on first write.
+                  </p>
+                </div>
+                <div class="observability-actions">
+                  <button
+                    id="claudeSettingsApplyButton"
+                    class="primary-button"
+                    type="button"
+                  >
+                    Configure
+                  </button>
+                  <button
+                    id="claudeSettingsRemoveButton"
+                    class="secondary-button"
+                    type="button"
+                  >
+                    Remove
+                  </button>
+                </div>
+              </div>
+              <div class="field">
+                <label for="claudeSettingsPath"><span>Settings file path</span></label>
+                <input id="claudeSettingsPath" type="text" autocomplete="off" />
+              </div>
+              <div id="claudeSettingsSuggestions" class="claude-settings-suggestions"></div>
+              <div
+                id="claudeSettingsStatus"
+                class="claude-settings-status"
+                aria-live="polite"
+              ></div>
+            </section>
             <section class="provider-strip" aria-label="Provider status">
               <div class="strip-header">
                 <h3>Providers</h3>
@@ -583,24 +627,24 @@ OLLAMA_BASE_URL="http://127.0.0.1:11434"</code></pre>
                   Claude Code reads its <strong>settings file</strong>, and that file
                   <strong>wins over exported environment variables</strong> &mdash; so
                   <code>export ANTHROPIC_BASE_URL=...</code> will appear to do nothing if
-                  the file says otherwise.
+                  the file says otherwise. The fastest way to point it at this proxy is the
+                  button on this dashboard, not hand-editing JSON.
                 </p>
                 <p>
-                  <strong>1.</strong> Open <code>~/.claude/settings.json</code>
-                  (<code>%USERPROFILE%\.claude\settings.json</code> on Windows). Create it
-                  if missing.
+                  <strong>1.</strong> Go to <strong>Providers &rarr; Claude Code settings
+                  file</strong>. The path field is pre-filled with
+                  <code>~/.claude/settings.json</code> (and, if this server runs under WSL
+                  while Claude Code runs on Windows, a second suggested path for the
+                  Windows-side file &mdash; those are two different files).
                 </p>
-                <p><strong>2.</strong> Merge in these two entries, keeping anything else:</p>
-                <pre><code>{
-  "env": {
-    "ANTHROPIC_AUTH_TOKEN": "freecc",
-    "ANTHROPIC_BASE_URL": "http://127.0.0.1:8082"
-  }
-}</code></pre>
                 <p>
-                  The token must match this server's <code>ANTHROPIC_AUTH_TOKEN</code>
-                  (shipped as <code>freecc</code>). It authenticates your agent to the
-                  proxy and is not a provider key.
+                  <strong>2.</strong> Press <strong>Configure</strong>. It writes
+                  <code>ANTHROPIC_BASE_URL</code> and <code>ANTHROPIC_AUTH_TOKEN</code>
+                  into that file's <code>env</code> block, merging with anything else
+                  already there. The previous file is backed up next to it with a
+                  <code>.fcc-backup</code> suffix the first time it writes. If the file
+                  already points somewhere else, the status line shows what is there before
+                  you overwrite it; <strong>Remove</strong> deletes just those two keys.
                 </p>
                 <p>
                   <strong>3.</strong> Restart Claude Code and run <code>/status</code>. It
@@ -612,9 +656,28 @@ OLLAMA_BASE_URL="http://127.0.0.1:11434"</code></pre>
                 <img class="guide-shot" src="/admin/img/cc-model-picker.png"
                      alt="Claude Code model picker listing FCC models" loading="lazy">
                 <p>
-                  Prefer not to edit files? <code>fcc-claude</code> sets everything for the
-                  session.
+                  <code>fcc-claude</code> also sets everything for just the current shell
+                  session, without touching any file.
                 </p>
+                <details class="guide-note">
+                  <summary>Editing the file by hand instead</summary>
+                  <p>
+                    Open <code>~/.claude/settings.json</code>
+                    (<code>%USERPROFILE%\.claude\settings.json</code> on Windows), creating
+                    it if missing, and merge in these two entries, keeping anything else:
+                  </p>
+                  <pre><code>{
+  "env": {
+    "ANTHROPIC_AUTH_TOKEN": "freecc",
+    "ANTHROPIC_BASE_URL": "http://127.0.0.1:8082"
+  }
+}</code></pre>
+                  <p>
+                    The token must match this server's <code>ANTHROPIC_AUTH_TOKEN</code>
+                    (shipped as <code>freecc</code>). It authenticates your agent to the
+                    proxy and is not a provider key.
+                  </p>
+                </details>
 
                 <h3 id="guide-desktop">Claude Desktop</h3>
                 <p>

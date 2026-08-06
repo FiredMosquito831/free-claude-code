@@ -88,7 +88,7 @@ fcc-server --version
 
 1. Installs `uv` (the Python tool runner) if missing or too old.
 2. Looks up the **latest** release, downloads its wheel, and **verifies the SHA-256 that GitHub publishes for that asset**. A mismatch aborts rather than running unverified code.
-3. Installs the package and puts `fcc-server`, `fcc-claude`, `fcc-codex` and `fcc-pi` on your `PATH`.
+3. Installs the package and puts `fcc-server`, `fcc-claude`, `fcc-claude-old`, `fcc-codex` and `fcc-pi` on your `PATH`.
 
 **It does not install Claude Code, Codex, or Pi.** Those are separate third-party tools and the proxy doesn't need any of them to run. Install whichever you actually use, yourself — the `fcc-*` launchers simply point an agent you already have at the proxy.
 
@@ -191,11 +191,19 @@ No model overrides are needed. FCC exposes native **Fable / Opus / Sonnet / Haik
 
 ### Shortcut
 
-If you'd rather not edit the file, the bundled launcher sets everything for the session:
+If you'd rather not edit the settings file, the bundled launcher sets the two
+proxy variables for the session:
 
 ```bash
 fcc-claude
 ```
+
+`fcc-claude` only sets `ANTHROPIC_BASE_URL` and `ANTHROPIC_AUTH_TOKEN` — it
+doesn't touch anything else, since `~/.claude/settings.json` (Step 2 above)
+takes precedence over environment variables anyway. If you want the previous
+`fcc-claude` behavior — gateway model discovery enabled, the auto-compact
+window set, telemetry/autoupdate disabled, and inherited `ANTHROPIC_*`
+variables cleared — run `fcc-claude-old` instead.
 
 Official references: [Claude Code LLM gateway docs](https://code.claude.com/docs/en/llm-gateway-connect) · [settings.json reference](https://code.claude.com/docs/en/settings)
 

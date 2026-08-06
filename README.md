@@ -112,7 +112,7 @@ fcc-server --version
 
 1. Installs `uv` (the Python tool runner) if it's missing or too old.
 2. Looks up the **latest** release, downloads its wheel, and **verifies the SHA-256 that GitHub publishes for that asset** — a mismatch aborts rather than running unverified code.
-3. Installs Free Claude Code and puts `fcc-server`, `fcc-claude`, `fcc-codex`, and `fcc-pi` on your `PATH`.
+3. Installs Free Claude Code and puts `fcc-server`, `fcc-claude`, `fcc-claude-old`, `fcc-codex`, and `fcc-pi` on your `PATH`.
 
 That's all it does. **It does not install Claude Code, Codex, or Pi** — those are separate third-party tools, and Free Claude Code doesn't need any of them to run. Install whichever you actually use, yourself. The `fcc-*` launchers just point an agent you already have at the proxy.
 
@@ -169,6 +169,12 @@ Claude Code:
 ```bash
 fcc-claude
 ```
+
+`fcc-claude` sets only `ANTHROPIC_BASE_URL` and `ANTHROPIC_AUTH_TOKEN` on top of
+your inherited shell environment — nothing else is changed or stripped. If you
+want the previous behavior (also enables gateway model discovery, sets the
+auto-compact window, disables telemetry/autoupdate, and clears any inherited
+`ANTHROPIC_*` variables), use `fcc-claude-old` instead.
 
 Codex:
 

@@ -13,6 +13,7 @@ $FccHomeDirname = ".fcc"
 $FccCommands = @(
     "fcc-server",
     "fcc-claude",
+    "fcc-claude-old",
     "fcc-codex",
     "fcc-pi",
     "fcc-init",
