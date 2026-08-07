@@ -744,6 +744,13 @@ function buildFieldControl(field) {
       : field.type === "model_chain"
         ? new ModelChainEditor(input, field).element
         : input;
+  // A control that wraps its input must still place it in the document.
+  // `changedValues()` collects fields by walking [data-key] over the page, so
+  // a wrapper that keeps its input detached produces a field that looks
+  // edited, never marks the form dirty, and is silently never saved. Enforced
+  // here rather than trusted to each wrapper: it is one line, and the failure
+  // is invisible until someone tries to save.
+  if (!control.contains(input)) control.appendChild(input);
   return { input, control };
 }
 
@@ -1305,7 +1312,11 @@ class ModelChainEditor {
     this.addButton.setAttribute("aria-label", `Add fallback to ${field.label}`);
     this.addButton.addEventListener("click", () => this.addRow("", true));
 
-    this.element.append(this.rowsEl, this.addButton);
+    // The hidden input carries this field's value and its data-key, so it
+    // has to be in the document: `changedValues()` finds fields by walking
+    // [data-key] across the page, and an input left detached is invisible
+    // to Apply no matter what gets written to it.
+    this.element.append(this.input, this.rowsEl, this.addButton);
 
     // Seed rows from the current value without touching the hidden input or
     // dirty state - this is initial render, not a user edit.

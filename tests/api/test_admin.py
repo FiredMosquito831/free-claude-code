@@ -1487,3 +1487,27 @@ def test_admin_chatgpt_oauth_import_codex_reports_missing_tokens(monkeypatch, tm
 
     assert response.status_code == 400
     assert "Codex" in response.json()["detail"]
+
+
+def test_admin_static_keeps_every_field_input_in_the_document():
+    """A wrapped control must still place its input in the page.
+
+    ``changedValues()`` collects fields by walking ``[data-key]`` across the
+    document, so a wrapper that keeps its input detached yields a field that
+    accepts edits, never marks the form dirty, and is silently never saved.
+    The fallback chain editor shipped exactly that way and its value could not
+    reach Apply at all.
+
+    Asserted against the source rather than a rendered page because the suite
+    has no DOM harness; this is the same guard-test approach the installers
+    use for behaviour that cannot be executed in CI.
+    """
+    script = Path("src/free_claude_code/api/admin_static/admin.js").read_text(
+        encoding="utf-8"
+    )
+
+    # The invariant that makes this true for every control type.
+    assert "if (!control.contains(input)) control.appendChild(input);" in script
+
+    # And the chain editor placing its own input, so the intent stays local.
+    assert "this.element.append(this.input, this.rowsEl, this.addButton);" in script
