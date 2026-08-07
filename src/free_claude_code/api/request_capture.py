@@ -65,6 +65,7 @@ class RequestCapture:
         self._cache_read_tokens: int | None = None
         self._cache_write_tokens: int | None = None
         self._tokens_out: int | None = None
+        self._primary_model_ref: str | None = None
         self._error: tuple[str | None, str | None] | None = None
         self._finalized = False
         # The rotating provider writes the credential it picks into this slot
@@ -89,10 +90,21 @@ class RequestCapture:
     def enabled(self) -> bool:
         return self._store is not None
 
-    def set_routing(self, routed: RoutedMessagesRequest) -> None:
-        """Attach provider/model/reasoning metadata once routing resolves."""
+    def set_routing(self, routed: RoutedMessagesRequest, attempt: int = 0) -> None:
+        """Attach provider/model/reasoning metadata for the attempt in flight.
+
+        Called again for each fallback, so the row always names the model that
+        actually answered. The first call also remembers the route's own model,
+        which is the only way to tell afterwards what it fell back *from*.
+        """
         if not self.enabled:
             return
+        if attempt == 0:
+            self._primary_model_ref = routed.resolved.provider_model_ref
+        self._record.route_attempt = attempt
+        self._record.route_primary_model = (
+            self._primary_model_ref if attempt > 0 else None
+        )
         self._record.provider = routed.resolved.provider_id
         self._record.resolved_model = routed.resolved.provider_model
         self._record.reasoning = _describe_reasoning(routed)

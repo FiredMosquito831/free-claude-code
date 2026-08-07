@@ -29,7 +29,7 @@ TokenCounter = Callable[
     int,
 ]
 WireApi = Literal["messages", "responses"]
-AttemptObserver = Callable[[RoutedMessagesRequest], None]
+AttemptObserver = Callable[[RoutedMessagesRequest, int], None]
 
 
 class ProviderExecutor:
@@ -107,7 +107,7 @@ class ProviderExecutor:
                     attempt_count=len(attempts),
                 )
                 if on_attempt is not None:
-                    on_attempt(routed)
+                    on_attempt(routed, index)
 
                 provider_stream: AsyncIterator[str] | None = None
                 committed = False
