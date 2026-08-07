@@ -3669,6 +3669,16 @@ const reqState = {
   providerOptions: new Set(),
   modelOptions: new Set(),
   keyOptions: new Set(),
+  // Baseline the pulse poll compares against. Established by the first pulse
+  // rather than by a full load: the list query is paged, so its newest visible
+  // row is not MAX(ts_epoch) once you are past page 1, and seeding from it
+  // would make every later tick look "changed" and reload the whole view.
+  lastPulseTotal: null,
+  lastPulseTs: null,
+  // The filters the baseline above was measured under. A different window or
+  // provider has different counts, so comparing across a filter change would
+  // report "changed" for something that only moved because the question did.
+  lastPulseFilters: null,
 };
 
 function reqFilters() {
@@ -3718,6 +3728,7 @@ async function loadRequestsView() {
     clearChart(byId("reqSeriesChart"));
     clearChart(byId("reqModelChart"));
     reqState.total = 0;
+    byId("reqBreakdownTruncatedNote").hidden = true;
     byId("reqBodiesIndicator").textContent = "Request log disabled (REQUEST_LOG_ENABLED=false)";
     renderReqPager();
     byId("reqLastUpdated").textContent = "Logging disabled";
@@ -3733,6 +3744,7 @@ async function loadRequestsView() {
   renderRequestProviderBreakdown(stats.by_provider || []);
   renderRequestKeyBreakdown(stats.by_key || []);
   renderRequestTopErrors(stats.top_errors || []);
+  renderReqBreakdownTruncatedNote(stats);
   reqState.total = list.total || 0;
   renderRequestsTable(list.rows || []);
   renderReqPager();
@@ -3756,6 +3768,24 @@ function populateRequestFilterOptions(stats) {
   populate("reqProviderOptions", stats.by_provider || [], reqState.providerOptions);
   populate("reqModelOptions", stats.by_model || [], reqState.modelOptions);
   populate("reqKeyOptions", stats.by_key || [], reqState.keyOptions);
+}
+
+/** Each breakdown (provider/model/key) is capped server-side; surface it when hit. */
+function renderReqBreakdownTruncatedNote(stats) {
+  const note = byId("reqBreakdownTruncatedNote");
+  const truncated = [];
+  if (stats.by_provider_truncated) truncated.push("providers");
+  if (stats.by_model_truncated) truncated.push("models");
+  if (stats.by_key_truncated) truncated.push("keys");
+  if (truncated.length === 0) {
+    note.hidden = true;
+    note.textContent = "";
+    return;
+  }
+  note.hidden = false;
+  note.textContent =
+    `Showing the top 50 ${truncated.join(", ")} by request volume; ` +
+    "narrow the filters to see the rest.";
 }
 
 /** "412 (18.4%)" — the count and its share of the window, in one cell. */
@@ -4341,17 +4371,61 @@ async function exportRequestAnalytics() {
   );
 }
 
+function requestAutoRefreshEnabled() {
+  return byId("reqAutoRefresh").checked;
+}
+
+/**
+ * Poll the cheap heartbeat endpoint instead of the full stats+list view.
+ * Only when the row count or latest timestamp actually moved does this fall
+ * through to `loadRequestsView()`, so an idle dashboard stops running the
+ * aggregate queries (percentiles, breakdowns, series) on every tick.
+ */
+async function pollRequestPulse() {
+  if (!requestAutoRefreshEnabled()) return;
+  if (state.activeView !== "requests") return;
+  // A hidden tab must not poll at all, not just skip the expensive call.
+  if (document.visibilityState === "hidden") return;
+  const params = reqFilters();
+  let pulse;
+  try {
+    pulse = await api(`/admin/api/requests/pulse?${params}`);
+  } catch (error) {
+    showMessage(error.message, "error");
+    return;
+  }
+  if (pulse.enabled === false) return;
+  const signature = params.toString();
+  const first =
+    reqState.lastPulseTotal === null || signature !== reqState.lastPulseFilters;
+  reqState.lastPulseFilters = signature;
+  const changed =
+    pulse.total !== reqState.lastPulseTotal || pulse.last_ts !== reqState.lastPulseTs;
+  reqState.lastPulseTotal = pulse.total;
+  reqState.lastPulseTs = pulse.last_ts;
+  // The first tick only establishes the baseline; the view was just loaded.
+  if (first || !changed) return;
+  loadRequestsView().catch((error) => showMessage(error.message, "error"));
+}
+
 function updateRequestAutoRefresh() {
   if (reqState.autoRefreshTimer != null) {
     window.clearInterval(reqState.autoRefreshTimer);
     reqState.autoRefreshTimer = null;
   }
-  if (!byId("reqAutoRefresh").checked) return;
+  if (!requestAutoRefreshEnabled()) return;
+  const intervalMs = Number(byId("reqAutoRefreshInterval").value) || 15000;
   reqState.autoRefreshTimer = window.setInterval(() => {
-    if (state.activeView !== "requests") return;
-    loadRequestsView().catch((error) => showMessage(error.message, "error"));
-  }, 15000);
+    pollRequestPulse();
+  }, intervalMs);
 }
+
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible" && requestAutoRefreshEnabled()) {
+    // Catch up immediately instead of waiting out the rest of the interval.
+    pollRequestPulse();
+  }
+});
 
 byId("reqDetailClose").addEventListener("click", closeRequestDetail);
 byId("reqDetailModal").addEventListener("click", (event) => {
@@ -4388,7 +4462,11 @@ byId("reqPageSize").addEventListener("change", () => {
 byId("reqRefreshButton").addEventListener("click", () =>
   loadRequestsView().catch((error) => showMessage(error.message, "error")),
 );
-byId("reqAutoRefresh").addEventListener("change", updateRequestAutoRefresh);
+byId("reqAutoRefresh").addEventListener("change", () => {
+  updateRequestAutoRefresh();
+  if (requestAutoRefreshEnabled()) pollRequestPulse();
+});
+byId("reqAutoRefreshInterval").addEventListener("change", updateRequestAutoRefresh);
 byId("reqExportButton").addEventListener("click", () =>
   exportRequestAnalytics().catch((error) => showMessage(error.message, "error")),
 );

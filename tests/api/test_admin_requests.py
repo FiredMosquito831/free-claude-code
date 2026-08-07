@@ -179,6 +179,72 @@ def test_stats_endpoint_rejects_invalid_status(client, seeded_store) -> None:
     assert response.json()["detail"] == "Invalid status filter"
 
 
+def test_pulse_endpoint(client, seeded_store) -> None:
+    pulse = client.get("/admin/api/requests/pulse").json()
+    assert pulse["enabled"] is True
+    assert pulse["total"] == 5
+    assert pulse["last_ts"] is not None
+
+    filtered = client.get("/admin/api/requests/pulse", params={"provider": "p2"}).json()
+    assert filtered["total"] == 2
+
+    windowed = client.get(
+        "/admin/api/requests/pulse", params={"since": time.time() + 1000}
+    ).json()
+    assert windowed["total"] == 0
+    assert windowed["last_ts"] is None
+
+
+def test_pulse_endpoint_rejects_invalid_status(client, seeded_store) -> None:
+    response = client.get(
+        "/admin/api/requests/pulse", params={"status": "not-a-status"}
+    )
+    assert response.status_code == 422
+
+
+def test_pulse_endpoint_disabled_store_shape(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("REQUEST_LOG_ENABLED", "false")
+    from free_claude_code.config.settings import Settings
+    from tests.api.support import create_test_app as make_app
+
+    app = make_app(Settings())
+    disabled_client = TestClient(app, client=("127.0.0.1", 50000))
+    pulse = disabled_client.get("/admin/api/requests/pulse").json()
+    assert pulse == {"enabled": False}
+
+
+def test_stats_endpoint_flags_truncated_breakdowns(client, tmp_path) -> None:
+    """A gateway with hundreds of providers must not return them all on every poll.
+
+    ``_isolate_request_log`` (autouse, see conftest.py) points
+    ``default_request_log_path`` at ``tmp_path / "requests.db"``, so writing
+    through that same path is what the app's own store resolves to.
+    """
+    store = get_request_log_store(tmp_path / "requests.db")
+    assert store is not None
+    for index in range(60):
+        store.enqueue(
+            RequestRecord(
+                id=f"p{index}",
+                endpoint="/v1/messages",
+                protocol="anthropic",
+                provider=f"provider-{index}",
+                resolved_model="m1",
+                status="success",
+            )
+        )
+    store.close()
+
+    stats = client.get("/admin/api/requests/stats").json()
+    assert stats["by_provider_truncated"] is True
+    assert len(stats["by_provider"]) == 50
+
+
+def test_admin_requests_loopback_guard_pulse(seeded_store) -> None:
+    remote = TestClient(create_test_app(), client=("203.0.113.10", 50000))
+    assert remote.get("/admin/api/requests/pulse").status_code == 403
+
+
 def test_clear_requests(client, seeded_store) -> None:
     response = client.request("DELETE", "/admin/api/requests")
     assert response.status_code == 200

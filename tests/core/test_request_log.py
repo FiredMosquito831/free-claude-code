@@ -551,6 +551,133 @@ def test_prune_reclaims_file_space(tmp_path) -> None:
     assert sizes[-1] <= sizes[0] * 2
 
 
+def test_percentiles_on_empty_table_are_none(store: RequestLogStore) -> None:
+    """No rows at all must not error the new rank-lookup path."""
+    stats = store.stats()
+    assert stats["total"] == 0
+    assert stats["p50_duration_ms"] is None
+    assert stats["p95_duration_ms"] is None
+
+
+def test_percentiles_ignore_rows_without_duration(store: RequestLogStore) -> None:
+    """Rows with duration_ms IS NULL must not shift the rank computation."""
+    store.enqueue(_record("no-duration", duration_ms=None))
+    store.enqueue(_record("has-duration", duration_ms=42.0))
+    store.close()
+    stats = store.stats()
+    assert stats["total"] == 2
+    assert stats["p50_duration_ms"] == pytest.approx(42.0)
+    assert stats["p95_duration_ms"] == pytest.approx(42.0)
+
+
+def test_percentiles_match_old_interpolation_unfiltered_and_filtered(
+    store: RequestLogStore,
+) -> None:
+    """Pin the adaptive index-seek (unfiltered) vs single-sort (filtered) paths.
+
+    Expected values are hand-computed with the same formula the removed
+    ``_percentile`` used: ``position = fraction * (n - 1)``, interpolating
+    between the floor and ceiling ranks.
+    """
+    # provider "a": durations 10, 50, 90 (n=3) -> p50 index 1.0 = 50;
+    #   p95 position 1.9 interpolates rank1=50 and rank2=90: 50+40*0.9=86.0
+    store.enqueue(_record("a1", provider="a", duration_ms=10.0))
+    store.enqueue(_record("a2", provider="a", duration_ms=90.0))
+    store.enqueue(_record("a3", provider="a", duration_ms=50.0))
+    # provider "b": durations 20, 40 -- combine with "a" for the unfiltered set.
+    store.enqueue(_record("b1", provider="b", duration_ms=20.0))
+    store.enqueue(_record("b2", provider="b", duration_ms=40.0))
+    store.close()
+
+    # Unfiltered: combined sorted durations are 10, 20, 40, 50, 90 (n=5).
+    # p50 position 2.0 = index 2 = 40; p95 position 3.8 interpolates
+    # rank3=50 and rank4=90: 50+40*0.8=82.0. This path uses the index-seek
+    # branch of ``_percentiles`` (no WHERE clause).
+    unfiltered = store.stats()
+    assert unfiltered["p50_duration_ms"] == pytest.approx(40.0)
+    assert unfiltered["p95_duration_ms"] == pytest.approx(82.0)
+
+    # Filtered: this path uses the single-sort branch of ``_percentiles``
+    # (a WHERE clause is present), which must still match the same formula.
+    filtered = store.stats(provider="a")
+    assert filtered["p50_duration_ms"] == pytest.approx(50.0)
+    assert filtered["p95_duration_ms"] == pytest.approx(86.0)
+
+
+def test_stats_cache_evicts_least_recently_used(tmp_path) -> None:
+    """The stats cache must be bounded rather than growing without limit."""
+    from free_claude_code.core import request_log as request_log_module
+
+    store = RequestLogStore(tmp_path / "requests.db", max_rows=100)
+    try:
+        store.enqueue(_record("r1"))
+        store.close()
+        max_entries = request_log_module._STATS_CACHE_MAX_ENTRIES
+        # Fill the cache with distinct filter combinations, one past capacity.
+        for index in range(max_entries + 1):
+            store.stats(provider=f"provider-{index}")
+        with store._stats_lock:
+            assert len(store._stats_cache) == max_entries
+            # The oldest key (provider-0) was evicted; the newest survives.
+            assert ("provider-0", None, None, None, None, None, None, None) not in (
+                store._stats_cache
+            )
+            assert (
+                f"provider-{max_entries}",
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+            ) in store._stats_cache
+    finally:
+        store.close()
+
+
+def test_breakdown_truncation_flag(tmp_path) -> None:
+    """A breakdown beyond the cap must be truncated with a visible flag."""
+    from free_claude_code.core import request_log as request_log_module
+
+    store = RequestLogStore(tmp_path / "requests.db", max_rows=1000)
+    try:
+        limit = request_log_module._BREAKDOWN_LIMIT
+        for index in range(limit + 5):
+            store.enqueue(_record(f"r{index}", provider=f"provider-{index}"))
+        store.close()
+        stats = store.stats()
+        assert len(stats["by_provider"]) == limit
+        assert stats["by_provider_truncated"] is True
+        # Untruncated breakdowns still report the flag as False, not absent.
+        assert stats["by_model_truncated"] is False
+    finally:
+        store.close()
+
+
+def test_pulse_reports_total_and_last_ts(store: RequestLogStore) -> None:
+    base = time.time()
+    store.enqueue(_record("r1", ts_epoch=base))
+    store.enqueue(_record("r2", ts_epoch=base + 10))
+    store.close()
+    pulse = store.pulse()
+    assert pulse["total"] == 2
+    assert pulse["last_ts"] == pytest.approx(base + 10)
+
+
+def test_pulse_on_empty_table(store: RequestLogStore) -> None:
+    pulse = store.pulse()
+    assert pulse == {"total": 0, "last_ts": None}
+
+
+def test_pulse_applies_filters(store: RequestLogStore) -> None:
+    store.enqueue(_record("a", provider="p1"))
+    store.enqueue(_record("b", provider="p2"))
+    store.close()
+    assert store.pulse(provider="p1")["total"] == 1
+    assert store.pulse(provider="missing")["total"] == 0
+
+
 def test_stats_are_cached_within_ttl(store: RequestLogStore) -> None:
     store.enqueue(_record("r1"))
     store.close()

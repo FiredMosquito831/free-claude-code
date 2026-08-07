@@ -6,6 +6,7 @@ import queue
 import sqlite3
 import threading
 import time
+from collections import OrderedDict
 from collections.abc import Iterator
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -29,6 +30,13 @@ _WRITER_POLL_SECONDS = 0.25
 _QUEUE_MAX_SIZE = 10_000
 _STOP = object()
 _STATS_CACHE_TTL_SECONDS = 5.0
+# Bounds the stats cache to the most recently used filter combinations. Without
+# this, every distinct filter tuple a user tries leaks an entry holding a full
+# stats payload for the lifetime of the process.
+_STATS_CACHE_MAX_ENTRIES = 64
+# Caps each breakdown (by provider/model/key) so a gateway with hundreds of
+# distinct models does not return hundreds of rows on every poll.
+_BREAKDOWN_LIMIT = 50
 
 # Columns read for list views. Body columns are deliberately excluded and
 # replaced by SQL-side ``substr`` previews so list queries never load full
@@ -204,7 +212,11 @@ class RequestLogStore:
         self._inserts_since_prune = 0
         self._closed = threading.Event()
         self._stats_lock = threading.Lock()
-        self._stats_cache: dict[tuple[Any, ...], tuple[float, dict[str, Any]]] = {}
+        # OrderedDict as an LRU: ``move_to_end`` on every hit/insert keeps the
+        # least recently used filter combination at the front for eviction.
+        self._stats_cache: OrderedDict[
+            tuple[Any, ...], tuple[float, dict[str, Any]]
+        ] = OrderedDict()
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
         self._init_db()
         self._writer = threading.Thread(
@@ -637,8 +649,13 @@ class RequestLogStore:
         now = time.monotonic()
         with self._stats_lock:
             cached = self._stats_cache.get(cache_key)
-            if cached is not None and now - cached[0] < _STATS_CACHE_TTL_SECONDS:
-                return dict(cached[1])
+            if cached is not None:
+                if now - cached[0] < _STATS_CACHE_TTL_SECONDS:
+                    self._stats_cache.move_to_end(cache_key)
+                    return dict(cached[1])
+                # Expired: drop it now rather than waiting for LRU eviction to
+                # get around to it.
+                del self._stats_cache[cache_key]
         where, args = self._where(
             provider=provider,
             model=model,
@@ -673,18 +690,14 @@ class RequestLogStore:
                 """,
                 args,
             ).fetchone()
-            durations = [
-                row[0]
-                for row in conn.execute(
-                    f"SELECT duration_ms FROM requests{where}"
-                    f"{' AND' if where else ' WHERE'} duration_ms IS NOT NULL"
-                    " ORDER BY duration_ms",
-                    args,
-                ).fetchall()
-            ]
-            by_provider = self._breakdown(conn, "provider", where, args)
-            by_model = self._breakdown(conn, "resolved_model", where, args)
-            by_key = self._breakdown(conn, "key_label", where, args)
+            percentiles = self._percentiles(conn, where, args, (0.50, 0.95))
+            by_provider, by_provider_truncated = self._breakdown(
+                conn, "provider", where, args
+            )
+            by_model, by_model_truncated = self._breakdown(
+                conn, "resolved_model", where, args
+            )
+            by_key, by_key_truncated = self._breakdown(conn, "key_label", where, args)
             top_errors = [
                 {"message": row[0], "count": row[1]}
                 for row in conn.execute(
@@ -714,23 +727,68 @@ class RequestLogStore:
             "turns_with_tools": totals["turns_with_tools"] or 0,
             "turns_with_reasoning": totals["turns_with_reasoning"] or 0,
             "avg_duration_ms": _rounded(totals["avg_duration_ms"]),
-            "p50_duration_ms": _rounded(_percentile(durations, 0.50)),
-            "p95_duration_ms": _rounded(_percentile(durations, 0.95)),
+            "p50_duration_ms": _rounded(percentiles[0.50]),
+            "p95_duration_ms": _rounded(percentiles[0.95]),
             "avg_ttft_ms": _rounded(totals["avg_ttft_ms"]),
             "by_provider": by_provider,
+            "by_provider_truncated": by_provider_truncated,
             "by_model": by_model,
+            "by_model_truncated": by_model_truncated,
             "by_key": by_key,
+            "by_key_truncated": by_key_truncated,
             "series": series,
             "top_errors": top_errors,
         }
         with self._stats_lock:
             self._stats_cache[cache_key] = (now, payload)
+            self._stats_cache.move_to_end(cache_key)
+            while len(self._stats_cache) > _STATS_CACHE_MAX_ENTRIES:
+                self._stats_cache.popitem(last=False)
         return dict(payload)
+
+    def pulse(
+        self,
+        *,
+        provider: str | None = None,
+        model: str | None = None,
+        status: str | None = None,
+        endpoint: str | None = None,
+        key: str | None = None,
+        since: float | None = None,
+        until: float | None = None,
+        q: str | None = None,
+    ) -> dict[str, Any]:
+        """Return a cheap heartbeat: row count and latest timestamp for these filters.
+
+        Auto-refresh polls this instead of ``stats()``: a single COUNT/MAX query
+        lets the caller detect "nothing changed" without paying for percentiles,
+        breakdowns, or series buckets on every tick.
+        """
+        where, args = self._where(
+            provider=provider,
+            model=model,
+            status=status,
+            endpoint=endpoint,
+            key=key,
+            since=since,
+            until=until,
+            q=q,
+        )
+        with self._connection() as conn:
+            total, last_ts = conn.execute(
+                f"SELECT COUNT(*), MAX(ts_epoch) FROM requests{where}", args
+            ).fetchone()
+        return {"total": total or 0, "last_ts": last_ts}
 
     @staticmethod
     def _breakdown(
         conn: sqlite3.Connection, column: str, where: str, args: list[Any]
-    ) -> list[dict[str, Any]]:
+    ) -> tuple[list[dict[str, Any]], bool]:
+        """Return (rows, truncated) for a GROUP BY breakdown, capped at ``_BREAKDOWN_LIMIT``.
+
+        Fetches one row past the cap to detect truncation without a second
+        COUNT(DISTINCT ...) query, then trims it back off before returning.
+        """
         cursor = conn.execute(
             f"SELECT COALESCE({column}, '(unknown)') AS key, COUNT(*) AS requests,"
             " COALESCE(SUM(tokens_in),0) AS tokens_in,"
@@ -741,9 +799,12 @@ class RequestLogStore:
             " AS cache_reported,"
             " SUM(CASE WHEN status='error' THEN 1 ELSE 0 END) AS errors,"
             " AVG(duration_ms) AS avg_duration_ms"
-            f" FROM requests{where} GROUP BY key ORDER BY requests DESC",
-            args,
+            f" FROM requests{where} GROUP BY key ORDER BY requests DESC LIMIT ?",
+            [*args, _BREAKDOWN_LIMIT + 1],
         )
+        rows = cursor.fetchall()
+        truncated = len(rows) > _BREAKDOWN_LIMIT
+        rows = rows[:_BREAKDOWN_LIMIT]
         return [
             {
                 "key": row["key"],
@@ -756,8 +817,93 @@ class RequestLogStore:
                 "errors": row["errors"],
                 "avg_duration_ms": _rounded(row["avg_duration_ms"]),
             }
-            for row in cursor.fetchall()
-        ]
+            for row in rows
+        ], truncated
+
+    @staticmethod
+    def _percentiles(
+        conn: sqlite3.Connection,
+        where: str,
+        args: list[Any],
+        fractions: tuple[float, ...],
+    ) -> dict[float, float | None]:
+        """Compute percentiles without pulling every duration into Python.
+
+        SQLite has to sort to answer ``ORDER BY duration_ms``: the covering
+        stats index leads on ``ts_epoch``, and an index leading on
+        ``duration_ms`` is not worth having -- one was tried and made the whole
+        of ``stats()`` 2.2x slower, because the planner then preferred it for
+        the totals and breakdown aggregates it does not cover.
+
+        So this pays for that one sort, exactly like the code it replaces, and
+        takes its win elsewhere: ``_ranks_via_single_sort`` pushes a ``LIMIT``
+        down to the highest rank actually needed, instead of pulling every
+        duration in the window into a Python list to index into.
+
+        Interpolation uses the same formula as the removed ``_percentile``
+        helper, so results match its semantics exactly.
+        """
+        connector = " AND" if where else " WHERE"
+        count = conn.execute(
+            f"SELECT COUNT(*) FROM requests{where}{connector} duration_ms IS NOT NULL",
+            args,
+        ).fetchone()[0]
+        if not count:
+            return dict.fromkeys(fractions)
+
+        spans: dict[float, tuple[int, int, float]] = {}
+        needed_ranks: set[int] = set()
+        for fraction in fractions:
+            position = min(count - 1, max(0.0, fraction * (count - 1)))
+            lower_index = int(position)
+            upper_index = min(count - 1, lower_index + 1)
+            weight = position - lower_index
+            spans[fraction] = (lower_index, upper_index, weight)
+            needed_ranks.add(lower_index)
+            needed_ranks.add(upper_index)
+
+        ranks = RequestLogStore._ranks_via_single_sort(
+            conn, where, args, connector, needed_ranks
+        )
+
+        results: dict[float, float | None] = {}
+        for fraction, (lower_index, upper_index, weight) in spans.items():
+            lower_val = ranks[lower_index]
+            upper_val = ranks[upper_index]
+            results[fraction] = lower_val + (upper_val - lower_val) * weight
+        return results
+
+    @staticmethod
+    def _ranks_via_single_sort(
+        conn: sqlite3.Connection,
+        where: str,
+        args: list[Any],
+        connector: str,
+        needed_ranks: set[int],
+    ) -> dict[int, float]:
+        """Fetch every needed rank from one sorted pass, bounded by SQL LIMIT.
+
+        An earlier version sorted the full filtered set and broke out of a
+        Python loop once the highest needed rank had gone past. That was
+        measurably *slower* than the original full-pull-then-index code for a
+        selective filter: iterating a cursor row by row pays Python-level
+        ``__next__`` overhead per row, which added up to more than the cost of
+        ``fetchall()`` materialising the (smaller, filtered) list it replaced.
+
+        Pushing ``LIMIT <highest needed rank + 1>`` into the query instead
+        lets SQLite itself stop producing rows once it has enough -- for a
+        limit well under the row count it can often satisfy that with a
+        bounded in-memory sort rather than a full temp-b-tree sort of every
+        matching row -- and ``fetchall()`` on that bounded result stays a
+        single bulk C-level fetch, not a Python loop.
+        """
+        highest = max(needed_ranks)
+        rows = conn.execute(
+            f"SELECT duration_ms FROM requests{where}{connector}"
+            " duration_ms IS NOT NULL ORDER BY duration_ms LIMIT ?",
+            [*args, highest + 1],
+        ).fetchall()
+        return {rank: rows[rank][0] for rank in needed_ranks}
 
     @staticmethod
     def _series(
@@ -828,18 +974,6 @@ class RequestLogStore:
         with self._connection() as conn:
             cursor = conn.execute("DELETE FROM requests")
             return cursor.rowcount
-
-
-def _percentile(values: list[float], fraction: float) -> float | None:
-    """Return a linearly interpolated percentile from an ordered sample."""
-
-    if not values:
-        return None
-    position = min(len(values) - 1, max(0.0, fraction * (len(values) - 1)))
-    lower_index = int(position)
-    upper_index = min(len(values) - 1, lower_index + 1)
-    weight = position - lower_index
-    return values[lower_index] + (values[upper_index] - values[lower_index]) * weight
 
 
 def _rounded(value: float | None) -> float | None:
