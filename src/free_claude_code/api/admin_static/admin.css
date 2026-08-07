@@ -1248,7 +1248,7 @@ textarea:focus-visible,
 }
 
 .ws-key-label {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--font-mono);
   font-size: 13px;
   color: var(--text-strong);
 }
@@ -1288,8 +1288,10 @@ textarea:focus-visible,
   cursor: pointer;
   user-select: none;
   color: var(--muted);
-  font-size: 13px;
-  font-weight: 500;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 
 .ws-advanced summary:hover {
@@ -1366,6 +1368,13 @@ textarea:focus-visible,
   font-size: 13px;
 }
 
+/* Reality diverging from configuration is the one fact on this page that
+   should not read as neutral status text -- it means the line above it is
+   describing a request that predates the current setup. */
+.route-summary-main .route-summary-observed.route-summary-observed-drift {
+  color: var(--warn);
+}
+
 .route-summary-main .route-summary-observed {
   color: var(--text);
   font-family: var(--font-mono);
@@ -1418,6 +1427,110 @@ textarea:focus-visible,
     linear-gradient(180deg, var(--accent-muted), transparent 70%),
     var(--card);
   box-shadow: var(--glow-accent);
+}
+
+/* ------------------------------------------------- Web search: active route --
+   Fourteen providers compete for equal visual weight below. The fix is to
+   spend boldness in exactly one place: the route this install is actually
+   using, right now, at the top of the page. #webSearchRouteSummary reuses
+   the shared .route-summary card chrome (border/background/shadow) but grows
+   into a hero -- provider name set large, route path in mono, state chip
+   pinned above it. Every other provider card recedes a step instead (see
+   #webSearchGrid .provider-card:not(.effective-provider) below), so the
+   effective one reads first without hiding the rest. */
+
+#webSearchRouteSummary.route-summary {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+  padding: 22px 24px;
+}
+
+.ws-hero-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+}
+
+.ws-hero-provider {
+  margin: 0;
+  color: var(--text-strong);
+  font-size: 28px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  line-height: 1.15;
+}
+
+.ws-hero-path {
+  font-family: var(--font-mono);
+  font-size: 13px;
+}
+
+.ws-hero-path-label,
+.ws-hero-path-arrow,
+.ws-hero-path-fallback {
+  color: var(--muted);
+}
+
+/* The primary hop is the one actually taking requests; fallbacks after it
+   are a safety net, not the answer, so only the first hop is set at full
+   contrast weight. */
+.ws-hero-path-primary {
+  color: var(--text-strong);
+  font-weight: 600;
+}
+
+.provider-title-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+/* Names what the accent wash on .effective-provider means, instead of
+   leaving a reader to infer it from a border color alone. */
+.ws-active-badge {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border: 1px solid var(--accent-border);
+  border-radius: var(--radius-full);
+  background: var(--accent-muted);
+  color: var(--accent);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+/* An opacity dim was the first pass here and it was the safe move, not the
+   specific one: it fades the status pill along with everything else, which
+   is exactly the signal worth keeping at full strength on a card you might
+   be about to switch to (missing key vs. configured, still legible without
+   guessing through a filter). What actually distinguishes "the route this
+   install uses" from "a provider it could use" is presence, not brightness:
+   the effective card is the only one that gets to exist as a raised surface
+   (var(--card), border, glow). The rest sit flush with var(--panel), the
+   section's own background -- carried by nothing but their 1px border,
+   the way an inactive tab sits flush with its own bar. Content stays at
+   full opacity throughout, so this reads as "not selected", not "dimmed". */
+#webSearchGrid .provider-card:not(.effective-provider) {
+  background: var(--panel);
+}
+
+/* Provider identifiers (env var names, key labels) read as identifiers, not
+   prose, so they're set in the shared mono stack here. */
+#webSearchGrid .provider-meta {
+  font-family: var(--font-mono);
+}
+
+@media (max-width: 560px) {
+  .ws-hero-provider {
+    font-size: 22px;
+  }
 }
 
 .analytics-summary {
@@ -2066,9 +2179,9 @@ details.turn-pane > summary:focus-visible {
 .websearch-result-answer,
 .websearch-result-item {
   padding: 12px;
-  border: 1px solid var(--border, #333);
-  border-radius: 8px;
-  background: var(--panel, #1b1b1b);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--panel);
 }
 
 .websearch-result-answer strong,
@@ -2089,7 +2202,7 @@ details.turn-pane > summary:focus-visible {
 }
 
 .websearch-result-item small {
-  color: var(--muted, #888);
+  color: var(--muted);
 }
 
 @media (max-width: 760px) {
