@@ -38,7 +38,7 @@ Because the translation happens at the protocol level, streaming, tool use, reas
 Three consequences worth internalising before you start:
 
 1. **The server must be running.** It's a daemon, not a library. Close the terminal and your agent stops working.
-2. **Your agent's model picker lists FCC's catalog**, not Anthropic's. Selecting "Sonnet" routes to whatever *you* mapped Sonnet to.
+2. **Your agent's model picker can list FCC's catalog**, not Anthropic's. Selecting "Sonnet" routes to whatever *you* mapped Sonnet to. Codex and Pi's pickers always do this; Claude Code's needs model discovery turned on (`fcc-claude --discover-models` or `fcc-claude-old`) — see [§4](#4-tutorial-connect-claude-code-cli).
 3. **Credentials live server-side.** Your agent holds a token that only authenticates it to the proxy; the real provider keys never leave your machine.
 
 <div align="center">
@@ -182,11 +182,11 @@ If it still shows Anthropic's own endpoint, the settings file wasn't picked up �
 
 ### Step 4 — pick a model
 
-No model overrides are needed. FCC exposes native **Fable / Opus / Sonnet / Haiku** tier models, so Claude Code's built-in picker works as-is:
+No model overrides are needed — FCC exposes native **Fable / Opus / Sonnet / Haiku** tier models, so you can type a tier name at the `/model` prompt either way. Claude Code's built-in *picker*, though, only lists the FCC catalog once model discovery is on: add `"CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY": "1"` to the `env` block from Step 2, or use `fcc-claude --discover-models` from the Shortcut below.
 
 <div align="center">
   <img src="../assets/cc-model-picker.png" alt="Claude Code model picker showing FCC gateway models" width="720">
-  <p><em><code>/model</code> in Claude Code, listing the FCC catalog.</em></p>
+  <p><em><code>/model</code> in Claude Code, listing the FCC catalog (model discovery on).</em></p>
 </div>
 
 ### Shortcut
@@ -200,10 +200,19 @@ fcc-claude
 
 `fcc-claude` only sets `ANTHROPIC_BASE_URL` and `ANTHROPIC_AUTH_TOKEN` — it
 doesn't touch anything else, since `~/.claude/settings.json` (Step 2 above)
-takes precedence over environment variables anyway. If you want the previous
-`fcc-claude` behavior — gateway model discovery enabled, the auto-compact
-window set, telemetry/autoupdate disabled, and inherited `ANTHROPIC_*`
-variables cleared — run `fcc-claude-old` instead.
+takes precedence over environment variables anyway. This also means its
+native model picker stays empty by default; pass `--discover-models` to have
+`fcc-claude` additionally set `CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1`
+for the session (an extra request to the proxy on every launch, so it's
+opt-in):
+
+```bash
+fcc-claude --discover-models
+```
+
+If you want the previous `fcc-claude` behavior — gateway model discovery
+enabled, the auto-compact window set, telemetry/autoupdate disabled, and
+inherited `ANTHROPIC_*` variables cleared — run `fcc-claude-old` instead.
 
 Official references: [Claude Code LLM gateway docs](https://code.claude.com/docs/en/llm-gateway-connect) · [settings.json reference](https://code.claude.com/docs/en/settings)
 

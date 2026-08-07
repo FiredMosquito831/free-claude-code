@@ -32,7 +32,7 @@ Run your coding agents with free, paid, or local models. Choose and validate pro
 
 <div align="center">
   <img src="assets/cc-model-picker.png" alt="Claude Code model picker showing gateway models" width="700">
-  <p><em>Claude Code native <code>/model</code> picker with FCC gateway models.</em></p>
+  <p><em>Claude Code native <code>/model</code> picker with FCC gateway models — requires <code>fcc-claude --discover-models</code> (or <code>fcc-claude-old</code>).</em></p>
 </div>
 
 <div align="center">
@@ -46,7 +46,7 @@ Run your coding agents with free, paid, or local models. Choose and validate pro
 
 | Area | What you get |
 | --- | --- |
-| **Coding agents** | Launch Claude Code with `fcc-claude`, Codex with `fcc-codex`, or Pi with `fcc-pi`; each agent's native model picker works against the FCC catalog. |
+| **Coding agents** | Launch Claude Code with `fcc-claude`, Codex with `fcc-codex`, or Pi with `fcc-pi`; Codex and Pi's native model pickers always list the FCC catalog, Claude Code's needs `fcc-claude --discover-models` (or `fcc-claude-old`). |
 | **Model providers** | 27 cloud and local providers, including Kimi For Coding and an experimental ChatGPT OAuth provider. Switch and validate providers from the Admin UI. |
 | **Model-tier routing** | Route Fable, Opus, Sonnet, Haiku, and fallback traffic to different models. |
 | **Protocol fidelity** | Streaming, tool use, reasoning, and image input preserved across compatible models, with configurable reasoning control. |
@@ -171,10 +171,14 @@ fcc-claude
 ```
 
 `fcc-claude` sets only `ANTHROPIC_BASE_URL` and `ANTHROPIC_AUTH_TOKEN` on top of
-your inherited shell environment — nothing else is changed or stripped. If you
-want the previous behavior (also enables gateway model discovery, sets the
-auto-compact window, disables telemetry/autoupdate, and clears any inherited
-`ANTHROPIC_*` variables), use `fcc-claude-old` instead.
+your inherited shell environment — nothing else is changed or stripped. This
+means its native model picker does **not** list the FCC catalog by default,
+since that requires an extra request to the proxy on every launch; pass
+`fcc-claude --discover-models` to opt in without adopting the rest of the
+legacy behavior. If you want the previous behavior (also enables gateway
+model discovery, sets the auto-compact window, disables telemetry/autoupdate,
+and clears any inherited `ANTHROPIC_*` variables), use `fcc-claude-old`
+instead.
 
 Codex:
 
@@ -188,7 +192,7 @@ Pi:
 fcc-pi
 ```
 
-All three launchers use the current Admin UI settings. Use the agent's model picker to choose from the models FCC exposes. Normal CLI arguments still work, for example:
+All three launchers use the current Admin UI settings. Codex and Pi's native model pickers always list the models FCC exposes; for Claude Code, add `--discover-models` to `fcc-claude` (or use `fcc-claude-old`) to populate its picker the same way — otherwise pick a model tier by name. Normal CLI arguments still work, for example:
 
 ```bash
 fcc-codex exec "hello"
@@ -215,11 +219,11 @@ Still stuck? Run the installer with `--dry-run` (PowerShell: `-DryRun`) and shar
 
 ## Connect Claude Code (CLI & Desktop)
 
-Two ways to point Claude Code at your local FCC server (`http://127.0.0.1:8082`, auth token `freecc` — match these to the Admin UI if you changed them). No custom model overrides are needed in either case: FCC exposes native **Fable / Opus / Sonnet / Haiku** tier models, so Claude Code's built-in model picker works as-is.
+Two ways to point Claude Code at your local FCC server (`http://127.0.0.1:8082`, auth token `freecc` — match these to the Admin UI if you changed them). FCC exposes native **Fable / Opus / Sonnet / Haiku** tier models, so no custom model overrides are needed either way — but Claude Code's built-in picker only *lists* them once model discovery is turned on (below).
 
 ### Claude Code CLI
 
-Edit `~/.claude/settings.json` (`%USERPROFILE%\.claude\settings.json` on Windows) and **add the `env` block — or replace these two values if they already exist**:
+Edit `~/.claude/settings.json` (`%USERPROFILE%\.claude\settings.json` on Windows) and **add the `env` block — or replace these values if they already exist**:
 
 ```json
 {
@@ -234,6 +238,7 @@ Notes:
 
 - Keep any other keys you already have in the file — just merge the `env` entries.
 - `ANTHROPIC_AUTH_TOKEN` sends the key as a bearer token (what FCC expects). The settings file wins over shell exports.
+- This gives you a working proxy connection, but the native `/model` picker stays empty until model discovery is on — add `"CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY": "1"` to the same `env` block, or launch with `fcc-claude --discover-models` instead of editing the file.
 - Restart Claude Code after editing, then verify with `/status` — it should show `Anthropic base URL: http://127.0.0.1:8082` and your auth token.
 - Official reference: [Claude Code LLM gateway docs](https://code.claude.com/docs/en/llm-gateway-connect) · [settings.json reference](https://code.claude.com/docs/en/settings).
 

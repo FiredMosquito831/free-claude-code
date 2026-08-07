@@ -886,7 +886,10 @@ Code proxy environment policies used by FCC-launched Claude processes:
   stripped or otherwise added. It exists because Claude Code's
   `~/.claude/settings.json` takes precedence over environment variables, so
   users who have configured that file don't need — and shouldn't have —
-  their environment rewritten.
+  their environment rewritten. A keyword-only `enable_model_discovery` flag
+  (default `False`) additionally sets
+  `CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1`, which `fcc-claude` wires to
+  its `--discover-models` argument.
 - `build_claude_proxy_env` is the legacy, more aggressive policy: it strips
   inherited `ANTHROPIC_*` variables, sets `ANTHROPIC_BASE_URL`, enables gateway
   model discovery, configures the auto-compact window, disables nonessential
@@ -900,9 +903,18 @@ reaches the proxy instead of stopping at its login gate.
 helper parameterized by env builder:
 
 - `fcc-claude` (`launch`) applies `build_minimal_claude_proxy_env` without
-  changing the user's Claude command arguments.
+  changing the user's Claude command arguments. It additionally recognizes an
+  FCC-only `--discover-models` flag, stripped from argv before Claude Code
+  ever sees it, that passes `enable_model_discovery=True` to the env builder
+  so `CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1` is set — without it,
+  Claude Code's native model picker does not fetch the FCC catalog. The flag
+  is only recognized before the first bare `--` argument separator; a literal
+  `--discover-models` after `--` (e.g. inside a `-p` prompt) passes through
+  untouched.
 - `fcc-claude-old` (`launch_legacy`) applies `build_claude_proxy_env`,
-  preserving the previous `fcc-claude` behavior under a new name.
+  preserving the previous `fcc-claude` behavior under a new name; it does not
+  gain the `--discover-models` flag since gateway model discovery is already
+  always on for it.
 
 [cli/launchers/codex.py](src/free_claude_code/cli/launchers/codex.py) owns the installed
 `fcc-codex` launcher:
