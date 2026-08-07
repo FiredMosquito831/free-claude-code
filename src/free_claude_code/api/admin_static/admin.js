@@ -343,7 +343,33 @@ function renderOnboarding() {
   const list = byId("getStartedSteps");
   if (!progress || !list || !onboarding) return;
 
-  progress.textContent = `${onboarding.required_done} of ${onboarding.required_total} essential steps done`;
+  // A number alone is easy to skim past; a filled bar reads as progress at a
+  // glance and is the one place this view spends visual weight.
+  progress.innerHTML = "";
+  const progressLabel = document.createElement("span");
+  progressLabel.className = "get-started-progress-label";
+  progressLabel.textContent = `${onboarding.required_done} of ${onboarding.required_total} essential steps done`;
+  progress.appendChild(progressLabel);
+
+  const progressBar = document.createElement("div");
+  progressBar.className = "get-started-progress-bar";
+  progressBar.setAttribute("role", "progressbar");
+  progressBar.setAttribute("aria-valuemin", "0");
+  progressBar.setAttribute("aria-valuemax", String(onboarding.required_total));
+  progressBar.setAttribute("aria-valuenow", String(onboarding.required_done));
+  progressBar.setAttribute(
+    "aria-label",
+    `${onboarding.required_done} of ${onboarding.required_total} essential steps done`,
+  );
+  const progressFill = document.createElement("div");
+  progressFill.className = "get-started-progress-fill";
+  const pct =
+    onboarding.required_total > 0
+      ? (onboarding.required_done / onboarding.required_total) * 100
+      : 0;
+  progressFill.style.width = `${pct}%`;
+  progressBar.appendChild(progressFill);
+  progress.appendChild(progressBar);
 
   // Expanded/collapsed is view state, not persisted. `null` means nothing has
   // been chosen yet, so auto-select the next action. When a step the app chose

@@ -2434,6 +2434,10 @@ details.turn-pane > summary:focus-visible {
   background: var(--card);
 }
 
+.guide-toc-eyebrow {
+  margin: 2px 10px 8px;
+}
+
 .guide-toc a {
   color: var(--muted);
   text-decoration: none;
@@ -2447,6 +2451,11 @@ details.turn-pane > summary:focus-visible {
 .guide-toc a:focus-visible {
   color: var(--text-strong);
   background: rgba(255, 255, 255, 0.05);
+}
+
+.guide-toc a:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
 }
 
 /* Which section you are actually reading. */
@@ -2645,10 +2654,33 @@ details.turn-pane > summary:focus-visible {
 
 /* Get Started checklist */
 .get-started-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 20px;
+}
+
+.get-started-progress-label {
   color: var(--muted);
   font-size: 13px;
   font-weight: 600;
-  margin-bottom: 16px;
+}
+
+/* The one bold move on this view: progress reads as a filled bar, not just
+   a number, so "almost done" and "just started" are visible before you read
+   a single word. */
+.get-started-progress-bar {
+  height: 8px;
+  border-radius: var(--radius-full);
+  background: var(--panel-strong);
+  overflow: hidden;
+}
+
+.get-started-progress-fill {
+  height: 100%;
+  border-radius: var(--radius-full);
+  background: var(--accent);
+  transition: width var(--transition-normal);
 }
 
 .get-started-steps {
@@ -2662,7 +2694,7 @@ details.turn-pane > summary:focus-visible {
 
 .get-started-step {
   border: 1px solid var(--line);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-lg);
   background: var(--card);
   overflow: hidden;
 }
@@ -2758,74 +2790,17 @@ details.turn-pane > summary:focus-visible {
   }
 }
 
-/* --------------------------------------------------------------- Failover --
-   A fallback that quietly works still changes what answered a request, so it
-   has to be visible: a badge on the row that was diverted, and a panel
-   naming which primary is failing and what covered for it. */
+@media (prefers-reduced-motion: reduce) {
+  .onboarding-highlight {
+    animation: none;
+    box-shadow: 0 0 0 3px var(--accent-border);
+  }
 
-.fallback-badge {
-  margin-left: 8px;
-  padding: 2px 7px;
-  border: 1px solid var(--warn-border);
-  border-radius: var(--radius-full);
-  background: var(--warn-bg);
-  color: var(--warn);
-  font-family: var(--font-sans);
-  font-size: 10.5px;
-  font-weight: 700;
-  letter-spacing: 0.02em;
-  white-space: nowrap;
-}
+  .get-started-progress-fill {
+    transition: none;
+  }
 
-.fallback-route {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 8px 0;
-  border-bottom: 1px solid var(--line);
-}
-
-.fallback-route:last-child {
-  border-bottom: 0;
-}
-
-.fallback-route-path {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-  flex-wrap: wrap;
-}
-
-.fallback-route-path code {
-  font-family: var(--font-mono);
-  font-size: 11.5px;
-  color: var(--muted);
-  word-break: break-all;
-}
-
-/* The model that actually answered is the one worth reading first. */
-.fallback-route-path code.fallback-route-served {
-  color: var(--text);
-}
-
-.fallback-route-arrow {
-  color: var(--warn);
-  font-size: 13px;
-}
-
-.fallback-route-count {
-  flex: 0 0 auto;
-  color: var(--text-strong);
-  font-size: 13px;
-  font-weight: 700;
-  font-variant-numeric: tabular-nums;
-}
-
-.analytics-empty {
-  margin: 4px 0 0;
-  color: var(--muted);
-  font-size: 12.5px;
-  line-height: 1.5;
+  .get-started-step-chevron {
+    transition: none;
+  }
 }
