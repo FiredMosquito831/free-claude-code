@@ -52,7 +52,8 @@ SECTIONS: tuple[ConfigSectionSpec, ...] = (
     ConfigSectionSpec(
         "models",
         "Model Routing",
-        "Search discovered provider models or enter a provider/model slug.",
+        "Where each Claude tier sends its requests, and what covers it when "
+        "that model cannot.",
     ),
     ConfigSectionSpec(
         "reasoning",
@@ -107,7 +108,6 @@ _NON_PROVIDER_FIELDS: tuple[ConfigFieldSpec, ...] = (
         "model",
         settings_attr="model",
         default="nvidia_nim/nvidia/nemotron-3-super-120b-a12b",
-        description="Fallback provider/model route for all Claude model names.",
     ),
     ConfigFieldSpec(
         "MODEL_FALLBACKS",
@@ -115,10 +115,6 @@ _NON_PROVIDER_FIELDS: tuple[ConfigFieldSpec, ...] = (
         "models",
         "model_chain",
         settings_attr="model_fallbacks",
-        description=(
-            "Tried in order when the Default Model cannot serve a request. "
-            "Used by any route that has no override of its own."
-        ),
     ),
     ConfigFieldSpec(
         "MODEL_FABLE",
@@ -126,7 +122,6 @@ _NON_PROVIDER_FIELDS: tuple[ConfigFieldSpec, ...] = (
         "models",
         "optional_model",
         settings_attr="model_fable",
-        description="Select None to use the Default Model for Fable requests.",
     ),
     ConfigFieldSpec(
         "MODEL_FABLE_FALLBACKS",
@@ -134,7 +129,6 @@ _NON_PROVIDER_FIELDS: tuple[ConfigFieldSpec, ...] = (
         "models",
         "model_chain",
         settings_attr="model_fable_fallbacks",
-        description="Tried in order when the Fable override cannot serve a request.",
     ),
     ConfigFieldSpec(
         "MODEL_OPUS",
@@ -142,7 +136,6 @@ _NON_PROVIDER_FIELDS: tuple[ConfigFieldSpec, ...] = (
         "models",
         "optional_model",
         settings_attr="model_opus",
-        description="Select None to use the Default Model for Opus requests.",
     ),
     ConfigFieldSpec(
         "MODEL_OPUS_FALLBACKS",
@@ -150,7 +143,6 @@ _NON_PROVIDER_FIELDS: tuple[ConfigFieldSpec, ...] = (
         "models",
         "model_chain",
         settings_attr="model_opus_fallbacks",
-        description="Tried in order when the Opus override cannot serve a request.",
     ),
     ConfigFieldSpec(
         "MODEL_SONNET",
@@ -158,7 +150,6 @@ _NON_PROVIDER_FIELDS: tuple[ConfigFieldSpec, ...] = (
         "models",
         "optional_model",
         settings_attr="model_sonnet",
-        description="Select None to use the Default Model for Sonnet requests.",
     ),
     ConfigFieldSpec(
         "MODEL_SONNET_FALLBACKS",
@@ -166,7 +157,6 @@ _NON_PROVIDER_FIELDS: tuple[ConfigFieldSpec, ...] = (
         "models",
         "model_chain",
         settings_attr="model_sonnet_fallbacks",
-        description="Tried in order when the Sonnet override cannot serve a request.",
     ),
     ConfigFieldSpec(
         "MODEL_HAIKU",
@@ -174,7 +164,6 @@ _NON_PROVIDER_FIELDS: tuple[ConfigFieldSpec, ...] = (
         "models",
         "optional_model",
         settings_attr="model_haiku",
-        description="Select None to use the Default Model for Haiku requests.",
     ),
     ConfigFieldSpec(
         "MODEL_HAIKU_FALLBACKS",
@@ -182,7 +171,6 @@ _NON_PROVIDER_FIELDS: tuple[ConfigFieldSpec, ...] = (
         "models",
         "model_chain",
         settings_attr="model_haiku_fallbacks",
-        description="Tried in order when the Haiku override cannot serve a request.",
     ),
     ConfigFieldSpec(
         "MODEL_VISION",
@@ -190,11 +178,6 @@ _NON_PROVIDER_FIELDS: tuple[ConfigFieldSpec, ...] = (
         "models",
         "optional_model",
         settings_attr="model_vision",
-        description=(
-            "Serves requests containing an image when the model the route "
-            "picked is known not to accept images. Leave as None to send "
-            "images to whatever the route resolves to."
-        ),
     ),
     ConfigFieldSpec(
         "REASONING_POLICY",
