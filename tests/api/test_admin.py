@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -1511,3 +1512,47 @@ def test_admin_static_keeps_every_field_input_in_the_document():
 
     # And the chain editor placing its own input, so the intent stays local.
     assert "this.element.append(this.input, this.rowsEl, this.addButton);" in script
+
+
+def test_admin_static_styles_every_class_the_script_emits():
+    """No class may be emitted by the script without a rule in the stylesheet.
+
+    An unstyled class renders as unformatted content rather than an error, so
+    losing a block of CSS is invisible to every other check: the page still
+    loads, the tests still pass, and only a person looking at it notices. A
+    careless conflict resolution dropped the whole failover block exactly that
+    way and it reached main.
+
+    Scoped to the feature prefixes rather than every class in the file, so it
+    stays a real assertion instead of a list nobody maintains.
+    """
+    static = Path("src/free_claude_code/api/admin_static")
+    script = (static / "admin.js").read_text(encoding="utf-8")
+    styles = (static / "admin.css").read_text(encoding="utf-8")
+
+    prefixes = ("fallback-", "route-", "get-started-", "ws-", "model-chain-")
+    emitted: set[str] = set()
+    # Template literals and plain strings are matched separately: one class
+    # covering both would stop at the first quote *inside* an interpolation and
+    # capture a fragment that was never a class name.
+    for match in re.finditer(r"className = (?:`([^`]*)`|\"([^\"]*)\")", script):
+        raw = match.group(1) if match.group(1) is not None else match.group(2)
+        # `class${cond ? " a" : " b"}` carries its modifiers inside the
+        # interpolation; drop those so the base class is what gets checked.
+        literal = re.sub(r"\$\{[^}]*\}", " ", raw)
+        # A nested template literal leaves an unterminated `${` behind, since
+        # the capture stopped at the inner backtick. Cut from there rather
+        # than reporting the fragment as an unstyled class -- the test should
+        # not dictate how the script writes its interpolations.
+        literal = literal.split("${")[0]
+        emitted.update(name for name in literal.split() if name.startswith(prefixes))
+    for match in re.finditer(r'classList\.add\("([^"]+)"\)', script):
+        if match.group(1).startswith(prefixes):
+            emitted.add(match.group(1))
+
+    unstyled = sorted(
+        name
+        for name in emitted
+        if not re.search(rf"\.{re.escape(name)}[\s,:{{]", styles)
+    )
+    assert unstyled == [], f"emitted by admin.js with no CSS rule: {unstyled}"
