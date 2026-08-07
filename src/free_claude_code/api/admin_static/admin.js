@@ -489,7 +489,9 @@ function renderField(field) {
   const control =
     field.type === "model" || field.type === "optional_model"
       ? new ModelCombobox(input, field).element
-      : input;
+      : field.type === "model_chain"
+        ? new ModelChainEditor(input, field).element
+        : input;
   wrapper.append(label, control);
   if (field.description) {
     const description = document.createElement("div");
@@ -798,6 +800,16 @@ function inputForField(field) {
     return input;
   }
 
+  if (field.type === "model_chain") {
+    // Wire value is the comma-joined chain string; the chain editor UI
+    // (built in renderField) reads/writes this hidden input so the normal
+    // dirty-state/apply machinery needs no special-casing for this type.
+    const input = document.createElement("input");
+    input.type = "hidden";
+    input.value = field.value || "";
+    return input;
+  }
+
   const input = document.createElement("input");
   input.type = field.type === "number" ? "number" : "text";
   if (field.type === "secret") {
@@ -990,6 +1002,147 @@ class ModelCombobox {
     } else if (this.isOpen && event.key === "Tab") {
       this.close();
     }
+  }
+}
+
+// Renders a "model_chain" field (e.g. MODEL_FALLBACKS) as an ordered list of
+// rows, each reusing ModelCombobox for search/autocomplete. Keeps the field's
+// hidden <input> (data-key/data-original/data-field-type) as the single
+// source of truth for changedValues()/apply; rows themselves carry no
+// data-key so they never get picked up as standalone settings.
+class ModelChainEditor {
+  constructor(input, field) {
+    this.input = input;
+    this.field = field;
+    this.rows = [];
+    this.rowSeq = 0;
+
+    this.element = document.createElement("div");
+    this.element.className = "model-chain-editor";
+
+    this.rowsEl = document.createElement("div");
+    this.rowsEl.className = "model-chain-rows";
+
+    this.addButton = document.createElement("button");
+    this.addButton.type = "button";
+    this.addButton.className = "secondary-button model-chain-add";
+    this.addButton.textContent = "Add fallback";
+    this.addButton.setAttribute("aria-label", `Add fallback to ${field.label}`);
+    this.addButton.addEventListener("click", () => this.addRow("", true));
+
+    this.element.append(this.rowsEl, this.addButton);
+
+    // Seed rows from the current value without touching the hidden input or
+    // dirty state - this is initial render, not a user edit.
+    this.parseValue(input.value).forEach((value) => this.addRow(value, false));
+  }
+
+  parseValue(value) {
+    return String(value || "")
+      .split(",")
+      .map((entry) => entry.trim())
+      .filter(Boolean);
+  }
+
+  syncValue() {
+    this.input.value = this.rows
+      .map((row) => row.combobox.input.value.trim())
+      .filter(Boolean)
+      .join(",");
+    updateDirtyState();
+  }
+
+  addRow(value, notify) {
+    const row = {};
+    const rowField = {
+      type: "model",
+      key: `${this.field.key}__chain_${this.rowSeq++}`,
+      label: `${this.field.label} fallback`,
+    };
+
+    const rowInput = document.createElement("input");
+    rowInput.type = "text";
+    rowInput.autocomplete = "off";
+    rowInput.value = value;
+    // No data-key: this row is not an independent setting, only a fragment
+    // of the parent hidden input's comma-joined value.
+
+    const combobox = new ModelCombobox(rowInput, rowField);
+    rowInput.addEventListener("input", () => this.syncValue());
+    rowInput.addEventListener("change", () => this.syncValue());
+
+    const numberEl = document.createElement("span");
+    numberEl.className = "model-chain-index";
+    numberEl.setAttribute("aria-hidden", "true");
+
+    const upButton = document.createElement("button");
+    upButton.type = "button";
+    upButton.className = "ghost-button model-chain-move";
+    upButton.textContent = "↑";
+    upButton.addEventListener("click", () => this.move(row, -1));
+
+    const downButton = document.createElement("button");
+    downButton.type = "button";
+    downButton.className = "ghost-button model-chain-move";
+    downButton.textContent = "↓";
+    downButton.addEventListener("click", () => this.move(row, 1));
+
+    const removeButton = document.createElement("button");
+    removeButton.type = "button";
+    removeButton.className = "ghost-button model-chain-remove";
+    removeButton.textContent = "Remove";
+    removeButton.addEventListener("click", () => this.removeRow(row));
+
+    const wrapper = document.createElement("div");
+    wrapper.className = "model-chain-row";
+    wrapper.append(numberEl, combobox.element, upButton, downButton, removeButton);
+
+    Object.assign(row, { wrapper, combobox, numberEl, upButton, downButton, removeButton });
+    this.rows.push(row);
+    this.rowsEl.appendChild(wrapper);
+    this.renumber();
+    if (notify) {
+      this.syncValue();
+      rowInput.focus();
+    }
+  }
+
+  removeRow(row) {
+    const index = this.rows.indexOf(row);
+    if (index === -1) return;
+    this.rows.splice(index, 1);
+    row.wrapper.remove();
+    state.modelComboboxes.delete(row.combobox);
+    this.renumber();
+    this.syncValue();
+  }
+
+  move(row, offset) {
+    const index = this.rows.indexOf(row);
+    const target = index + offset;
+    if (index === -1 || target < 0 || target >= this.rows.length) return;
+    this.rows.splice(index, 1);
+    this.rows.splice(target, 0, row);
+    // Re-append in the new order; appendChild moves existing nodes rather
+    // than duplicating them, so this is enough to reorder the DOM.
+    this.rows.forEach((item) => this.rowsEl.appendChild(item.wrapper));
+    this.renumber();
+    this.syncValue();
+  }
+
+  renumber() {
+    this.rows.forEach((row, index) => {
+      row.numberEl.textContent = String(index + 1);
+      row.upButton.disabled = index === 0;
+      row.upButton.setAttribute("aria-label", `Move fallback ${index + 1} up`);
+      row.downButton.disabled = index === this.rows.length - 1;
+      row.downButton.setAttribute("aria-label", `Move fallback ${index + 1} down`);
+      row.removeButton.setAttribute("aria-label", `Remove fallback ${index + 1}`);
+      row.combobox.input.setAttribute(
+        "aria-label",
+        `${this.field.label} fallback ${index + 1}`,
+      );
+    });
   }
 }
 

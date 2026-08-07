@@ -3,6 +3,10 @@
 import os
 from typing import Any
 
+from free_claude_code.config.model_refs import (
+    format_model_ref_list,
+    parse_model_ref_list,
+)
 from free_claude_code.config.paths import managed_env_path
 
 from .manifest import (
@@ -34,6 +38,21 @@ def normalize_for_env(value: Any) -> str:
     if isinstance(value, bool):
         return "true" if value else "false"
     return str(value)
+
+
+def normalize_field_value(field: ConfigFieldSpec, value: Any) -> str:
+    """Normalize a submitted admin value for its field type.
+
+    ``Settings`` canonicalises a fallback chain when it loads it, so persisting
+    the raw submission would leave the dashboard showing a value that differs
+    from the one actually in effect. Normalizing on the way in keeps the stored
+    value and the running value the same string.
+    """
+
+    normalized = normalize_for_env(value)
+    if field.field_type == "model_chain":
+        return format_model_ref_list(parse_model_ref_list(normalized))
+    return normalized
 
 
 def display_value(field: ConfigFieldSpec, value: str) -> str:

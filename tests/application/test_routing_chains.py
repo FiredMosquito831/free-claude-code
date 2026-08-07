@@ -5,9 +5,9 @@ import pytest
 from free_claude_code.application.routing import ModelRouter
 from free_claude_code.config.reasoning import ReasoningPreference
 from free_claude_code.config.settings import Settings
-from free_claude_code.core.anthropic.models import Message, MessagesRequest
+from free_claude_code.core.anthropic.models import MessagesRequest
 
-_IMAGE_BLOCK = {
+_IMAGE_BLOCK: dict[str, object] = {
     "type": "image",
     "source": {"type": "base64", "media_type": "image/png", "data": "iVBORw0KGgo="},
 }
@@ -39,7 +39,9 @@ def _request(*, image: bool = False, model: str = "claude-opus-4") -> MessagesRe
     content: list[dict[str, object]] = [{"type": "text", "text": "describe this"}]
     if image:
         content.append(_IMAGE_BLOCK)
-    return MessagesRequest(model=model, messages=[Message(role="user", content=content)])
+    return MessagesRequest.model_validate(
+        {"model": model, "messages": [{"role": "user", "content": content}]}
+    )
 
 
 def _refs(router: ModelRouter, request: MessagesRequest) -> tuple[str, ...]:
