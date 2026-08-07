@@ -217,7 +217,8 @@ def test_admin_static_exposes_professional_observability_controls():
     assert "stats?.dropped_records" in script
     assert "effectiveWebSearchProvider" in script
     assert "WEB_SEARCH_FALLBACK_POLICY" in script
-    assert "Configured route:" in script
+    assert "ws-hero-path-primary" in script
+    assert "ws-hero-path-fallback" in script
     assert '"Logical searches"' in script
     assert '"Fallback rate"' in script
     assert '"Terminal route outcomes"' in script

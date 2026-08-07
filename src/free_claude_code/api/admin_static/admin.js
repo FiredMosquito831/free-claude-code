@@ -1857,27 +1857,13 @@ function webSearchProviderMeta(provider, activeSelection, effectiveProvider) {
   return parts.join(" · ");
 }
 
-function renderWebSearchRouteSummary(providers, activeSelection, effectiveProvider) {
-  const summary = byId("webSearchRouteSummary");
-  if (!summary) return;
+// "What should happen" -- the configured route, in try-order -- is needed by
+// both the hero headline and the observed-route line below it. Factored out
+// so the two can't drift into two slightly different definitions of "the
+// route" as the manifest evolves.
+function webSearchConfiguredRoute(providers, activeSelection, effectiveProvider) {
   const fallbackPolicy =
     state.fields.get("WEB_SEARCH_FALLBACK_POLICY")?.value || "auto";
-  const effectiveDescriptor = providers.find(
-    (provider) => provider.id === effectiveProvider,
-  );
-  const providerLabel = (providerId) =>
-    providerId === "legacy"
-      ? "Legacy DuckDuckGo scraper"
-      : providers.find((provider) => provider.id === providerId)?.label || providerId;
-  const selectionLabel =
-    activeSelection === "auto"
-      ? "Auto"
-      : activeSelection === "off"
-        ? "Legacy compatibility"
-        : activeSelection === "disabled"
-          ? "Disabled"
-          : providers.find((provider) => provider.id === activeSelection)?.label ||
-            activeSelection;
   const resolvedPolicy =
     fallbackPolicy === "auto"
       ? activeSelection === "auto"
@@ -1899,25 +1885,49 @@ function renderWebSearchRouteSummary(providers, activeSelection, effectiveProvid
     }
     if (resolvedPolicy === "legacy") routeIds.push("legacy");
   }
-  const routeLabel =
-    routeIds[0] === "disabled"
-      ? "Disabled"
-      : routeIds.map(providerLabel).join(" → ");
-  summary.innerHTML = "";
-  const route = document.createElement("div");
-  route.className = "route-summary-main";
-  const title = document.createElement("strong");
-  title.textContent = `Configured route: ${routeLabel}`;
-  const detail = document.createElement("span");
-  detail.textContent =
-    `Selection: ${selectionLabel} · Fallback: ${fallbackPolicy}` +
-    (fallbackPolicy === "auto" ? ` (resolves to ${resolvedPolicy})` : "") +
-    " · Configuration errors stop the route";
-  route.append(title, detail);
-  const note = document.createElement("span");
+  return { fallbackPolicy, resolvedPolicy, routeIds };
+}
+
+function renderWebSearchRouteSummary(providers, activeSelection, effectiveProvider) {
+  const summary = byId("webSearchRouteSummary");
+  if (!summary) return;
+  const effectiveDescriptor = providers.find(
+    (provider) => provider.id === effectiveProvider,
+  );
+  const providerLabel = (providerId) =>
+    providerId === "legacy"
+      ? "Legacy DuckDuckGo scraper"
+      : providers.find((provider) => provider.id === providerId)?.label || providerId;
+  const selectionLabel =
+    activeSelection === "auto"
+      ? "Auto"
+      : activeSelection === "off"
+        ? "Legacy compatibility"
+        : activeSelection === "disabled"
+          ? "Disabled"
+          : providers.find((provider) => provider.id === activeSelection)?.label ||
+            activeSelection;
+  const { fallbackPolicy, resolvedPolicy, routeIds } = webSearchConfiguredRoute(
+    providers,
+    activeSelection,
+    effectiveProvider,
+  );
   const ready =
     effectiveProvider === "legacy" ||
     Boolean(effectiveDescriptor && effectiveDescriptor.configured);
+  // The headline is the one thing this bar has to answer at a glance: which
+  // provider is actually serving requests right now. Everything else --
+  // selection mode, fallback policy, the full chain -- is supporting detail.
+  const headline =
+    routeIds[0] === "disabled" ? "Web search disabled" : providerLabel(routeIds[0]);
+
+  summary.innerHTML = "";
+  const head = document.createElement("div");
+  head.className = "ws-hero-head";
+  const eyebrow = document.createElement("span");
+  eyebrow.className = "eyebrow";
+  eyebrow.textContent = "Active web search route";
+  const note = document.createElement("span");
   note.className = `status-pill ${
     ready ? "ok" : effectiveProvider ? "warn" : "neutral"
   }`;
@@ -1926,11 +1936,57 @@ function renderWebSearchRouteSummary(providers, activeSelection, effectiveProvid
     : effectiveProvider
       ? "Needs configuration"
       : "Search disabled";
-  summary.append(route, note);
-  renderWebSearchObservedRoute(state.webSearchLastRoute);
+  head.append(eyebrow, note);
+
+  const headlineEl = document.createElement("strong");
+  headlineEl.className = "ws-hero-provider";
+  headlineEl.textContent = headline;
+
+  const route = document.createElement("div");
+  route.className = "route-summary-main";
+  const path = document.createElement("span");
+  path.className = "ws-hero-path";
+  const pathLabel = document.createElement("span");
+  pathLabel.className = "ws-hero-path-label";
+  pathLabel.textContent = "Route: ";
+  path.appendChild(pathLabel);
+  // The headline already answers "which provider". This answers "and then
+  // what": the primary hop carries the visual weight, each fallback hop
+  // after it is quieter, so try-order is legible without reading the prose
+  // sentence below -- the one thing a picker UI for a single value has no
+  // equivalent of.
+  if (routeIds[0] === "disabled") {
+    path.appendChild(document.createTextNode("Disabled"));
+  } else {
+    routeIds.forEach((id, index) => {
+      if (index > 0) {
+        const arrow = document.createElement("span");
+        arrow.className = "ws-hero-path-arrow";
+        arrow.textContent = " → ";
+        path.appendChild(arrow);
+      }
+      const hop = document.createElement("span");
+      hop.className = index === 0 ? "ws-hero-path-primary" : "ws-hero-path-fallback";
+      hop.textContent = providerLabel(id);
+      path.appendChild(hop);
+    });
+  }
+  const detail = document.createElement("span");
+  detail.textContent =
+    `Selection: ${selectionLabel} · Fallback: ${fallbackPolicy}` +
+    (fallbackPolicy === "auto" ? ` (resolves to ${resolvedPolicy})` : "") +
+    " · Configuration errors stop the route";
+  route.append(path, detail);
+
+  summary.append(head, headlineEl, route);
+  renderWebSearchObservedRoute(state.webSearchLastRoute, routeIds);
 }
 
-function renderWebSearchObservedRoute(lastRoute) {
+// configuredRouteIds is optional: renderWebSearchRouteSummary already has it
+// on hand and passes it through, but this is also called on its own after an
+// analytics refresh (loadWebSearchAnalytics), where it recomputes the same
+// route from current field state.
+function renderWebSearchObservedRoute(lastRoute, configuredRouteIds = null) {
   const route = byId("webSearchRouteSummary")?.querySelector(".route-summary-main");
   if (!route) return;
   route.querySelector(".route-summary-observed")?.remove();
@@ -1946,8 +2002,32 @@ function renderWebSearchObservedRoute(lastRoute) {
       : lastRoute.terminal_provider || lastRoute.primary_provider || "unknown";
   const duration =
     lastRoute.duration_ms == null ? "unknown latency" : `${lastRoute.duration_ms} ms`;
+
+  // The configured route describes intent; this line describes what the
+  // last request actually did. When the two disagree on which provider goes
+  // first -- almost always because the config changed after that request
+  // ran -- that gap is the operationally true thing worth flagging here,
+  // not just a timestamped restatement of the same fact as the headline.
+  let routeIds = configuredRouteIds;
+  if (!routeIds) {
+    const allProviders = webSearchProviders();
+    const activeSelection = state.fields.get("WEB_SEARCH_PROVIDER")?.value || "auto";
+    const effectiveProvider = effectiveWebSearchProvider(allProviders, activeSelection);
+    routeIds = webSearchConfiguredRoute(
+      allProviders,
+      activeSelection,
+      effectiveProvider,
+    ).routeIds;
+  }
+  const observedPrimary = lastRoute.primary_provider || providers[0] || null;
+  const configuredPrimary = routeIds[0] || null;
+  const drifted = Boolean(
+    observedPrimary && configuredPrimary && observedPrimary !== configuredPrimary,
+  );
+  observed.classList.toggle("route-summary-observed-drift", drifted);
   observed.textContent =
-    `Last observed: ${path} · ${lastRoute.status || "unknown"} · ${duration}`;
+    `Last observed: ${path} · ${lastRoute.status || "unknown"} · ${duration}` +
+    (drifted ? " — configuration has changed since" : "");
   route.appendChild(observed);
 }
 
@@ -2001,6 +2081,24 @@ function renderWebSearchAdvanced(provider) {
   return details;
 }
 
+// Only the effective provider needs to compete for attention; the rest of
+// the strip stays legible but visibly secondary. Shared with
+// updateWebSearchCardsFromState() so a live selection change re-applies the
+// same badge instead of drifting from the initial render.
+function setWebSearchCardEffective(card, isEffective) {
+  card.classList.toggle("effective-provider", isEffective);
+  const labelWrap = card.querySelector(".provider-title-label");
+  let badge = labelWrap?.querySelector(".ws-active-badge");
+  if (isEffective && labelWrap && !badge) {
+    badge = document.createElement("span");
+    badge.className = "ws-active-badge";
+    badge.textContent = "Active";
+    labelWrap.prepend(badge);
+  } else if (!isEffective && badge) {
+    badge.remove();
+  }
+}
+
 function renderWebSearchProviders() {
   const grid = byId("webSearchGrid");
   if (!grid) return;
@@ -2012,14 +2110,17 @@ function renderWebSearchProviders() {
   renderWebSearchRouteSummary(providers, active, effectiveProvider);
   providers.forEach((provider) => {
     const card = document.createElement("article");
-    card.className = `provider-card${
-      effectiveProvider === provider.id ? " effective-provider" : ""
-    }`;
+    card.className = "provider-card";
     card.dataset.websearchProvider = provider.id;
 
     const title = document.createElement("div");
     title.className = "provider-title";
-    title.innerHTML = `<strong>${provider.label}</strong>`;
+    const labelWrap = document.createElement("div");
+    labelWrap.className = "provider-title-label";
+    const label = document.createElement("strong");
+    label.textContent = provider.label;
+    labelWrap.appendChild(label);
+    title.appendChild(labelWrap);
     const pill = document.createElement("span");
     pill.className = `status-pill ${provider.configured ? "ok" : "warn"}`;
     pill.textContent = provider.configured ? "Configured" : "Missing key";
@@ -2053,6 +2154,7 @@ function renderWebSearchProviders() {
     actions.appendChild(testButton);
 
     card.append(title, meta, actions);
+    setWebSearchCardEffective(card, effectiveProvider === provider.id);
     const advanced = renderWebSearchAdvanced(provider);
     if (advanced) {
       card.appendChild(advanced);
@@ -2106,7 +2208,7 @@ function updateWebSearchCardsFromState() {
       `[data-websearch-provider="${provider.id}"]`,
     );
     if (!card) return;
-    card.classList.toggle("effective-provider", effectiveProvider === provider.id);
+    setWebSearchCardEffective(card, effectiveProvider === provider.id);
     const pill = card.querySelector(".status-pill");
     pill.className = `status-pill ${provider.configured ? "ok" : "warn"}`;
     pill.textContent = provider.configured ? "Configured" : "Missing key";
