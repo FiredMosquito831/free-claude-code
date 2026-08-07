@@ -29,6 +29,14 @@ class OnboardingStep:
     view: str
     optional: bool
     done: bool
+    # Concrete, ordered click-path the user follows to complete the step —
+    # not a restatement of `description`, which only says what the step is.
+    instructions: tuple[str, ...] = ()
+    # Optional DOM target the "Go to..." button scrolls to and highlights:
+    # an id selector ("#someId") or an attribute selector
+    # ('[data-key="ENV_KEY"]') for a dynamically-rendered field. None means
+    # the button only switches views.
+    target: str | None = None
 
 
 @dataclass(frozen=True)
@@ -170,6 +178,15 @@ def build_state(
             view="providers",
             optional=False,
             done=_provider_credential_configured(),
+            instructions=(
+                "Open the Providers page from the left nav.",
+                "Pick a provider with a free tier — Cerebras, Groq, and "
+                "NVIDIA NIM all have one.",
+                "Paste the API key into that provider's key field further "
+                "down the page.",
+                "Click Apply at the bottom of the page to save it.",
+            ),
+            target="#providerGrid",
         ),
         OnboardingStep(
             id="models",
@@ -182,6 +199,12 @@ def build_state(
             view="model_config",
             optional=False,
             done=_fallback_model_configured(),
+            instructions=(
+                "Open the Model Config page from the left nav.",
+                "Set Default Model to a model from the provider you just configured.",
+                "Click Apply at the bottom of the page to save it.",
+            ),
+            target='[data-key="MODEL"]',
         ),
         OnboardingStep(
             id="client",
@@ -193,6 +216,12 @@ def build_state(
             view="providers",
             optional=False,
             done=claude_settings_configured,
+            instructions=(
+                "Open the Providers page from the left nav.",
+                "Scroll to the Claude Code settings file card.",
+                "Click Configure to write FCC's URL and token into settings.json.",
+            ),
+            target="#claudeSettingsPanel",
         ),
         OnboardingStep(
             id="websearch",
@@ -204,6 +233,14 @@ def build_state(
             view="web_search",
             optional=True,
             done=_websearch_credential_configured(),
+            instructions=(
+                "Open the Web Search page from the left nav.",
+                "Set Web Search Provider to one with a free tier, such as "
+                "Brave or Tavily.",
+                "Paste its API key into the field that appears below.",
+                "Click Apply at the bottom of the page to save it.",
+            ),
+            target='[data-key="WEB_SEARCH_PROVIDER"]',
         ),
         OnboardingStep(
             id="messaging",
@@ -215,6 +252,13 @@ def build_state(
             view="messaging",
             optional=True,
             done=_messaging_platform_configured(),
+            instructions=(
+                "Open the Messaging page from the left nav.",
+                "Set Messaging Platform to Telegram or Discord.",
+                "Paste that platform's bot token into the field that appears.",
+                "Click Apply at the bottom of the page to save it.",
+            ),
+            target='[data-key="MESSAGING_PLATFORM"]',
         ),
         OnboardingStep(
             id="analytics",
@@ -226,6 +270,14 @@ def build_state(
             view="requests",
             optional=True,
             done=has_requests,
+            instructions=(
+                "Finish the Point Claude Code at FCC step above so a real "
+                "request has somewhere to go.",
+                "Run any Claude Code command in your terminal.",
+                "Open the Analytics page from the left nav to see it land "
+                "in the requests log.",
+            ),
+            target="#reqStatsCards",
         ),
         OnboardingStep(
             id="guide",
@@ -234,6 +286,9 @@ def build_state(
             view="guide",
             optional=True,
             done="guide" in visited,
+            instructions=(
+                "Open the Guide page from the left nav and skim through it.",
+            ),
         ),
     ]
 

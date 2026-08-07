@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+from free_claude_code.config.admin.manifest import FIELD_BY_KEY
 from free_claude_code.config.onboarding import (
     OnboardingError,
     build_state,
@@ -11,6 +12,17 @@ from free_claude_code.config.onboarding import (
     save_persisted,
 )
 from free_claude_code.config.paths import onboarding_state_path
+
+# Dashboard markup the Get Started buttons scroll to and highlight; targets
+# are asserted against this file so a renamed id fails the test instead of
+# quietly pointing the button at nothing.
+ADMIN_STATIC_DIR = (
+    Path(__file__).resolve().parents[2]
+    / "src"
+    / "free_claude_code"
+    / "api"
+    / "admin_static"
+)
 
 EXPECTED_STEP_IDS = (
     "provider",
@@ -265,3 +277,71 @@ class TestFallbackModelStep:
         state = self._state(monkeypatch, {"MODEL": "my_custom_thing/some-model"})
 
         assert self._step(state, "models").done is True
+
+
+class TestStepInstructionsAndTargets:
+    """Every step must say *how*, and its button must point somewhere real."""
+
+    def test_every_step_has_concrete_instructions(self, monkeypatch, tmp_path):
+        _set_home(monkeypatch, tmp_path)
+
+        state = build_state(claude_settings_configured=False, has_requests=False)
+
+        for step in state.steps:
+            assert len(step.instructions) > 0, f"{step.id} has no instructions"
+            for instruction in step.instructions:
+                assert instruction.strip(), f"{step.id} has a blank instruction"
+
+    def test_every_step_view_is_a_known_dashboard_view(self, monkeypatch, tmp_path):
+        _set_home(monkeypatch, tmp_path)
+        known_views = {
+            "get_started",
+            "providers",
+            "model_config",
+            "messaging",
+            "requests",
+            "web_search",
+            "guide",
+        }
+
+        state = build_state(claude_settings_configured=False, has_requests=False)
+
+        for step in state.steps:
+            assert step.view in known_views, (
+                f"{step.id} targets unknown view {step.view!r}"
+            )
+
+    def test_id_selector_targets_exist_in_dashboard_markup(self, monkeypatch, tmp_path):
+        _set_home(monkeypatch, tmp_path)
+        index_html = (ADMIN_STATIC_DIR / "index.html").read_text(encoding="utf-8")
+
+        state = build_state(claude_settings_configured=False, has_requests=False)
+
+        id_targets = [
+            step.target
+            for step in state.steps
+            if step.target and step.target.startswith("#")
+        ]
+        assert id_targets, "expected at least one id-selector target"
+        for target in id_targets:
+            dom_id = target[1:]
+            assert f'id="{dom_id}"' in index_html, (
+                f"missing id={dom_id!r} in index.html"
+            )
+
+    def test_data_key_selector_targets_reference_real_field_keys(
+        self, monkeypatch, tmp_path
+    ):
+        _set_home(monkeypatch, tmp_path)
+
+        state = build_state(claude_settings_configured=False, has_requests=False)
+
+        data_key_targets = [
+            step.target
+            for step in state.steps
+            if step.target and step.target.startswith('[data-key="')
+        ]
+        assert data_key_targets, "expected at least one data-key selector target"
+        for target in data_key_targets:
+            key = target.split('"')[1]
+            assert key in FIELD_BY_KEY, f"{key!r} is not a real admin config field key"

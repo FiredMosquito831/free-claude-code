@@ -47,6 +47,7 @@ const state = {
   claudeSettings: null,
   claudeSettingsBusy: false,
   onboarding: null,
+  onboardingExpandedStepId: null,
   userNavigated: false,
 };
 
@@ -318,6 +319,20 @@ async function updateOnboarding(patch) {
   return data;
 }
 
+// The first incomplete required step is "next" — the one worth walking
+// through in full. Everything else collapses to a single line so the
+// checklist reads as "here is your next action" instead of a wall of text.
+function primaryOnboardingStepId(steps) {
+  const nextRequired = steps.find((step) => !step.optional && !step.done);
+  return nextRequired ? nextRequired.id : null;
+}
+
+// Sentinel for "the user explicitly collapsed the expanded step" — distinct
+// from `null` ("nothing chosen yet, auto-select"). It never matches a real
+// step id, so a step becoming done can't accidentally re-expand a checklist
+// the user just closed.
+const ONBOARDING_NOTHING_EXPANDED = "__onboarding_nothing_expanded__";
+
 function renderOnboarding() {
   const onboarding = state.onboarding;
   const progress = byId("getStartedProgress");
@@ -326,41 +341,110 @@ function renderOnboarding() {
 
   progress.textContent = `${onboarding.required_done} of ${onboarding.required_total} essential steps done`;
 
+  // Expanded/collapsed is view state, not persisted. `null` means nothing
+  // has been chosen yet, so auto-select the next action. Once the step the
+  // user is looking at is done, advance to the new next action — otherwise
+  // completing a step would leave it expanded while the real next step sits
+  // collapsed out of sight. A user who deliberately collapsed everything
+  // (ONBOARDING_NOTHING_EXPANDED) is left alone: that id never matches a
+  // step, so the "advance when done" check below is a no-op for it.
+  if (state.onboardingExpandedStepId === null) {
+    state.onboardingExpandedStepId = primaryOnboardingStepId(onboarding.steps);
+  } else {
+    const expandedStep = onboarding.steps.find(
+      (step) => step.id === state.onboardingExpandedStepId,
+    );
+    if (expandedStep && expandedStep.done) {
+      state.onboardingExpandedStepId = primaryOnboardingStepId(onboarding.steps);
+    }
+  }
+
   list.innerHTML = "";
   onboarding.steps.forEach((step) => {
+    const expanded = step.id === state.onboardingExpandedStepId;
+
     const item = document.createElement("li");
-    item.className = "get-started-step";
+    item.className = `get-started-step${expanded ? " expanded" : " collapsed"}${step.done ? " done" : ""}`;
+
+    const header = document.createElement("div");
+    header.className = "get-started-step-header";
+    header.setAttribute("role", "button");
+    header.setAttribute("aria-expanded", expanded ? "true" : "false");
+    header.tabIndex = 0;
+    const toggle = () => {
+      state.onboardingExpandedStepId = expanded
+        ? ONBOARDING_NOTHING_EXPANDED
+        : step.id;
+      renderOnboarding();
+    };
+    header.addEventListener("click", toggle);
+    header.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        toggle();
+      }
+    });
 
     const marker = document.createElement("span");
     const state_ = step.done ? "ok" : step.optional ? "neutral" : "warn";
     marker.className = `status-pill ${state_}`;
     marker.textContent = step.done ? "Done" : step.optional ? "Optional" : "To do";
-    item.appendChild(marker);
+    header.appendChild(marker);
 
-    const body = document.createElement("div");
-    body.className = "get-started-step-body";
     const label = document.createElement("strong");
     label.textContent = step.label;
-    const description = document.createElement("p");
-    description.textContent = step.description;
-    body.append(label, description);
-    item.appendChild(body);
+    header.appendChild(label);
 
-    const targetView = VIEW_GROUPS.find((view) => view.id === step.view);
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "secondary-button";
-    button.textContent = `Open ${targetView ? targetView.label : step.view}`;
-    button.addEventListener("click", () => {
-      if (step.id === "guide") {
-        updateOnboarding({ visited: ["guide"] }).catch((error) =>
-          showMessage(error.message, "error"),
-        );
+    const chevron = document.createElement("span");
+    chevron.className = "get-started-step-chevron";
+    chevron.setAttribute("aria-hidden", "true");
+    chevron.textContent = "›";
+    header.appendChild(chevron);
+
+    item.appendChild(header);
+
+    if (expanded) {
+      const body = document.createElement("div");
+      body.className = "get-started-step-body";
+
+      const description = document.createElement("p");
+      description.textContent = step.description;
+      body.appendChild(description);
+
+      if (step.instructions && step.instructions.length) {
+        const instructionList = document.createElement("ol");
+        instructionList.className = "get-started-step-instructions";
+        step.instructions.forEach((instruction) => {
+          const instructionItem = document.createElement("li");
+          instructionItem.textContent = instruction;
+          instructionList.appendChild(instructionItem);
+        });
+        body.appendChild(instructionList);
       }
-      state.userNavigated = true;
-      setActiveView(step.view, { scroll: true });
-    });
-    item.appendChild(button);
+
+      const targetView = VIEW_GROUPS.find((view) => view.id === step.view);
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "secondary-button";
+      button.textContent = targetView
+        ? `Go to ${targetView.label}`
+        : `Open ${step.view}`;
+      button.addEventListener("click", () => {
+        if (step.id === "guide") {
+          updateOnboarding({ visited: ["guide"] }).catch((error) =>
+            showMessage(error.message, "error"),
+          );
+        }
+        state.userNavigated = true;
+        setActiveView(step.view, { scroll: true });
+        if (step.target) {
+          highlightOnboardingTarget(step.target);
+        }
+      });
+      body.appendChild(button);
+
+      item.appendChild(body);
+    }
 
     list.appendChild(item);
   });
@@ -370,6 +454,19 @@ function renderOnboarding() {
     ? "Checklist dismissed"
     : "Dismiss checklist";
   dismissButton.disabled = onboarding.dismissed;
+}
+
+// The target may be a field that only exists once its (previously hidden)
+// view section is in the layout; a rAF lets setActiveView's DOM change settle
+// before we measure it for scrollIntoView.
+function highlightOnboardingTarget(selector) {
+  requestAnimationFrame(() => {
+    const target = document.querySelector(selector);
+    if (!target) return;
+    target.scrollIntoView({ behavior: "smooth", block: "center" });
+    target.classList.add("onboarding-highlight");
+    window.setTimeout(() => target.classList.remove("onboarding-highlight"), 2000);
+  });
 }
 
 function renderSections(sections, fields) {
