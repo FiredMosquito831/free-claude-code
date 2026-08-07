@@ -122,6 +122,8 @@ The dashboard is where everything is configured. Every setting maps to a variabl
 
 There is also a **Guide** tab inside the dashboard with a condensed version of this document, available offline.
 
+On first run, the dashboard opens straight to a **Get Started** checklist instead of the Providers tab. It walks through configuring a provider, mapping model tiers, connecting Claude Code, and then points at the optional web search and analytics pages. Dismiss it once you're set up — the Get Started tab stays in the nav if you want it back.
+
 ### The two addresses that matter
 
 | What | Default | Who uses it |

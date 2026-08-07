@@ -613,7 +613,7 @@ Oversized payloads are stored as valid JSON truncation envelopes containing the 
 
 ## Admin Dashboard
 
-The Admin UI (`http://127.0.0.1:8082/admin`, local-only) is the control center for the whole proxy:
+The Admin UI (`http://127.0.0.1:8082/admin`, local-only) is the control center for the whole proxy. It opens on a **Get Started** checklist for first-time setup — provider, model tiers, connecting Claude Code, plus optional web search and analytics — then gets out of the way once dismissed.
 
 - **Providers** — API keys, model catalog, **Validate** / **Apply**, per-provider **Test**, and **Manage keys** for multi-key rotation state (per-key health/usage, key reset).
 - **Model Config** — the `MODEL` picker, model-tier routing (`MODEL_FABLE` / `MODEL_OPUS` / `MODEL_SONNET` / `MODEL_HAIKU`), and reasoning control.

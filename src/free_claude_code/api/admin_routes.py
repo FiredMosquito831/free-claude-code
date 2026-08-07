@@ -34,6 +34,19 @@ from free_claude_code.config.constants import (
 )
 from free_claude_code.config.credentials import parse_credential_keys
 from free_claude_code.config.model_refs import configured_chat_model_refs
+from free_claude_code.config.onboarding import (
+    OnboardingState,
+    OnboardingStep,
+)
+from free_claude_code.config.onboarding import (
+    build_state as build_onboarding_state,
+)
+from free_claude_code.config.onboarding import (
+    load_persisted as load_onboarding_persisted,
+)
+from free_claude_code.config.onboarding import (
+    save_persisted as save_onboarding_persisted,
+)
 from free_claude_code.config.paths import (
     claude_settings_candidates,
     claude_settings_path,
@@ -99,6 +112,13 @@ class ClaudeSettingsPathPayload(BaseModel):
     """Optional target path submitted by the Claude settings admin card."""
 
     path: str | None = None
+
+
+class OnboardingUpdatePayload(BaseModel):
+    """Partial onboarding checklist update submitted by the admin UI."""
+
+    dismissed: bool | None = None
+    visited: list[str] | None = None
 
 
 def _is_loopback_host(host: str | None) -> bool:
@@ -505,6 +525,103 @@ async def unset_claude_settings(
     except ClaudeSettingsError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     return _claude_settings_status_response(status)
+
+
+# --------------------------------------------------------------------- onboarding checklist
+
+
+def _onboarding_step_response(step: OnboardingStep) -> dict[str, Any]:
+    return {
+        "id": step.id,
+        "label": step.label,
+        "description": step.description,
+        "view": step.view,
+        "optional": step.optional,
+        "done": step.done,
+    }
+
+
+def _onboarding_state_response(state: OnboardingState) -> dict[str, Any]:
+    return {
+        "dismissed": state.dismissed,
+        "steps": [_onboarding_step_response(step) for step in state.steps],
+        "required_total": state.required_total,
+        "required_done": state.required_done,
+        "complete": state.complete,
+    }
+
+
+async def _claude_settings_configured(settings: Settings) -> bool:
+    """Return whether the default Claude settings.json points at this proxy.
+
+    Never raises: an unreadable settings file counts as "not done" rather
+    than failing the whole onboarding request.
+    """
+
+    expected_base_url, expected_auth_token = _claude_settings_expectations(settings)
+    try:
+        status = await asyncio.to_thread(
+            read_status,
+            path=claude_settings_path(),
+            expected_base_url=expected_base_url,
+            expected_auth_token=expected_auth_token,
+        )
+    except ClaudeSettingsError:
+        return False
+    return status.state == "configured"
+
+
+async def _onboarding_has_requests(settings: Settings) -> bool:
+    """Return whether the request log has at least one recorded request."""
+
+    store = _request_log_store_or_none(settings)
+    if store is None:
+        return False
+    try:
+        _rows, total = await asyncio.to_thread(store.list_requests, limit=1, offset=0)
+    except Exception:
+        return False
+    return total > 0
+
+
+async def _build_onboarding_state(settings: Settings) -> OnboardingState:
+    claude_settings_configured = await _claude_settings_configured(settings)
+    has_requests = await _onboarding_has_requests(settings)
+    return build_onboarding_state(
+        claude_settings_configured=claude_settings_configured,
+        has_requests=has_requests,
+    )
+
+
+@router.get("/admin/api/onboarding")
+async def get_onboarding(
+    request: Request,
+    settings: Settings = Depends(get_settings),
+):
+    require_loopback_admin(request)
+    state = await _build_onboarding_state(settings)
+    return _onboarding_state_response(state)
+
+
+@router.post("/admin/api/onboarding")
+async def update_onboarding(
+    payload: OnboardingUpdatePayload,
+    request: Request,
+    settings: Settings = Depends(get_settings),
+):
+    require_loopback_admin(request)
+    dismissed, visited = await asyncio.to_thread(load_onboarding_persisted)
+
+    if payload.dismissed is not None:
+        dismissed = payload.dismissed
+    if payload.visited is not None:
+        visited = sorted(set(visited) | set(payload.visited))
+
+    await asyncio.to_thread(
+        save_onboarding_persisted, dismissed=dismissed, visited=visited
+    )
+    state = await _build_onboarding_state(settings)
+    return _onboarding_state_response(state)
 
 
 @router.get("/admin/api/models")
