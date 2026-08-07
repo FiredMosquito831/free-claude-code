@@ -70,6 +70,10 @@ class RequestRuntimePort(Protocol):
         self, provider_id: str, model_id: str
     ) -> bool | None: ...
 
+    def cached_model_supports_vision(
+        self, provider_id: str, model_id: str
+    ) -> bool | None: ...
+
     def cached_prefixed_model_infos(self) -> tuple[ProviderModelInfo, ...]: ...
 
 

@@ -37,7 +37,11 @@ from free_claude_code.api.web_tools.streaming import stream_web_server_tool_resp
 from free_claude_code.application.errors import ApplicationError, InvalidRequestError
 from free_claude_code.application.execution import ProviderExecutor, TokenCounter
 from free_claude_code.application.ports import ProviderResolver
-from free_claude_code.application.routing import ModelRouter, RoutedMessagesRequest
+from free_claude_code.application.routing import (
+    ModelRouter,
+    RoutedMessagesPlan,
+    RoutedMessagesRequest,
+)
 from free_claude_code.config.settings import Settings
 from free_claude_code.core.anthropic import (
     MessagesRequest,
@@ -109,8 +113,9 @@ class MessagesHandler:
         )
         try:
             require_non_empty_messages(request_data.messages)
-            routed = self._model_router.resolve_messages_request(request_data)
-            routed = self._apply_message_routing_policies(routed)
+            plan = self._model_router.resolve_messages_plan(request_data)
+            plan = self._apply_message_routing_policies(plan)
+            routed = plan.primary
             self._reject_unsupported_server_tools(routed)
             capture.set_routing(routed)
 
@@ -119,11 +124,14 @@ class MessagesHandler:
                 logger.debug("No optimization matched, routing to provider")
                 result = _MessagesStreamResult(
                     self._provider_executor.stream(
-                        routed,
+                        plan,
                         wire_api="messages",
                         raw_log_label="FULL_PAYLOAD",
                         raw_log_payload=routed.request.model_dump(),
                         request_id=request_id,
+                        # Analytics must name the model that actually answered,
+                        # not the one the route started from.
+                        on_attempt=capture.set_routing,
                     )
                 )
             if isinstance(result, _MessagesStreamResult):
@@ -286,21 +294,35 @@ class MessagesHandler:
             raise InvalidRequestError(tool_err)
 
     def _apply_message_routing_policies(
-        self, routed: RoutedMessagesRequest
-    ) -> RoutedMessagesRequest:
-        if not is_safety_classifier_request(routed.request):
-            return routed
-        changed = routed.reasoning.control is not ReasoningControl.OFF
+        self, plan: RoutedMessagesPlan
+    ) -> RoutedMessagesPlan:
+        """Apply request-shaped policies to every attempt in the plan.
+
+        A policy that depends on the request rather than the model has to hold
+        for a fallback too, or the same request would gain thinking back merely
+        by being served by the second model in a chain.
+        """
+        if not is_safety_classifier_request(plan.primary.request):
+            return plan
+        changed = any(
+            attempt.reasoning.control is not ReasoningControl.OFF
+            for attempt in plan.attempts
+        )
         trace_event(
             stage="routing",
             event="free_claude_code.api.optimization.safety_classifier_no_thinking",
             source="api",
-            model=routed.request.model,
+            model=plan.primary.request.model,
             changed=changed,
         )
         if not changed:
-            return routed
-        return replace(routed, reasoning=ReasoningPolicy.off())
+            return plan
+        return RoutedMessagesPlan(
+            tuple(
+                replace(attempt, reasoning=ReasoningPolicy.off())
+                for attempt in plan.attempts
+            )
+        )
 
     def _run_message_intercepts(
         self, routed: RoutedMessagesRequest

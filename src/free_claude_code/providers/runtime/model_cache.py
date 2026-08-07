@@ -63,6 +63,15 @@ class ProviderModelCache:
             return None
         return info.supports_thinking
 
+    def cached_model_supports_vision(
+        self, provider_id: str, model_id: str
+    ) -> bool | None:
+        """Return cached image-input support when a provider exposes it."""
+        info = self._model_infos_by_provider.get(provider_id, {}).get(model_id)
+        if info is None:
+            return None
+        return info.supports_vision
+
     def cached_prefixed_model_refs(self) -> tuple[str, ...]:
         """Return cached provider models in user-selectable ``provider/model`` form."""
         return tuple(info.model_id for info in self.cached_prefixed_model_infos())
@@ -87,6 +96,7 @@ class ProviderModelCache:
                 ProviderModelInfo(
                     model_id=f"{provider_id}/{info.model_id}",
                     supports_thinking=info.supports_thinking,
+                    supports_vision=info.supports_vision,
                     context_length=info.context_length,
                     input_price=info.input_price,
                     output_price=info.output_price,

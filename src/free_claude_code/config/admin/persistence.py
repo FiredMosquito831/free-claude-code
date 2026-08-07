@@ -12,7 +12,12 @@ from free_claude_code.config.settings import Settings
 from .manifest import FIELD_BY_KEY, FIELDS, SECTIONS, ConfigFieldSpec
 from .sources import dotenv_values_from_file, is_locked_source, template_values
 from .validation import settings_from_values
-from .values import MASKED_SECRET, load_value_state, normalize_for_env
+from .values import (
+    MASKED_SECRET,
+    load_value_state,
+    normalize_field_value,
+    normalize_for_env,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -81,7 +86,7 @@ def target_values_with_updates(updates: Mapping[str, Any]) -> dict[str, str]:
             continue
         if field.secret and value == MASKED_SECRET:
             continue
-        values[key] = normalize_for_env(value)
+        values[key] = normalize_field_value(field, value)
 
     for field in FIELDS:
         values.setdefault(field.key, field.default)
