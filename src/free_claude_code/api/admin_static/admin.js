@@ -48,6 +48,10 @@ const state = {
   claudeSettingsBusy: false,
   onboarding: null,
   onboardingExpandedStepId: null,
+  // Whether the expanded step was opened by a click rather than chosen
+  // for the user. Auto-advance is a convenience; it must never overrule
+  // someone who deliberately opened a step to re-read it.
+  onboardingExpandedByUser: false,
   userNavigated: false,
 };
 
@@ -341,16 +345,20 @@ function renderOnboarding() {
 
   progress.textContent = `${onboarding.required_done} of ${onboarding.required_total} essential steps done`;
 
-  // Expanded/collapsed is view state, not persisted. `null` means nothing
-  // has been chosen yet, so auto-select the next action. Once the step the
-  // user is looking at is done, advance to the new next action — otherwise
-  // completing a step would leave it expanded while the real next step sits
-  // collapsed out of sight. A user who deliberately collapsed everything
-  // (ONBOARDING_NOTHING_EXPANDED) is left alone: that id never matches a
-  // step, so the "advance when done" check below is a no-op for it.
+  // Expanded/collapsed is view state, not persisted. `null` means nothing has
+  // been chosen yet, so auto-select the next action. When a step the app chose
+  // becomes done, advance to the new next action, or finishing a step would
+  // leave it expanded while the real next one sits collapsed out of sight.
+  //
+  // Auto-advance applies only to steps the app picked. Opening a completed
+  // step to re-read what you did is a legitimate thing to want, and advancing
+  // out of it would make already-finished steps impossible to view at all.
+  // A user who collapsed everything (ONBOARDING_NOTHING_EXPANDED) is likewise
+  // left alone: that id never matches a step.
   if (state.onboardingExpandedStepId === null) {
     state.onboardingExpandedStepId = primaryOnboardingStepId(onboarding.steps);
-  } else {
+    state.onboardingExpandedByUser = false;
+  } else if (!state.onboardingExpandedByUser) {
     const expandedStep = onboarding.steps.find(
       (step) => step.id === state.onboardingExpandedStepId,
     );
@@ -372,6 +380,7 @@ function renderOnboarding() {
     header.setAttribute("aria-expanded", expanded ? "true" : "false");
     header.tabIndex = 0;
     const toggle = () => {
+      state.onboardingExpandedByUser = !expanded;
       state.onboardingExpandedStepId = expanded
         ? ONBOARDING_NOTHING_EXPANDED
         : step.id;
