@@ -2282,3 +2282,54 @@ details.turn-pane > summary:focus-visible {
 .guide-table td {
   color: var(--muted);
 }
+
+/* Get Started checklist */
+.get-started-progress {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 16px;
+}
+
+.get-started-steps {
+  list-style: none;
+  margin: 0 0 20px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.get-started-step {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  padding: 14px 16px;
+  background: var(--card);
+}
+
+.get-started-step-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.get-started-step-body strong {
+  display: block;
+  color: var(--text-strong);
+  font-size: 14px;
+  margin-bottom: 2px;
+}
+
+.get-started-step-body p {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.4;
+  margin: 0;
+}
+
+.get-started-footer {
+  display: flex;
+  justify-content: flex-end;
+}

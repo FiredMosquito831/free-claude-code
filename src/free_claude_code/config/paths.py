@@ -16,6 +16,7 @@ AUTH_DIRNAME = "auth"
 CHATGPT_OAUTH_AUTH_FILENAME = "chatgpt-oauth.json"
 CLAUDE_CONFIG_DIRNAME = ".claude"
 CLAUDE_SETTINGS_FILENAME = "settings.json"
+ONBOARDING_STATE_FILENAME = "onboarding.json"
 WSL_OSRELEASE_PATH = "/proc/sys/kernel/osrelease"
 WSL_WINDOWS_USERS_DIR = "/mnt/c/Users"
 MACOS_MANAGED_SETTINGS_PATH = (
@@ -80,6 +81,12 @@ def claude_settings_path() -> Path:
     """Return the default Claude Code settings.json path."""
 
     return Path.home() / CLAUDE_CONFIG_DIRNAME / CLAUDE_SETTINGS_FILENAME
+
+
+def onboarding_state_path() -> Path:
+    """Return the persisted onboarding checklist state path."""
+
+    return config_dir_path() / ONBOARDING_STATE_FILENAME
 
 
 def _is_wsl() -> bool:

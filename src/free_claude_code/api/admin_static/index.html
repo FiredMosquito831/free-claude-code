@@ -31,6 +31,29 @@
         <div id="versionBanners" class="version-banners" aria-live="polite"></div>
 
         <div id="adminViews" class="admin-views">
+          <section id="view-get_started" class="admin-view" data-view="get_started" hidden>
+            <section class="settings-section" id="getStartedPanel">
+              <div class="section-heading">
+                <div>
+                  <h3>Get Started</h3>
+                  <p>
+                    Free Claude Code speaks Anthropic's API locally. Point your coding
+                    agent at this server, and it routes each request to whichever
+                    provider you configure below &mdash; your provider keys stay on this
+                    machine and never reach Anthropic or anywhere else.
+                  </p>
+                </div>
+              </div>
+              <div id="getStartedProgress" class="get-started-progress" aria-live="polite"></div>
+              <ol id="getStartedSteps" class="get-started-steps"></ol>
+              <div class="get-started-footer">
+                <button id="getStartedDismissButton" class="secondary-button" type="button">
+                  Dismiss checklist
+                </button>
+              </div>
+            </section>
+          </section>
+
           <section id="view-providers" class="admin-view active" data-view="providers">
             <section class="settings-section" id="versionPanel" aria-label="Version and updates">
               <div class="section-heading">

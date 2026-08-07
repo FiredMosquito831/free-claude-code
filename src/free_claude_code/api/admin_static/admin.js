@@ -46,10 +46,21 @@ const state = {
   versionUpgrading: false,
   claudeSettings: null,
   claudeSettingsBusy: false,
+  onboarding: null,
+  userNavigated: false,
 };
 
 const MASKED_SECRET = "********";
 const VIEW_GROUPS = [
+  {
+    // Static content: no settings sections, nothing to fetch, so it stays
+    // readable even when the server cannot reach a provider or the network.
+    id: "get_started",
+    label: "Get Started",
+    title: "Get Started",
+    sections: [],
+    containerId: null,
+  },
   {
     id: "providers",
     label: "Providers",
@@ -150,6 +161,15 @@ async function api(path, options = {}) {
 
 async function load() {
   showMessage("Loading admin config");
+  await loadOnboarding().catch((error) => showMessage(error.message, "error"));
+  if (
+    state.onboarding &&
+    !state.onboarding.dismissed &&
+    !state.onboarding.complete &&
+    !state.userNavigated
+  ) {
+    state.activeView = "get_started";
+  }
   const config = await api("/admin/api/config");
   state.config = config;
   state.fields = new Map(config.fields.map((field) => [field.key, field]));
@@ -186,6 +206,7 @@ function renderNav() {
       button.setAttribute("aria-current", "page");
     }
     button.addEventListener("click", () => {
+      state.userNavigated = true;
       setActiveView(view.id, { scroll: true });
     });
     nav.appendChild(button);
@@ -214,6 +235,10 @@ function setActiveView(viewId, { scroll = false } = {}) {
     view.classList.toggle("active", selected);
     view.hidden = !selected;
   });
+
+  if (activeView.id === "get_started") {
+    loadOnboarding().catch((error) => showMessage(error.message, "error"));
+  }
 
   if (activeView.id === "web_search") {
     loadWebSearchAnalytics().catch((error) => showMessage(error.message, "error"));
@@ -272,6 +297,79 @@ function updateProviderCard(providerId, status, label, metaText) {
   if (metaText) {
     card.querySelector(".provider-meta").textContent = metaText;
   }
+}
+
+/* ------------------------------------------------------------- get started */
+
+async function loadOnboarding() {
+  const data = await api("/admin/api/onboarding");
+  state.onboarding = data;
+  renderOnboarding();
+  return data;
+}
+
+async function updateOnboarding(patch) {
+  const data = await api("/admin/api/onboarding", {
+    method: "POST",
+    body: JSON.stringify(patch),
+  });
+  state.onboarding = data;
+  renderOnboarding();
+  return data;
+}
+
+function renderOnboarding() {
+  const onboarding = state.onboarding;
+  const progress = byId("getStartedProgress");
+  const list = byId("getStartedSteps");
+  if (!progress || !list || !onboarding) return;
+
+  progress.textContent = `${onboarding.required_done} of ${onboarding.required_total} essential steps done`;
+
+  list.innerHTML = "";
+  onboarding.steps.forEach((step) => {
+    const item = document.createElement("li");
+    item.className = "get-started-step";
+
+    const marker = document.createElement("span");
+    const state_ = step.done ? "ok" : step.optional ? "neutral" : "warn";
+    marker.className = `status-pill ${state_}`;
+    marker.textContent = step.done ? "Done" : step.optional ? "Optional" : "To do";
+    item.appendChild(marker);
+
+    const body = document.createElement("div");
+    body.className = "get-started-step-body";
+    const label = document.createElement("strong");
+    label.textContent = step.label;
+    const description = document.createElement("p");
+    description.textContent = step.description;
+    body.append(label, description);
+    item.appendChild(body);
+
+    const targetView = VIEW_GROUPS.find((view) => view.id === step.view);
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "secondary-button";
+    button.textContent = `Open ${targetView ? targetView.label : step.view}`;
+    button.addEventListener("click", () => {
+      if (step.id === "guide") {
+        updateOnboarding({ visited: ["guide"] }).catch((error) =>
+          showMessage(error.message, "error"),
+        );
+      }
+      state.userNavigated = true;
+      setActiveView(step.view, { scroll: true });
+    });
+    item.appendChild(button);
+
+    list.appendChild(item);
+  });
+
+  const dismissButton = byId("getStartedDismissButton");
+  dismissButton.textContent = onboarding.dismissed
+    ? "Checklist dismissed"
+    : "Dismiss checklist";
+  dismissButton.disabled = onboarding.dismissed;
 }
 
 function renderSections(sections, fields) {
@@ -3294,6 +3392,12 @@ document.addEventListener("pointerdown", (event) => {
   state.modelComboboxes.forEach((combobox) => {
     if (combobox.isOpen && !combobox.element.contains(event.target)) combobox.close();
   });
+});
+
+byId("getStartedDismissButton").addEventListener("click", () => {
+  updateOnboarding({ dismissed: true }).catch((error) =>
+    showMessage(error.message, "error"),
+  );
 });
 
 load().catch((error) => {
