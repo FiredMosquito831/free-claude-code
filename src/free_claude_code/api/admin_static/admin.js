@@ -3915,6 +3915,7 @@ async function loadRequestsView() {
     byId("reqProviderBreakdown").innerHTML = "";
     byId("reqKeyBreakdown").innerHTML = "";
     byId("reqTopErrors").innerHTML = "";
+    byId("reqFallbackRoutes").innerHTML = "";
     clearChart(byId("reqSeriesChart"));
     clearChart(byId("reqModelChart"));
     reqState.total = 0;
@@ -3934,6 +3935,7 @@ async function loadRequestsView() {
   renderRequestProviderBreakdown(stats.by_provider || []);
   renderRequestKeyBreakdown(stats.by_key || []);
   renderRequestTopErrors(stats.top_errors || []);
+  renderRequestFallbackRoutes(stats.fallback_routes || []);
   renderReqBreakdownTruncatedNote(stats);
   reqState.total = list.total || 0;
   renderRequestsTable(list.rows || []);
@@ -3986,6 +3988,68 @@ function formatTurnShare(count, total) {
   return `${formatAnalyticsNumber(value)} (${((value / denominator) * 100).toFixed(1)}%)`;
 }
 
+/** "12 (3.1%)", or an em dash when no row in the window carries route data.
+ *
+ * Rows written before fallback chains existed have no `route_attempt` at all,
+ * and 0% would read as "failover never fires" for traffic we know nothing
+ * about. The dash says "not reported" instead, the same distinction the cache
+ * columns already make.
+ */
+function formatFallbackShare(stats) {
+  const reported = Number(stats.route_reported || 0);
+  if (!reported) return "—";
+  const served = Number(stats.served_by_fallback || 0);
+  return `${formatAnalyticsNumber(served)} (${((served / reported) * 100).toFixed(1)}%)`;
+}
+
+/** Which primary failed, and what covered for it. */
+/** Plain wording for the detail panel: which link in the chain answered. */
+function formatRouteAttempt(row) {
+  const attempt = row.route_attempt;
+  if (attempt == null) return null;
+  if (Number(attempt) === 0) return "Primary model";
+  return row.route_primary_model
+    ? `Fallback ${attempt}, after ${row.route_primary_model}`
+    : `Fallback ${attempt}`;
+}
+
+function renderRequestFallbackRoutes(rows) {
+  const container = byId("reqFallbackRoutes");
+  if (!container) return;
+  container.innerHTML = "";
+  if (!rows.length) {
+    const empty = document.createElement("p");
+    empty.className = "analytics-empty";
+    empty.textContent = "No request fell back to another model in this window.";
+    container.appendChild(empty);
+    return;
+  }
+  rows.forEach((row) => {
+    const item = document.createElement("div");
+    item.className = "fallback-route";
+
+    const path = document.createElement("div");
+    path.className = "fallback-route-path";
+    const from = document.createElement("code");
+    from.textContent = row.primary;
+    const arrow = document.createElement("span");
+    arrow.className = "fallback-route-arrow";
+    arrow.setAttribute("aria-label", "fell back to");
+    arrow.textContent = "→";
+    const to = document.createElement("code");
+    to.className = "fallback-route-served";
+    to.textContent = row.served_by;
+    path.append(from, arrow, to);
+
+    const count = document.createElement("span");
+    count.className = "fallback-route-count";
+    count.textContent = formatAnalyticsNumber(row.count);
+
+    item.append(path, count);
+    container.appendChild(item);
+  });
+}
+
 function renderRequestStatsCards(stats) {
   const successRate = stats.total
     ? ((Number(stats.success || 0) / Number(stats.total)) * 100).toFixed(1)
@@ -3994,6 +4058,7 @@ function renderRequestStatsCards(stats) {
     ["Total requests", stats.total],
     ["Success rate", `${successRate}%`],
     ["Error rate", `${((stats.error_rate || 0) * 100).toFixed(1)}%`],
+    ["Served by fallback", formatFallbackShare(stats)],
     ["Cancelled", stats.cancelled],
     ["Total input", formatAnalyticsNumber(totalInputTokens(stats))],
     ["Input (uncached)", formatAnalyticsNumber(uncachedInputTokens(stats))],
@@ -4106,6 +4171,29 @@ function renderRequestTopErrors(rows) {
   );
 }
 
+/** The model that answered, flagged when it was not the one the route picked.
+ *
+ * A fallback that quietly works still changes what answered the request, so a
+ * row has to say so -- otherwise a chain looks identical to a healthy primary
+ * and nobody learns their first choice is failing.
+ */
+function buildModelCell(row) {
+  const td = document.createElement("td");
+  const name = document.createElement("span");
+  name.textContent = row.resolved_model || row.requested_model || "";
+  td.appendChild(name);
+  if (Number(row.route_attempt || 0) > 0) {
+    const badge = document.createElement("span");
+    badge.className = "fallback-badge";
+    badge.textContent = `fallback ${row.route_attempt}`;
+    badge.title = row.route_primary_model
+      ? `Fell back from ${row.route_primary_model}`
+      : "Served by a fallback model";
+    td.appendChild(badge);
+  }
+  return td;
+}
+
 function renderRequestsTable(rows) {
   const body = byId("reqTableBody");
   body.innerHTML = "";
@@ -4127,14 +4215,16 @@ function renderRequestsTable(rows) {
       row.endpoint || "",
       row.provider || "",
       row.key_label || "",
-      row.resolved_model || row.requested_model || "",
-      row.status,
     ];
     cells.forEach((text) => {
       const td = document.createElement("td");
       td.textContent = text;
       tr.appendChild(td);
     });
+    tr.appendChild(buildModelCell(row));
+    const statusCell = document.createElement("td");
+    statusCell.textContent = row.status;
+    tr.appendChild(statusCell);
     tr.appendChild(buildTurnShapeCell(row));
     [
       `${row.tokens_in ?? "—"}/${row.tokens_out ?? "—"}`,
@@ -4329,6 +4419,7 @@ async function openRequestDetail(requestId) {
     ["Requested model", row.requested_model],
     ["Provider", row.provider],
     ["Resolved model", row.resolved_model],
+    ["Route attempt", formatRouteAttempt(row)],
     ["Status", row.status],
     ["Error", row.error_kind ? `${row.error_kind}: ${row.error_message || ""}` : ""],
     ["Key", row.key_label],

@@ -237,7 +237,7 @@ async def test_fallback_runs_when_primary_fails_before_the_first_chunk() -> None
     primary = ScriptedProvider(chunks=(), error=RuntimeError("upstream 503"))
     secondary = FakeProvider()
     executor = _executor({"primary": primary, "secondary": secondary})
-    attempts: list[str] = []
+    attempts: list[tuple[int, str]] = []
 
     stream = executor.stream(
         _plan(
@@ -248,11 +248,13 @@ async def test_fallback_runs_when_primary_fails_before_the_first_chunk() -> None
         raw_log_label="FULL_PAYLOAD",
         raw_log_payload={},
         request_id="req_fallback",
-        on_attempt=lambda routed: attempts.append(routed.resolved.provider_model_ref),
+        on_attempt=lambda routed, index: attempts.append(
+            (index, routed.resolved.provider_model_ref)
+        ),
     )
 
     assert [chunk async for chunk in stream] == ["event: message_stop\ndata: {}\n\n"]
-    assert attempts == ["primary/big", "secondary/small"]
+    assert attempts == [(0, "primary/big"), (1, "secondary/small")]
     assert primary.stream_close_calls == 1
     assert secondary.stream_close_calls == 1
 

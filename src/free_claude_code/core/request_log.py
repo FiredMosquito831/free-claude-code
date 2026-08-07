@@ -67,6 +67,8 @@ _LIST_METADATA_COLUMNS = (
     "error_kind",
     "error_message",
     "headers",
+    "route_attempt",
+    "route_primary_model",
     "key_index",
     "key_label",
     # Shape of the assistant turn. These are counts, not bodies, so list views
@@ -85,6 +87,8 @@ CREATE TABLE IF NOT EXISTS requests (
     requested_model TEXT,
     provider TEXT,
     resolved_model TEXT,
+    route_attempt INTEGER,
+    route_primary_model TEXT,
     stream INTEGER NOT NULL DEFAULT 0,
     input_text TEXT,
     output_text TEXT,
@@ -129,6 +133,11 @@ _ADDED_COLUMNS = (
     ("thinking_chars", "ALTER TABLE requests ADD COLUMN thinking_chars INTEGER"),
     ("tool_calls", "ALTER TABLE requests ADD COLUMN tool_calls TEXT"),
     ("tool_call_count", "ALTER TABLE requests ADD COLUMN tool_call_count INTEGER"),
+    ("route_attempt", "ALTER TABLE requests ADD COLUMN route_attempt INTEGER"),
+    (
+        "route_primary_model",
+        "ALTER TABLE requests ADD COLUMN route_primary_model TEXT",
+    ),
 )
 
 # Indexes over post-release columns, created only once those columns exist.
@@ -163,6 +172,13 @@ class RequestRecord:
     requested_model: str | None = None
     provider: str | None = None
     resolved_model: str | None = None
+    # 0 when the route's own model answered, 1+ when a fallback did. ``None``
+    # on rows written before fallback chains existed, which is distinct from
+    # 0 and must stay that way: an old row cannot claim it used its primary.
+    route_attempt: int | None = None
+    # The model the route resolved to first, recorded only when a later
+    # attempt answered -- otherwise it just repeats ``resolved_model``.
+    route_primary_model: str | None = None
     stream: bool = False
     input_text: str | None = None
     output_text: str | None = None
@@ -419,8 +435,9 @@ class RequestLogStore:
                         cache_read_tokens, cache_write_tokens, ttft_ms,
                         duration_ms, status, error_kind, error_message, headers,
                         key_index, key_label, thinking_text, thinking_chars,
-                        tool_calls, tool_call_count
-                    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                        tool_calls, tool_call_count, route_attempt,
+                        route_primary_model
+                    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                     """,
                     rows,
                 )
@@ -468,6 +485,8 @@ class RequestLogStore:
             record.thinking_chars,
             json.dumps(record.tool_calls) if record.tool_calls else None,
             record.tool_call_count,
+            record.route_attempt,
+            record.route_primary_model,
         )
 
     def close(self, *, timeout: float = 5.0) -> None:
@@ -684,6 +703,10 @@ class RequestLogStore:
                            AS turns_with_tools,
                        SUM(CASE WHEN thinking_chars > 0 THEN 1 ELSE 0 END)
                            AS turns_with_reasoning,
+                       SUM(CASE WHEN route_attempt > 0 THEN 1 ELSE 0 END)
+                           AS served_by_fallback,
+                       SUM(CASE WHEN route_attempt IS NOT NULL THEN 1 ELSE 0 END)
+                           AS route_reported,
                        AVG(duration_ms) AS avg_duration_ms,
                        AVG(ttft_ms) AS avg_ttft_ms
                 FROM requests{where}
@@ -708,6 +731,23 @@ class RequestLogStore:
                     args,
                 ).fetchall()
             ]
+            fallback_routes = [
+                {
+                    "primary": row[0],
+                    "served_by": row[1],
+                    "count": row[2],
+                }
+                for row in conn.execute(
+                    f"SELECT route_primary_model,"
+                    " COALESCE(provider, '(unknown)') || '/' ||"
+                    " COALESCE(resolved_model, '(unknown)'), COUNT(*)"
+                    f" FROM requests{where}"
+                    f"{' AND' if where else ' WHERE'} route_attempt > 0"
+                    " AND route_primary_model IS NOT NULL"
+                    " GROUP BY 1, 2 ORDER BY COUNT(*) DESC LIMIT 10",
+                    args,
+                ).fetchall()
+            ]
             series = self._series(conn, where, args, since=since, until=until)
 
         total = totals["total"] or 0
@@ -726,6 +766,12 @@ class RequestLogStore:
             "tool_calls": totals["tool_calls"] or 0,
             "turns_with_tools": totals["turns_with_tools"] or 0,
             "turns_with_reasoning": totals["turns_with_reasoning"] or 0,
+            # ``route_reported`` separates "no fallback was used" from "these
+            # rows predate fallback chains", so the UI can show a dash rather
+            # than a reassuring 0% for traffic it knows nothing about.
+            "served_by_fallback": totals["served_by_fallback"] or 0,
+            "route_reported": totals["route_reported"] or 0,
+            "fallback_routes": fallback_routes,
             "avg_duration_ms": _rounded(totals["avg_duration_ms"]),
             "p50_duration_ms": _rounded(percentiles[0.50]),
             "p95_duration_ms": _rounded(percentiles[0.95]),
