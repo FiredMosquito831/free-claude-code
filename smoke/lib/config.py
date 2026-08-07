@@ -66,6 +66,9 @@ PROVIDER_SMOKE_DEFAULT_MODELS: dict[str, str] = {
     "groq": "groq/llama-3.3-70b-versatile",
     "sambanova": "sambanova/Meta-Llama-3.3-70B-Instruct",
     "novita": "novita/deepseek/deepseek-v3.2",
+    "nous_portal": "nous_portal/deepseek/deepseek-v4-flash-0731",
+    "kilo": "kilo/kilo-auto/balanced",
+    "cline": "cline/anthropic/claude-sonnet-4-6",
     "cerebras": "cerebras/llama3.1-8b",
     "cloudflare": "cloudflare/@cf/moonshotai/kimi-k2.6",
 }
@@ -301,6 +304,12 @@ class SmokeConfig:
             return bool(self.settings.sambanova_api_key.strip())
         if provider == "novita":
             return bool(getattr(self.settings, "novita_api_key", "").strip())
+        if provider == "nous_portal":
+            return bool(getattr(self.settings, "nous_api_key", "").strip())
+        if provider == "kilo":
+            return bool(getattr(self.settings, "kilo_api_key", "").strip())
+        if provider == "cline":
+            return bool(getattr(self.settings, "cline_api_key", "").strip())
         if provider == "cerebras":
             return bool(self.settings.cerebras_api_key.strip())
         if provider == "cloudflare":

@@ -90,6 +90,15 @@ class Settings(BaseSettings):
     # ==================== Novita AI Config ====================
     novita_api_key: str = Field(default="", validation_alias="NOVITA_API_KEY")
 
+    # ==================== Nous Portal Config ====================
+    nous_api_key: str = Field(default="", validation_alias="NOUS_API_KEY")
+
+    # ==================== Kilo AI Gateway Config ====================
+    kilo_api_key: str = Field(default="", validation_alias="KILO_API_KEY")
+
+    # ==================== Cline Config ====================
+    cline_api_key: str = Field(default="", validation_alias="CLINE_API_KEY")
+
     # ==================== Cloudflare Workers AI Config ====================
     cloudflare_api_token: str = Field(
         default="", validation_alias="CLOUDFLARE_API_TOKEN"
@@ -179,6 +188,9 @@ class Settings(BaseSettings):
     zai_proxy: str = Field(default="", validation_alias="ZAI_PROXY")
     fireworks_proxy: str = Field(default="", validation_alias="FIREWORKS_PROXY")
     novita_proxy: str = Field(default="", validation_alias="NOVITA_PROXY")
+    nous_proxy: str = Field(default="", validation_alias="NOUS_PROXY")
+    kilo_proxy: str = Field(default="", validation_alias="KILO_PROXY")
+    cline_proxy: str = Field(default="", validation_alias="CLINE_PROXY")
     cloudflare_proxy: str = Field(default="", validation_alias="CLOUDFLARE_PROXY")
     gemini_proxy: str = Field(default="", validation_alias="GEMINI_PROXY")
     groq_proxy: str = Field(default="", validation_alias="GROQ_PROXY")

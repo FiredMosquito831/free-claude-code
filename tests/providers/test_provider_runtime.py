@@ -23,8 +23,10 @@ from free_claude_code.providers.cloudflare import CloudflareProvider
 from free_claude_code.providers.deepseek import DeepSeekProvider
 from free_claude_code.providers.gemini import GeminiProvider
 from free_claude_code.providers.github_models import GitHubModelsProvider
+from free_claude_code.providers.kilo import KiloProvider
 from free_claude_code.providers.lmstudio import LMStudioProvider
 from free_claude_code.providers.mistral import MistralProvider
+from free_claude_code.providers.nous_portal import NousPortalProvider
 from free_claude_code.providers.nvidia_nim import NvidiaNimProvider
 from free_claude_code.providers.open_router import OpenRouterProvider
 from free_claude_code.providers.openai_chat import (
@@ -90,6 +92,12 @@ def _make_settings(**overrides):
     mock.fireworks_api_key = "test_fireworks_key"
     mock.novita_proxy = ""
     mock.novita_api_key = "test_novita_key"
+    mock.nous_proxy = ""
+    mock.nous_api_key = "test_nous_key"
+    mock.kilo_proxy = ""
+    mock.kilo_api_key = "test_kilo_key"
+    mock.cline_proxy = ""
+    mock.cline_api_key = "test_cline_key"
     mock.cloudflare_api_token = "test_cloudflare_token"
     mock.cloudflare_account_id = "test_cloudflare_account"
     mock.cloudflare_proxy = ""
@@ -403,6 +411,9 @@ def test_create_provider_instantiates_each_builtin():
         "sambanova": OpenAIChatProvider,
         "cerebras": OpenAIChatProvider,
         "novita": OpenAIChatProvider,
+        "cline": OpenAIChatProvider,
+        "nous_portal": NousPortalProvider,
+        "kilo": KiloProvider,
     }
     sentinel_limiter = MagicMock(spec=ProviderRateLimiter)
 

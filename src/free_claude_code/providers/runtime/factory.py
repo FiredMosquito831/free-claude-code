@@ -52,6 +52,26 @@ def _create_open_router(
     return OpenRouterProvider(config, rate_limiter=rate_limiter)
 
 
+def _create_nous_portal(
+    config: ProviderConfig,
+    _settings: Settings,
+    rate_limiter: ProviderRateLimiter,
+) -> BaseProvider:
+    from free_claude_code.providers.nous_portal import NousPortalProvider
+
+    return NousPortalProvider(config, rate_limiter=rate_limiter)
+
+
+def _create_kilo(
+    config: ProviderConfig,
+    _settings: Settings,
+    rate_limiter: ProviderRateLimiter,
+) -> BaseProvider:
+    from free_claude_code.providers.kilo import KiloProvider
+
+    return KiloProvider(config, rate_limiter=rate_limiter)
+
+
 def _create_mistral(
     config: ProviderConfig,
     _settings: Settings,
@@ -133,6 +153,8 @@ def _create_chatgpt_oauth(
 _SPECIAL_PROVIDER_FACTORIES: dict[str, ProviderFactory] = {
     "nvidia_nim": _create_nvidia_nim,
     "open_router": _create_open_router,
+    "nous_portal": _create_nous_portal,
+    "kilo": _create_kilo,
     "mistral": _create_mistral,
     "deepseek": _create_deepseek,
     "lmstudio": _create_lmstudio,

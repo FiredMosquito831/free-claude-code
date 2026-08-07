@@ -301,6 +301,14 @@ OPENAI_CHAT_PROFILES: dict[str, OpenAIChatProfile] = {
         _policy("NOVITA", ReasoningReplayMode.THINK_TAGS),
         NO_REASONING,
     ),
+    "cline": OpenAIChatProfile(
+        _policy(
+            "CLINE",
+            ReasoningReplayMode.THINK_TAGS,
+            default_max_tokens=ANTHROPIC_DEFAULT_MAX_OUTPUT_TOKENS,
+        ),
+        NO_REASONING,
+    ),
     "zai": OpenAIChatProfile(
         _policy(
             "ZAI",
