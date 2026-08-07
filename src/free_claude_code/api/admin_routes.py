@@ -1064,6 +1064,45 @@ async def request_log_stats(
     return result
 
 
+@router.get("/admin/api/requests/pulse")
+async def request_log_pulse(
+    request: Request,
+    provider: str | None = None,
+    model: str | None = None,
+    status: str | None = None,
+    endpoint: str | None = None,
+    key: str | None = None,
+    since: float | None = None,
+    until: float | None = None,
+    q: str | None = None,
+    settings: Settings = Depends(get_settings),
+):
+    """Cheap heartbeat for auto-refresh: row count and latest timestamp only.
+
+    Polling this instead of ``/admin/api/requests/stats`` lets an idle
+    dashboard detect "nothing changed" without paying for percentiles,
+    breakdowns, or series buckets on every tick.
+    """
+    require_loopback_admin(request)
+    store = _request_log_store_or_none(settings)
+    if store is None:
+        return {"enabled": False}
+    _validate_request_log_status(status)
+    result = await asyncio.to_thread(
+        store.pulse,
+        provider=provider,
+        model=model,
+        status=status,
+        endpoint=endpoint,
+        key=key,
+        since=since,
+        until=until,
+        q=q,
+    )
+    result["enabled"] = True
+    return result
+
+
 @router.get("/admin/api/requests/{request_id}")
 async def get_request_log_entry(
     request_id: str,

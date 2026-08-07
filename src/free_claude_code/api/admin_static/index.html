@@ -212,6 +212,12 @@
                   <input id="reqAutoRefresh" type="checkbox" />
                   Auto-refresh
                 </label>
+                <select id="reqAutoRefreshInterval" aria-label="Auto-refresh interval">
+                  <option value="5000">5s</option>
+                  <option value="15000" selected>15s</option>
+                  <option value="30000">30s</option>
+                  <option value="60000">60s</option>
+                </select>
                 <button id="reqRefreshButton" class="secondary-button" type="button">
                   Refresh
                 </button>
@@ -323,6 +329,7 @@
             <p class="analytics-footnote">
               Table timestamps use your browser locale; chart bucket boundaries use UTC.
             </p>
+            <p id="reqBreakdownTruncatedNote" class="analytics-footnote" hidden></p>
             <div class="requests-breakdowns">
               <section class="analytics-panel">
                 <h4>Provider performance</h4>
