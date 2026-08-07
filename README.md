@@ -223,7 +223,9 @@ Two ways to point Claude Code at your local FCC server (`http://127.0.0.1:8082`,
 
 ### Claude Code CLI
 
-Edit `~/.claude/settings.json` (`%USERPROFILE%\.claude\settings.json` on Windows) and **add the `env` block — or replace these values if they already exist**:
+The easiest route is the **Admin UI → Providers → Claude Code settings file** card. It lists every user-level `settings.json` it can find on this machine — under WSL that is two different files, your Linux home *and* your Windows home — shows whether each already points here, and configures or unsets the one you pick. It backs the file up first and refuses to touch one it cannot parse. It also warns when an enterprise `managed-settings.json` sets `ANTHROPIC_*`, because that outranks the file you are editing.
+
+To do it by hand instead, edit `~/.claude/settings.json` (`%USERPROFILE%\.claude\settings.json` on Windows) and **add the `env` block — or replace these values if they already exist**:
 
 ```json
 {
@@ -239,6 +241,7 @@ Notes:
 - Keep any other keys you already have in the file — just merge the `env` entries.
 - `ANTHROPIC_AUTH_TOKEN` sends the key as a bearer token (what FCC expects). The settings file wins over shell exports.
 - This gives you a working proxy connection, but the native `/model` picker stays empty until model discovery is on — add `"CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY": "1"` to the same `env` block, or launch with `fcc-claude --discover-models` instead of editing the file.
+- A `.claude/settings.json` or `.claude/settings.local.json` **inside a project directory** takes precedence over this user-level file. A user-level `settings.local.json` is *not* read — that scope is repository-root only.
 - Restart Claude Code after editing, then verify with `/status` — it should show `Anthropic base URL: http://127.0.0.1:8082` and your auth token.
 - Official reference: [Claude Code LLM gateway docs](https://code.claude.com/docs/en/llm-gateway-connect) · [settings.json reference](https://code.claude.com/docs/en/settings).
 

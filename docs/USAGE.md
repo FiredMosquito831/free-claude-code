@@ -146,6 +146,12 @@ Claude Code is configured through its **settings file**, not shell variables. Th
 
 If the file doesn't exist yet, create it.
 
+Prefer not to hand-edit it? The **Claude Code settings file** card on the dashboard's
+Providers view lists every settings file it can see on this machine (including the
+Windows-side file when this server runs under WSL) and warns when a higher-precedence
+file — like an enterprise managed settings file — already sets these variables and
+would override the one you configure here.
+
 ### Step 2 — add the `env` block
 
 ```json
