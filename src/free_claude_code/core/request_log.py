@@ -827,83 +827,52 @@ class RequestLogStore:
         args: list[Any],
         fractions: tuple[float, ...],
     ) -> dict[float, float | None]:
-        """Compute percentiles without pulling every duration into Python.
+        """Compute percentiles from one ordered pass over ``duration_ms``.
 
-        SQLite has to sort to answer ``ORDER BY duration_ms``: the covering
-        stats index leads on ``ts_epoch``, and an index leading on
-        ``duration_ms`` is not worth having -- one was tried and made the whole
-        of ``stats()`` 2.2x slower, because the planner then preferred it for
-        the totals and breakdown aggregates it does not cover.
+        Two cleverer mechanisms were tried and measured, and both lost to this:
 
-        So this pays for that one sort, exactly like the code it replaces, and
-        takes its win elsewhere: ``_ranks_via_single_sort`` pushes a ``LIMIT``
-        down to the highest rank actually needed, instead of pulling every
-        duration in the window into a Python list to index into.
+        - An index leading on ``duration_ms`` makes an isolated rank lookup 68x
+          faster, and made the whole of ``stats()`` 2.2x slower (1525 ms against
+          701 ms). With no ``ANALYZE`` statistics SQLite starts preferring it for
+          the totals and breakdown aggregates it does not cover.
+        - Streaming the sorted cursor and stopping once the highest needed rank
+          has gone past measured 1.5x (unfiltered) to 1.7x (provider-filtered)
+          the cost of a plain ``fetchall()``. ``p95`` needs a rank near the end
+          of the row count whatever the filter, so there is almost nothing to
+          stop early from, while ``fetchall()`` is one bulk C-level fetch
+          against a Python-level ``__next__`` per row.
 
-        Interpolation uses the same formula as the removed ``_percentile``
-        helper, so results match its semantics exactly.
+        So this is the same one query and one fetch the removed ``_percentile``
+        helper used, with p50 and p95 sharing a single sorted list instead of
+        two separate module-level calls. It is not faster than what it replaces;
+        the wins in this area are the bounded stats cache, the capped
+        breakdowns, and ``pulse()``.
+
+        Interpolation matches the removed helper's formula exactly.
         """
         connector = " AND" if where else " WHERE"
-        count = conn.execute(
-            f"SELECT COUNT(*) FROM requests{where}{connector} duration_ms IS NOT NULL",
-            args,
-        ).fetchone()[0]
-        if not count:
+        values = [
+            row[0]
+            for row in conn.execute(
+                f"SELECT duration_ms FROM requests{where}{connector}"
+                " duration_ms IS NOT NULL ORDER BY duration_ms",
+                args,
+            ).fetchall()
+        ]
+        if not values:
             return dict.fromkeys(fractions)
 
-        spans: dict[float, tuple[int, int, float]] = {}
-        needed_ranks: set[int] = set()
+        count = len(values)
+        results: dict[float, float | None] = {}
         for fraction in fractions:
             position = min(count - 1, max(0.0, fraction * (count - 1)))
             lower_index = int(position)
             upper_index = min(count - 1, lower_index + 1)
             weight = position - lower_index
-            spans[fraction] = (lower_index, upper_index, weight)
-            needed_ranks.add(lower_index)
-            needed_ranks.add(upper_index)
-
-        ranks = RequestLogStore._ranks_via_single_sort(
-            conn, where, args, connector, needed_ranks
-        )
-
-        results: dict[float, float | None] = {}
-        for fraction, (lower_index, upper_index, weight) in spans.items():
-            lower_val = ranks[lower_index]
-            upper_val = ranks[upper_index]
+            lower_val = values[lower_index]
+            upper_val = values[upper_index]
             results[fraction] = lower_val + (upper_val - lower_val) * weight
         return results
-
-    @staticmethod
-    def _ranks_via_single_sort(
-        conn: sqlite3.Connection,
-        where: str,
-        args: list[Any],
-        connector: str,
-        needed_ranks: set[int],
-    ) -> dict[int, float]:
-        """Fetch every needed rank from one sorted pass, bounded by SQL LIMIT.
-
-        An earlier version sorted the full filtered set and broke out of a
-        Python loop once the highest needed rank had gone past. That was
-        measurably *slower* than the original full-pull-then-index code for a
-        selective filter: iterating a cursor row by row pays Python-level
-        ``__next__`` overhead per row, which added up to more than the cost of
-        ``fetchall()`` materialising the (smaller, filtered) list it replaced.
-
-        Pushing ``LIMIT <highest needed rank + 1>`` into the query instead
-        lets SQLite itself stop producing rows once it has enough -- for a
-        limit well under the row count it can often satisfy that with a
-        bounded in-memory sort rather than a full temp-b-tree sort of every
-        matching row -- and ``fetchall()`` on that bounded result stays a
-        single bulk C-level fetch, not a Python loop.
-        """
-        highest = max(needed_ranks)
-        rows = conn.execute(
-            f"SELECT duration_ms FROM requests{where}{connector}"
-            " duration_ms IS NOT NULL ORDER BY duration_ms LIMIT ?",
-            [*args, highest + 1],
-        ).fetchall()
-        return {rank: rows[rank][0] for rank in needed_ranks}
 
     @staticmethod
     def _series(
