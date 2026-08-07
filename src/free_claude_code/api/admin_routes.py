@@ -538,6 +538,8 @@ def _onboarding_step_response(step: OnboardingStep) -> dict[str, Any]:
         "view": step.view,
         "optional": step.optional,
         "done": step.done,
+        "instructions": list(step.instructions),
+        "target": step.target,
     }
 
 

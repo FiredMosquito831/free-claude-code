@@ -2358,25 +2358,56 @@ details.turn-pane > summary:focus-visible {
 }
 
 .get-started-step {
-  display: flex;
-  align-items: center;
-  gap: 16px;
   border: 1px solid var(--line);
   border-radius: var(--radius-md);
-  padding: 14px 16px;
   background: var(--card);
+  overflow: hidden;
+}
+
+.get-started-step.expanded {
+  border-color: var(--accent-border);
+}
+
+.get-started-step-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  cursor: pointer;
+}
+
+.get-started-step-header:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.get-started-step-header strong {
+  flex: 1;
+  min-width: 0;
+  color: var(--text-strong);
+  font-size: 14px;
+}
+
+.get-started-step.done .get-started-step-header strong {
+  color: var(--muted);
+}
+
+.get-started-step-chevron {
+  color: var(--muted);
+  font-size: 16px;
+  line-height: 1;
+  transition: transform 0.15s ease;
+}
+
+.get-started-step.expanded .get-started-step-chevron {
+  transform: rotate(90deg);
 }
 
 .get-started-step-body {
-  flex: 1;
-  min-width: 0;
-}
-
-.get-started-step-body strong {
-  display: block;
-  color: var(--text-strong);
-  font-size: 14px;
-  margin-bottom: 2px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 0 16px 16px;
 }
 
 .get-started-step-body p {
@@ -2386,7 +2417,40 @@ details.turn-pane > summary:focus-visible {
   margin: 0;
 }
 
+.get-started-step-instructions {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding-left: 20px;
+}
+
+.get-started-step-instructions li {
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.get-started-step-body .secondary-button {
+  align-self: flex-start;
+}
+
 .get-started-footer {
   display: flex;
   justify-content: flex-end;
+}
+
+/* Brief highlight for a field/card scrolled to from the Get Started button. */
+.onboarding-highlight {
+  animation: onboarding-highlight-pulse 2s ease;
+}
+
+@keyframes onboarding-highlight-pulse {
+  0% {
+    box-shadow: 0 0 0 3px var(--accent-border);
+    border-radius: var(--radius-md);
+  }
+  100% {
+    box-shadow: 0 0 0 3px transparent;
+  }
 }

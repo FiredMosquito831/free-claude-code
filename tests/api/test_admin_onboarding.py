@@ -42,6 +42,10 @@ def test_get_onboarding_returns_200_with_step_list(monkeypatch, tmp_path):
     assert body["dismissed"] is False
     assert isinstance(body["required_total"], int)
     assert isinstance(body["complete"], bool)
+    for step in body["steps"]:
+        assert isinstance(step["instructions"], list)
+        assert len(step["instructions"]) > 0
+        assert "target" in step
 
 
 def test_get_onboarding_rejects_non_loopback_client(monkeypatch, tmp_path):
