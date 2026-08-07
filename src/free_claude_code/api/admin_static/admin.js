@@ -478,6 +478,160 @@ function highlightOnboardingTarget(selector) {
   });
 }
 
+/* ------------------------------------------------------- model routing ---
+   A tier's primary model and its fallbacks are one thing: the path a request
+   takes. The generic field grid flowed them into separate, often
+   non-adjacent, cells, so the ordering that governs every request was
+   invisible. Each tier is rendered as one card instead, with its models on a
+   vertical rail -- the rail's length is the depth of the safety net. */
+
+const ROUTE_TIERS = [
+  {
+    id: "default",
+    label: "Default",
+    modelKey: "MODEL",
+    chainKey: "MODEL_FALLBACKS",
+    note: "Used by any tier without a route of its own.",
+  },
+  { id: "fable", label: "Fable", modelKey: "MODEL_FABLE", chainKey: "MODEL_FABLE_FALLBACKS" },
+  { id: "opus", label: "Opus", modelKey: "MODEL_OPUS", chainKey: "MODEL_OPUS_FALLBACKS" },
+  { id: "sonnet", label: "Sonnet", modelKey: "MODEL_SONNET", chainKey: "MODEL_SONNET_FALLBACKS" },
+  { id: "haiku", label: "Haiku", modelKey: "MODEL_HAIKU", chainKey: "MODEL_HAIKU_FALLBACKS" },
+];
+
+function routeNode(marker, control, modifier) {
+  const node = document.createElement("div");
+  node.className = `route-node${modifier ? ` ${modifier}` : ""}`;
+  const dot = document.createElement("span");
+  dot.className = "route-marker";
+  dot.setAttribute("aria-hidden", "true");
+  dot.textContent = marker;
+  node.append(dot, control);
+  return node;
+}
+
+function renderRouteCard(tier, fieldByKey) {
+  const modelField = fieldByKey.get(tier.modelKey);
+  const chainField = fieldByKey.get(tier.chainKey);
+  if (!modelField) return null;
+
+  const card = document.createElement("article");
+  card.className = "route-card";
+  card.dataset.tier = tier.id;
+  // The onboarding checklist deep-links to [data-key="MODEL"]; keep that
+  // selector resolvable now the field lives inside a card.
+  card.dataset.key = modelField.key;
+
+  const head = document.createElement("header");
+  head.className = "route-card-head";
+
+  const name = document.createElement("h4");
+  name.className = "route-tier";
+  name.textContent = tier.label;
+
+  head.appendChild(name);
+  // The default route has no state to report: it is the thing the others
+  // inherit, so calling it "custom" would be noise on every install.
+  if (tier.id !== "default") {
+    const inherits = !String(modelField.value || "").trim();
+    const stateChip = document.createElement("span");
+    stateChip.className = `route-state${inherits ? " is-inherited" : ""}`;
+    stateChip.textContent = inherits ? "Inherits default" : "Custom route";
+    head.appendChild(stateChip);
+  }
+  card.appendChild(head);
+
+  if (tier.note) {
+    const note = document.createElement("p");
+    note.className = "route-note";
+    note.textContent = tier.note;
+    card.appendChild(note);
+  }
+
+  const rail = document.createElement("div");
+  rail.className = "field route-rail";
+
+  const { control: modelControl } = buildFieldControl(modelField);
+  rail.appendChild(routeNode("", modelControl, "is-primary"));
+
+  if (chainField) {
+    const { control: chainControl } = buildFieldControl(chainField);
+    rail.appendChild(chainControl);
+  }
+
+  card.appendChild(rail);
+  return card;
+}
+
+function renderModelRouting(fields) {
+  const fieldByKey = new Map(fields.map((field) => [field.key, field]));
+  const wrap = document.createElement("div");
+  wrap.className = "route-layout";
+
+  const rule = document.createElement("p");
+  rule.className = "route-rule";
+  rule.textContent =
+    "Each tier tries its models in order. If one cannot serve a request the " +
+    "next takes over, up until the response starts streaming.";
+  wrap.appendChild(rule);
+
+  const grid = document.createElement("div");
+  grid.className = "route-grid";
+  ROUTE_TIERS.forEach((tier) => {
+    const card = renderRouteCard(tier, fieldByKey);
+    if (card) grid.appendChild(card);
+  });
+  wrap.appendChild(grid);
+
+  // The vision adapter is not a tier. It fires on what a request contains
+  // rather than on which model was asked for, so it gets its own shape
+  // instead of masquerading as a sixth route.
+  const visionField = fieldByKey.get("MODEL_VISION");
+  if (visionField) {
+    const vision = document.createElement("article");
+    vision.className = "route-card route-vision";
+    vision.dataset.key = visionField.key;
+
+    const head = document.createElement("header");
+    head.className = "route-card-head";
+    const name = document.createElement("h4");
+    name.className = "route-tier";
+    name.textContent = "Vision adapter";
+    head.appendChild(name);
+    vision.appendChild(head);
+
+    const note = document.createElement("p");
+    note.className = "route-note";
+    note.textContent =
+      "Takes any request carrying an image when the model its tier picked " +
+      "is known not to read images. Leave as None to send images wherever " +
+      "the tier resolves to.";
+    vision.appendChild(note);
+
+    const { control } = buildFieldControl(visionField);
+    const visionControl = document.createElement("div");
+    visionControl.className = "field route-vision-control";
+    visionControl.appendChild(control);
+    vision.appendChild(visionControl);
+    wrap.appendChild(vision);
+  }
+
+  // Anything the manifest adds to this section later still has to appear.
+  const claimed = new Set([
+    "MODEL_VISION",
+    ...ROUTE_TIERS.flatMap((tier) => [tier.modelKey, tier.chainKey]),
+  ]);
+  const unclaimed = fields.filter((field) => !claimed.has(field.key));
+  if (unclaimed.length) {
+    const rest = document.createElement("div");
+    rest.className = "field-grid";
+    unclaimed.forEach((field) => rest.appendChild(renderField(field)));
+    wrap.appendChild(rest);
+  }
+
+  return wrap;
+}
+
 function renderSections(sections, fields) {
   state.modelComboboxes.clear();
   VIEW_GROUPS.forEach((view) => {
@@ -528,12 +682,16 @@ function renderSections(sections, fields) {
       }
       sectionEl.appendChild(heading);
 
-      const grid = document.createElement("div");
-      grid.className = "field-grid";
-      gridFields.forEach((field) => {
-        grid.appendChild(renderField(field));
-      });
-      sectionEl.appendChild(grid);
+      if (section.id === "models") {
+        sectionEl.appendChild(renderModelRouting(gridFields));
+      } else {
+        const grid = document.createElement("div");
+        grid.className = "field-grid";
+        gridFields.forEach((field) => {
+          grid.appendChild(renderField(field));
+        });
+        sectionEl.appendChild(grid);
+      }
 
       if (gridFields.some((field) => field.advanced)) {
         const toggle = document.createElement("button");
@@ -552,25 +710,13 @@ function renderSections(sections, fields) {
   });
 }
 
-function renderField(field) {
-  const wrapper = document.createElement("div");
-  wrapper.className = `field${field.advanced ? " advanced-field" : ""}`;
-  wrapper.dataset.key = field.key;
-
-  const label = document.createElement("label");
-  label.htmlFor = `field-${field.key}`;
-  const labelText = document.createElement("span");
-  labelText.textContent = field.label;
-  label.appendChild(labelText);
-
-  const source = sourceText(field);
-  if (source) {
-    const sourceEl = document.createElement("span");
-    sourceEl.className = "field-source";
-    sourceEl.textContent = source;
-    label.appendChild(sourceEl);
-  }
-
+/** Build one field's live control, wired into the dirty/apply machinery.
+ *
+ * Shared by the generic field grid and the Model Routing view, so a control
+ * behaves identically wherever it is placed and there is one place to change
+ * when a new field type appears.
+ */
+function buildFieldControl(field) {
   const input = inputForField(field);
   input.id = `field-${field.key}`;
   input.dataset.key = field.key;
@@ -598,6 +744,29 @@ function renderField(field) {
       : field.type === "model_chain"
         ? new ModelChainEditor(input, field).element
         : input;
+  return { input, control };
+}
+
+function renderField(field) {
+  const wrapper = document.createElement("div");
+  wrapper.className = `field${field.advanced ? " advanced-field" : ""}`;
+  wrapper.dataset.key = field.key;
+
+  const label = document.createElement("label");
+  label.htmlFor = `field-${field.key}`;
+  const labelText = document.createElement("span");
+  labelText.textContent = field.label;
+  label.appendChild(labelText);
+
+  const source = sourceText(field);
+  if (source) {
+    const sourceEl = document.createElement("span");
+    sourceEl.className = "field-source";
+    sourceEl.textContent = source;
+    label.appendChild(sourceEl);
+  }
+
+  const { control } = buildFieldControl(field);
   wrapper.append(label, control);
   if (field.description) {
     const description = document.createElement("div");
@@ -1196,7 +1365,7 @@ class ModelChainEditor {
     const removeButton = document.createElement("button");
     removeButton.type = "button";
     removeButton.className = "ghost-button model-chain-remove";
-    removeButton.textContent = "Remove";
+    removeButton.textContent = "×";
     removeButton.addEventListener("click", () => this.removeRow(row));
 
     const wrapper = document.createElement("div");
@@ -1208,6 +1377,7 @@ class ModelChainEditor {
     this.rowsEl.appendChild(wrapper);
     this.renumber();
     if (notify) {
+      wrapper.classList.add("route-fallback-enter");
       this.syncValue();
       rowInput.focus();
     }

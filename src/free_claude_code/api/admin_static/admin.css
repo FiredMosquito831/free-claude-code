@@ -60,6 +60,10 @@
   
   /* Typography */
   --font-sans: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  /* Model refs are paths, not prose. Setting them in mono makes the
+     provider prefix scannable and stops a long slug reading as a mistake. */
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
+    "Liberation Mono", monospace;
   
   /* Transitions */
   --transition-fast: 0.15s ease;
@@ -820,6 +824,305 @@ textarea:focus-visible,
 
 .model-chain-add {
   align-self: flex-start;
+}
+
+/* ----------------------------------------------------------- Model routing --
+   A tier's primary model and its fallbacks are one path, so they live in one
+   card. The rail down the left is the signature: markers sit on it, and its
+   length is the depth of that tier's safety net -- a tier with no fallbacks
+   shows a stub, a tier with three shows a long descent. */
+
+.route-layout {
+  display: grid;
+  gap: 20px;
+}
+
+.route-rule {
+  margin: 0;
+  max-width: 68ch;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.route-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+  gap: 16px;
+}
+
+.route-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 18px 20px 20px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--card);
+  transition: border-color var(--transition-fast);
+}
+
+.route-card:focus-within {
+  border-color: var(--line-strong);
+}
+
+.route-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.route-tier {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-strong);
+}
+
+/* Replaces four near-identical "Select None to use the Default Model for X"
+   sentences with the state they were all describing. */
+.route-state {
+  flex: 0 0 auto;
+  padding: 3px 9px;
+  border: 1px solid var(--accent-border);
+  border-radius: var(--radius-full);
+  background: var(--accent-muted);
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
+.route-state.is-inherited {
+  border-color: var(--neutral-border);
+  background: var(--neutral-bg);
+  color: var(--muted);
+}
+
+.route-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.route-rail {
+  position: relative;
+  gap: 10px;
+}
+
+/* The rail is drawn per node rather than as one absolute line down the card:
+   each node carries its own segment from its marker's centre into the gap
+   below, so the line meets every marker exactly whatever height a row ends up
+   being. A single line with a fixed offset only lands correctly while every
+   row is the same height, which is not a guarantee worth depending on. */
+.route-rail .route-node,
+.route-rail .model-chain-row,
+.route-rail .model-chain-add {
+  position: relative;
+}
+
+.route-rail .route-node::before,
+.route-rail .model-chain-row::before,
+.route-rail .model-chain-add::after {
+  content: "";
+  position: absolute;
+  left: 12px;
+  width: 2px;
+  border-radius: 1px;
+  background: var(--line-strong);
+  top: -10px;
+  bottom: -10px;
+}
+
+/* The path begins at the primary model and ends at the add affordance. */
+.route-rail .route-node.is-primary::before {
+  top: 50%;
+  background: linear-gradient(to bottom, var(--accent-border), var(--line-strong));
+}
+
+.route-rail .model-chain-add::after {
+  bottom: 50%;
+}
+
+/* A tier with no fallbacks has only the primary and the add node, so the two
+   halves meet and the rail reads as the stub it is. */
+
+.route-node {
+  position: relative;
+  display: grid;
+  grid-template-columns: 26px minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  min-height: 40px;
+}
+
+.route-marker {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: var(--radius-full);
+  background: var(--panel-strong);
+  border: 1px solid var(--line-strong);
+}
+
+.route-node.is-primary .route-marker {
+  border-color: var(--accent-border);
+}
+
+.route-node.is-primary .route-marker::after {
+  content: "";
+  width: 8px;
+  height: 8px;
+  border-radius: var(--radius-full);
+  background: var(--accent);
+  box-shadow: var(--glow-accent);
+}
+
+/* Chain rows become rail nodes: same marker column, same gap, so the numbers
+   line up under the primary dot instead of floating beside it. */
+.route-rail .model-chain-editor {
+  gap: 10px;
+}
+
+.route-rail .model-chain-rows {
+  gap: 10px;
+}
+
+.route-rail .model-chain-row {
+  position: relative;
+  display: grid;
+  grid-template-columns: 26px minmax(0, 1fr) auto auto auto;
+  align-items: center;
+  gap: 6px;
+  min-height: 40px;
+}
+
+.route-rail .model-chain-index {
+  position: relative;
+  z-index: 1;
+  width: 26px;
+  height: 26px;
+  border: 1px solid var(--line-strong);
+  background: var(--panel-strong);
+  color: var(--text);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.route-rail .model-chain-move,
+.route-rail .model-chain-remove {
+  width: 30px;
+  min-height: 30px;
+  height: 30px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius-sm);
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1;
+}
+
+.route-rail .model-chain-remove {
+  font-size: 18px;
+}
+
+.route-rail .model-chain-move:disabled {
+  opacity: 0.25;
+}
+
+/* The rail terminates in the affordance rather than trailing past it. */
+.route-rail .model-chain-add {
+  display: grid;
+  grid-template-columns: 26px auto;
+  align-items: center;
+  gap: 12px;
+  min-height: 40px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.route-rail .model-chain-add::before {
+  content: "+";
+  position: relative;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: var(--radius-full);
+  border: 1px dashed var(--line-strong);
+  background: var(--panel);
+  color: var(--muted);
+  font-size: 14px;
+  transition: color var(--transition-fast), border-color var(--transition-fast);
+}
+
+.route-rail .model-chain-add:hover {
+  color: var(--text-strong);
+  background: none;
+}
+
+.route-rail .model-chain-add:hover::before {
+  color: var(--accent);
+  border-color: var(--accent-border);
+}
+
+/* Model refs read as identifiers, so they are set in mono here. */
+.route-card .model-combobox input[type="text"],
+.route-card .model-combobox-option {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  letter-spacing: 0;
+}
+
+/* The vision adapter is not a tier: it fires on what a request contains, not
+   on which model was asked for, so it does not get a rail. */
+.route-vision {
+  border-style: dashed;
+  background: var(--panel);
+}
+
+.route-vision .route-vision-control {
+  max-width: 460px;
+}
+
+.route-fallback-enter {
+  animation: route-fallback-in var(--transition-normal);
+}
+
+@keyframes route-fallback-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+
+@media (max-width: 720px) {
+  .route-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .route-card {
+    padding: 16px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .route-fallback-enter {
+    animation: none;
+  }
 }
 
 /* Show/Hide Advanced fields */
