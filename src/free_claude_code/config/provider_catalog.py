@@ -45,6 +45,12 @@ GROQ_DEFAULT_BASE = "https://api.groq.com/openai/v1"
 NOVITA_DEFAULT_BASE = "https://api.novita.ai/openai"
 CEREBRAS_DEFAULT_BASE = "https://api.cerebras.ai/v1"
 SAMBANOVA_DEFAULT_BASE = "https://api.sambanova.ai/v1"
+# Nous Research inference API (OpenRouter-dialect); keys from portal.nousresearch.com.
+NOUS_PORTAL_DEFAULT_BASE = "https://inference-api.nousresearch.com/v1"
+# Kilo AI Gateway OpenAI-compatible root (OpenRouter-dialect model catalog).
+KILO_DEFAULT_BASE = "https://api.kilo.ai/api/gateway"
+# Cline API gateway OpenAI-compatible Chat Completions.
+CLINE_DEFAULT_BASE = "https://api.cline.bot/api/v1"
 
 
 @dataclass(frozen=True, slots=True)
@@ -261,6 +267,33 @@ PROVIDER_CATALOG: dict[str, ProviderDescriptor] = {
         credential_attr="novita_api_key",
         default_base_url=NOVITA_DEFAULT_BASE,
         proxy_attr="novita_proxy",
+    ),
+    "nous_portal": ProviderDescriptor(
+        provider_id="nous_portal",
+        display_name="Nous Portal",
+        credential_env="NOUS_API_KEY",
+        credential_url="https://portal.nousresearch.com/",
+        credential_attr="nous_api_key",
+        default_base_url=NOUS_PORTAL_DEFAULT_BASE,
+        proxy_attr="nous_proxy",
+    ),
+    "kilo": ProviderDescriptor(
+        provider_id="kilo",
+        display_name="Kilo AI Gateway",
+        credential_env="KILO_API_KEY",
+        credential_url="https://app.kilo.ai/",
+        credential_attr="kilo_api_key",
+        default_base_url=KILO_DEFAULT_BASE,
+        proxy_attr="kilo_proxy",
+    ),
+    "cline": ProviderDescriptor(
+        provider_id="cline",
+        display_name="Cline",
+        credential_env="CLINE_API_KEY",
+        credential_url="https://app.cline.bot/",
+        credential_attr="cline_api_key",
+        default_base_url=CLINE_DEFAULT_BASE,
+        proxy_attr="cline_proxy",
     ),
     "cloudflare": ProviderDescriptor(
         provider_id="cloudflare",

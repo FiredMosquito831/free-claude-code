@@ -73,6 +73,27 @@ _PROVIDER_FIELD_OVERRIDES: dict[str, dict[str, Any]] = {
             "[novita.ai/settings](https://novita.ai/settings))."
         ),
     },
+    "NOUS_API_KEY": {
+        "label": "Nous Portal API Key",
+        "description": (
+            "Nous Research inference API key (`sk-nous-...`), OpenAI-compatible gateway "
+            "with 350+ models (create at [portal.nousresearch.com](https://portal.nousresearch.com/))."
+        ),
+    },
+    "KILO_API_KEY": {
+        "label": "Kilo AI Gateway API Key",
+        "description": (
+            "Kilo AI Gateway API key for the OpenAI-compatible endpoint at "
+            "api.kilo.ai/api/gateway (create at [app.kilo.ai](https://app.kilo.ai/))."
+        ),
+    },
+    "CLINE_API_KEY": {
+        "label": "Cline API Key",
+        "description": (
+            "Cline API key for the OpenAI-compatible gateway at api.cline.bot "
+            "(create at [app.cline.bot](https://app.cline.bot/) under Settings > API Keys)."
+        ),
+    },
     "KIMI_CODING_API_KEY": {
         "label": "Kimi Coding API Key",
         "description": (
