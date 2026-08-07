@@ -83,10 +83,30 @@ def extract_openrouter_tool_model_infos(
             _ProviderModelInfo(
                 model_id=model_id,
                 supports_thinking="reasoning" in supported_parameter_names,
+                supports_vision=_openrouter_accepts_images(item),
             )
         )
 
     return frozenset(model_infos)
+
+
+def _openrouter_accepts_images(item: Any) -> bool | None:
+    """Read image support from an OpenRouter-dialect ``architecture`` block.
+
+    A gateway that omits the block entirely tells us nothing, so the answer is
+    unknown rather than False — reporting False would divert requests away from
+    a model that may well handle them.
+    """
+    architecture = _field(item, "architecture")
+    if architecture is None:
+        return None
+    modalities = _field(architecture, "input_modalities")
+    if not _is_sequence(modalities):
+        return None
+    return any(
+        isinstance(modality, str) and modality.strip().lower() == "image"
+        for modality in modalities
+    )
 
 
 def _field(item: Any, name: str) -> Any:

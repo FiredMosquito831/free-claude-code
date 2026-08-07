@@ -396,6 +396,34 @@ Web search provider keys share the same rotation engine — see [Web Search → 
 
 For example, route Opus to `nvidia_nim/moonshotai/kimi-k2.6`, Sonnet to `open_router/openrouter/free`, Haiku to `lmstudio/qwen3.5-coder`, and keep `MODEL` on `zai/glm-5.2`.
 
+### Fallback Chains
+
+Every tier can carry an ordered list of stand-ins. If the model a request routes to cannot serve it, FCC tries the next entry in that tier's chain, then the next, until one answers.
+
+| Setting | Chain used |
+| --- | --- |
+| `MODEL_FALLBACKS` | after `MODEL`, for any tier with no override of its own |
+| `MODEL_FABLE_FALLBACKS` | after `MODEL_FABLE` |
+| `MODEL_OPUS_FALLBACKS` | after `MODEL_OPUS` |
+| `MODEL_SONNET_FALLBACKS` | after `MODEL_SONNET` |
+| `MODEL_HAIKU_FALLBACKS` | after `MODEL_HAIKU` |
+
+Each is a comma-separated list of `provider/model` refs, in priority order — for example `MODEL_OPUS_FALLBACKS="cerebras/qwen-3-coder-480b,groq/moonshotai/kimi-k2"`. Edit them in **Admin UI → Model Config**, where each chain sits directly under the model it backs up and entries can be reordered.
+
+A tier with its own override uses only its own chain; the two are never merged. So `MODEL_OPUS` set means Opus tries `MODEL_OPUS` then `MODEL_OPUS_FALLBACKS`, while an unset `MODEL_SONNET` means Sonnet tries `MODEL` then `MODEL_FALLBACKS`.
+
+**Failover stops at the first streamed chunk.** A model that fails while connecting, authenticating, rate-limiting or before emitting anything is replaced silently; one that fails *after* it has begun answering is not, because the reply is already on the wire and switching models mid-answer would splice two different completions together. Requests that name a provider and model directly (`open_router/…`) are never redirected — an explicit choice is honoured as given.
+
+Each fallback is recorded in the request log against the model that actually answered, so **Analytics** shows which model served a request rather than which one the route started from.
+
+### Vision Adapter
+
+Set `MODEL_VISION` to a model that accepts images and FCC will route image-carrying requests to it whenever the model the tier picked is **known** not to read images — so a fast text-only default can stay in place without breaking screenshots and diagrams.
+
+Capability is read from what each provider publishes about its own models (OpenRouter-dialect gateways report `input_modalities`; others are enriched from models.dev). A model whose provider reports nothing is left alone rather than diverted: most providers publish no modality data at all, and rerouting on silence would move traffic away from models that handle images perfectly well.
+
+When the diversion happens, any fallbacks that are themselves known to be image-blind are dropped from the chain for that request — answering a question about an image it cannot see is worse than failing.
+
 ### Reasoning Control
 
 Open **Admin UI → Model Config → Reasoning** to choose how FCC handles client reasoning controls. The default **From client** option preserves reasoning effort sent by Claude Code, Codex, or Pi; when the client sends no control, the provider keeps its own default.
@@ -619,7 +647,7 @@ Oversized payloads are stored as valid JSON truncation envelopes containing the 
 The Admin UI (`http://127.0.0.1:8082/admin`, local-only) is the control center for the whole proxy. It opens on a **Get Started** checklist for first-time setup — provider, model tiers, connecting Claude Code, plus optional web search and analytics — then gets out of the way once dismissed.
 
 - **Providers** — API keys, model catalog, **Validate** / **Apply**, per-provider **Test**, and **Manage keys** for multi-key rotation state (per-key health/usage, key reset).
-- **Model Config** — the `MODEL` picker, model-tier routing (`MODEL_FABLE` / `MODEL_OPUS` / `MODEL_SONNET` / `MODEL_HAIKU`), and reasoning control.
+- **Model Config** — the `MODEL` picker, model-tier routing (`MODEL_FABLE` / `MODEL_OPUS` / `MODEL_SONNET` / `MODEL_HAIKU`), per-tier fallback chains, the vision adapter, and reasoning control.
 - **Web Search** — configured and last-observed route summaries, strict/fallback policy, provider cards, key health, advanced options, separate route/attempt analytics, and full captured input/output drill-down.
 - **Analytics** — the full model-request observability dashboard (see below).
 - **Messaging** — Discord/Telegram bot and voice-note settings.

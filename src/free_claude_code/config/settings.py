@@ -15,11 +15,28 @@ from .env_files import (
     env_file_override,
     settings_env_files,
 )
+from .model_refs import format_model_ref_list, parse_model_ref_list
 from .nim import NimSettings
 from .paths import chatgpt_oauth_auth_path
 from .provider_registry import get_provider_registry
 from .reasoning import ReasoningPreference
 from .websearch_catalog import SUPPORTED_WEBSEARCH_PROVIDER_IDS
+
+
+def _require_provider_prefixed_model_ref(model_ref: str) -> None:
+    """Raise when a model ref is not a `provider/model` for a known provider."""
+
+    supported_ids = get_provider_registry().supported_ids()
+    if "/" not in model_ref:
+        raise ValueError(
+            f"Model must be prefixed with provider type. "
+            f"Valid providers: {', '.join(supported_ids)}. "
+            f"Format: provider_type/model/name"
+        )
+    provider = model_ref.split("/", 1)[0]
+    if provider not in supported_ids:
+        supported = ", ".join(f"'{p}'" for p in supported_ids)
+        raise ValueError(f"Invalid provider: '{provider}'. Supported: {supported}")
 
 
 class Settings(BaseSettings):
@@ -163,6 +180,30 @@ class Settings(BaseSettings):
     model_opus: str | None = Field(default=None, validation_alias="MODEL_OPUS")
     model_sonnet: str | None = Field(default=None, validation_alias="MODEL_SONNET")
     model_haiku: str | None = Field(default=None, validation_alias="MODEL_HAIKU")
+
+    # Ordered fallback chains, comma-separated `provider/model` refs. A route
+    # uses its own chain when it has its own primary override, otherwise the
+    # root MODEL chain; the two are never merged, so what a route will try is
+    # exactly the primary plus the chain sitting next to it.
+    model_fallbacks: str | None = Field(
+        default=None, validation_alias="MODEL_FALLBACKS"
+    )
+    model_fable_fallbacks: str | None = Field(
+        default=None, validation_alias="MODEL_FABLE_FALLBACKS"
+    )
+    model_opus_fallbacks: str | None = Field(
+        default=None, validation_alias="MODEL_OPUS_FALLBACKS"
+    )
+    model_sonnet_fallbacks: str | None = Field(
+        default=None, validation_alias="MODEL_SONNET_FALLBACKS"
+    )
+    model_haiku_fallbacks: str | None = Field(
+        default=None, validation_alias="MODEL_HAIKU_FALLBACKS"
+    )
+
+    # Vision adapter: serves requests carrying images when the model a route
+    # resolved to is known not to accept them.
+    model_vision: str | None = Field(default=None, validation_alias="MODEL_VISION")
 
     # ==================== Per-Provider Proxy ====================
     nvidia_nim_proxy: str = Field(default="", validation_alias="NVIDIA_NIM_PROXY")
@@ -435,6 +476,12 @@ class Settings(BaseSettings):
         "model_opus",
         "model_sonnet",
         "model_haiku",
+        "model_vision",
+        "model_fallbacks",
+        "model_fable_fallbacks",
+        "model_opus_fallbacks",
+        "model_sonnet_fallbacks",
+        "model_haiku_fallbacks",
         "ollama_search_api_key",
         "exa_api_key",
         "tavily_api_key",
@@ -551,24 +598,38 @@ class Settings(BaseSettings):
         return ",".join(schemes)
 
     @field_validator(
-        "model", "model_fable", "model_opus", "model_sonnet", "model_haiku"
+        "model",
+        "model_fable",
+        "model_opus",
+        "model_sonnet",
+        "model_haiku",
+        "model_vision",
     )
     @classmethod
     def validate_model_format(cls, v: str | None) -> str | None:
         if v is None:
             return None
-        supported_ids = get_provider_registry().supported_ids()
-        if "/" not in v:
-            raise ValueError(
-                f"Model must be prefixed with provider type. "
-                f"Valid providers: {', '.join(supported_ids)}. "
-                f"Format: provider_type/model/name"
-            )
-        provider = v.split("/", 1)[0]
-        if provider not in supported_ids:
-            supported = ", ".join(f"'{p}'" for p in supported_ids)
-            raise ValueError(f"Invalid provider: '{provider}'. Supported: {supported}")
+        _require_provider_prefixed_model_ref(v)
         return v
+
+    @field_validator(
+        "model_fallbacks",
+        "model_fable_fallbacks",
+        "model_opus_fallbacks",
+        "model_sonnet_fallbacks",
+        "model_haiku_fallbacks",
+    )
+    @classmethod
+    def validate_model_fallback_chain(cls, v: str | None) -> str | None:
+        """Validate every chain entry and store the chain in canonical form."""
+        if v is None:
+            return None
+        model_refs = parse_model_ref_list(v)
+        if not model_refs:
+            return None
+        for model_ref in model_refs:
+            _require_provider_prefixed_model_ref(model_ref)
+        return format_model_ref_list(model_refs)
 
     @model_validator(mode="after")
     def reference_managed_chatgpt_oauth_credentials(self) -> Settings:

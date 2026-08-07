@@ -131,6 +131,11 @@ class ProviderRuntimeManager:
     ) -> bool | None:
         return self._model_cache.cached_model_supports_thinking(provider_id, model_id)
 
+    def cached_model_supports_vision(
+        self, provider_id: str, model_id: str
+    ) -> bool | None:
+        return self._model_cache.cached_model_supports_vision(provider_id, model_id)
+
     def cached_prefixed_model_infos(self) -> tuple[ProviderModelInfo, ...]:
         return self._model_cache.cached_prefixed_model_infos()
 

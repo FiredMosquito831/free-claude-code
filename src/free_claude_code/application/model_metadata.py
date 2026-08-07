@@ -9,6 +9,10 @@ class ProviderModelInfo:
 
     model_id: str
     supports_thinking: bool | None = None
+    # ``None`` means the provider does not report image support, which is not
+    # the same as reporting that it has none: vision routing only diverts a
+    # request when a model is known to lack it.
+    supports_vision: bool | None = None
     context_length: int | None = None
     input_price: float | None = None
     output_price: float | None = None

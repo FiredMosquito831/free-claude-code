@@ -5,6 +5,7 @@ from loguru import logger
 
 from free_claude_code.application.errors import ApplicationError
 from free_claude_code.application.ports import ProviderResolver, RequestRuntimeLease
+from free_claude_code.application.routing import ModelRouter
 from free_claude_code.config.model_refs import parse_provider_type
 from free_claude_code.config.settings import Settings
 from free_claude_code.core.anthropic import (
@@ -35,6 +36,14 @@ def _provider_resolver(lease: RequestRuntimeLease) -> ProviderResolver:
     return lambda provider_type: resolve_provider(provider_type, lease=lease)
 
 
+def _model_router(services: ApiServices, lease: RequestRuntimeLease) -> ModelRouter:
+    """Build a router that can see which cached models accept images."""
+    return ModelRouter(
+        lease.settings,
+        vision_lookup=services.requests.cached_model_supports_vision,
+    )
+
+
 async def _create_messages_response(
     services: ApiServices,
     request_data: MessagesRequest,
@@ -47,6 +56,7 @@ async def _create_messages_response(
         handler = MessagesHandler(
             lease.settings,
             provider_resolver=_provider_resolver(lease),
+            model_router=_model_router(services, lease),
             token_counter=get_token_count,
             generation_id=lease.generation_id,
         )
@@ -79,6 +89,7 @@ async def _create_responses_response(
         handler = ResponsesHandler(
             lease.settings,
             provider_resolver=_provider_resolver(lease),
+            model_router=_model_router(services, lease),
             generation_id=lease.generation_id,
         )
         response = await handler.create(request_data, request_id=request_id)

@@ -10,6 +10,7 @@ FieldType = Literal[
     "boolean",
     "model",
     "optional_model",
+    "model_chain",
     "select",
     "textarea",
     "oauth_login",

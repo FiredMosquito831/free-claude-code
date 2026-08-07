@@ -149,6 +149,7 @@ class _ModelsDevModelMetadata:
     context_length: int | None
     input_price: float | None
     output_price: float | None
+    supports_vision: bool | None
 
 
 def _flatten_index(index: Mapping[str, Any]) -> dict[str, _ModelsDevModelMetadata]:
@@ -187,7 +188,24 @@ def _parse_models_dev_metadata(
         context_length=context_length,
         input_price=input_price,
         output_price=output_price,
+        supports_vision=_accepts_image_input(metadata),
     )
+
+
+def _accepts_image_input(metadata: Mapping[str, Any]) -> bool | None:
+    """Read image support from a models.dev entry, or None when unstated."""
+    modalities = metadata.get("modalities")
+    if isinstance(modalities, Mapping):
+        inputs = modalities.get("input")
+        if isinstance(inputs, list):
+            return any(
+                isinstance(item, str) and item.strip().lower() == "image"
+                for item in inputs
+            )
+    # Older entries predate ``modalities`` and only carry ``attachment``, which
+    # is broader than images but is the only signal those rows have.
+    attachment = metadata.get("attachment")
+    return attachment if isinstance(attachment, bool) else None
 
 
 def _float_or_none(value: Any) -> float | None:
@@ -235,6 +253,11 @@ def enrich_model_infos(
             ProviderModelInfo(
                 model_id=info.model_id,
                 supports_thinking=info.supports_thinking,
+                supports_vision=(
+                    info.supports_vision
+                    if info.supports_vision is not None
+                    else metadata.supports_vision
+                ),
                 context_length=info.context_length or metadata.context_length,
                 input_price=(
                     info.input_price

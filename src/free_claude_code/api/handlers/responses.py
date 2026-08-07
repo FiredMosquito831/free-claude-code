@@ -77,16 +77,17 @@ class ResponsesHandler:
                 protocol="openai_responses",
             )
             require_non_empty_messages(response_request.messages)
-            routed = self._model_router.resolve_messages_request(response_request)
-            capture.set_routing(routed)
+            plan = self._model_router.resolve_messages_plan(response_request)
+            capture.set_routing(plan.primary)
 
             streamed = capture.wrap(
                 self._provider_executor.stream(
-                    routed,
+                    plan,
                     wire_api="responses",
                     raw_log_label="FULL_RESPONSES_PAYLOAD",
                     raw_log_payload=request_payload,
                     request_id=request_id,
+                    on_attempt=capture.set_routing,
                 )
             )
             return await openai_responses_sse_streaming_response(
