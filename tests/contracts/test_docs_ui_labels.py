@@ -1,0 +1,112 @@
+"""Every UI control the docs tell you to press must actually exist.
+
+Part IX has carried "docs drift is unguarded" as a known gap for a long time,
+and it bit for real in 4.40.x: the in-dashboard Guide and ``docs/USAGE.md`` both
+still said "paste a key, press Validate, then Apply and select it as active"
+after the Providers page had been rebuilt around Configure, a key pool, and
+Refresh models. A walkthrough that names a button which no longer exists is
+worse than no walkthrough, because it is read by someone who does not yet know
+the app and cannot tell the difference between "I misread this" and "this lies".
+
+This does not try to check prose for accuracy — nothing can. It checks the one
+mechanical thing that goes stale first and silently: control names.
+"""
+
+from pathlib import Path
+
+import pytest
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+ADMIN_STATIC = REPO_ROOT / "src/free_claude_code/api/admin_static"
+
+# Control labels the user-facing docs instruct the reader to press or look for.
+# Add to this when the docs start naming a new control; the point is that a
+# rename in the UI then fails here instead of quietly making the docs wrong.
+DOCUMENTED_CONTROLS: tuple[str, ...] = (
+    "Search providers",
+    "Only configured",
+    "Configure",
+    "Add key",
+    "Remove",
+    "Rotation",
+    "Refresh models",
+    "Test connection",
+    "Validate",
+    "Apply",
+    "Manage keys",
+)
+
+
+def _ui_surface() -> tuple[str, str]:
+    """Return (script, markup-without-the-Guide).
+
+    The in-dashboard Guide lives inside ``index.html``, so searching that file
+    wholesale makes this check circular: it finds every label in the Guide's own
+    prose and passes whether or not the control still exists. The Guide view is
+    therefore cut out.
+    """
+    script = (ADMIN_STATIC / "admin.js").read_text(encoding="utf-8")
+    markup = (ADMIN_STATIC / "index.html").read_text(encoding="utf-8")
+
+    start = markup.index('<section id="view-guide"')
+    end = markup.index("</section>", markup.index('id="guide-keys"'))
+    chrome = markup[:start] + markup[end:]
+    assert '<section id="view-guide"' not in chrome
+
+    return script, chrome
+
+
+def _defines_control(label: str) -> bool:
+    """True when ``label`` is used *as a control label*, not merely mentioned.
+
+    A plain substring search over the whole file is too loose to be a guard. It
+    matches prose as readily as a button: renaming the two real "Refresh models"
+    buttons still left the hint string "No discovered models. Refresh models or
+    enter a custom slug.", so a substring check passed a UI that no longer had
+    the button. Both weaknesses in this test were found by breaking it on
+    purpose, which is the only way to know a guard works.
+    """
+    script, chrome = _ui_surface()
+
+    quoted_in_script = any(
+        f"{quote}{label}{quote}" in script for quote in ('"', "'", "`")
+    )
+    tag_text_in_markup = f">{label}<" in " ".join(chrome.split())
+    return quoted_in_script or tag_text_in_markup
+
+
+@pytest.mark.parametrize("label", DOCUMENTED_CONTROLS)
+def test_documented_control_exists_in_the_dashboard(label: str) -> None:
+    assert _defines_control(label), (
+        f"The docs name a control {label!r} that the dashboard no longer "
+        "defines. Either restore it, or update docs/USAGE.md, the in-dashboard "
+        "Guide and the README together."
+    )
+
+
+def test_guide_and_usage_describe_the_current_provider_flow() -> None:
+    """Pin the specific claims that were wrong, so they cannot regress.
+
+    Keys added through the pool apply immediately, and there is no "active
+    provider" to select -- the model ref on Model Config decides who serves a
+    request. Both of those were stated incorrectly before 4.40.2.
+    """
+    usage = (REPO_ROOT / "docs/USAGE.md").read_text(encoding="utf-8")
+    guide = (ADMIN_STATIC / "index.html").read_text(encoding="utf-8")
+
+    for name, text in (("USAGE.md", usage), ("the Guide", guide)):
+        assert "Configure" in text, f"{name} does not mention Configure"
+        assert "Refresh models" in text, f"{name} does not mention Refresh models"
+
+    # The two concrete falsehoods that shipped.
+    assert "select it as active" not in guide
+    assert "**Select** that provider as the active one" not in usage
+
+
+def test_readme_points_at_configure_rather_than_a_removed_path() -> None:
+    """The README used to route the reader to "Providers -> Manage keys"."""
+    readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
+
+    assert "Providers → Manage keys" not in readme
+    assert "**Configure**" in readme
+    assert "Refresh models" in readme

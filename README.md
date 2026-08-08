@@ -390,7 +390,7 @@ Rate limits (429) escalate the cooldown ladder but deliberately do **not** open 
 
 **When rotation happens.** Only for errors another key could actually fix: authentication, rate limits, 5xx/overload, and transport failures. A plain 400 fails identically on every key and is not rotated. Failover happens before the first streamed chunk; once output has started, switching credentials would corrupt the response, so a mid-stream failure is recorded against the key but propagated to the client.
 
-All of this is visible and manageable from **Admin UI → Providers → Manage keys**, which shows per-key state and usage and lets you reset keys, plus a **Test** button per provider. For historical per-key request volume, error rate, tokens, and latency, see [Per-Key Attribution](#per-key-attribution).
+All of this is visible and manageable from **Admin UI → Providers**: press **Configure** on a provider's card to open its key pool, which lists every key with its own health and usage, lets you add keys (one, or several comma-separated) and remove them individually, and carries the rotation policy. **Refresh models** on the card face makes a real call to the provider. For historical per-key request volume, error rate, tokens, and latency, see [Per-Key Attribution](#per-key-attribution).
 
 Web search provider keys share the same rotation engine — see [Web Search → Multi-key rotation](#multi-key-rotation-web-search-keys).
 
@@ -650,7 +650,7 @@ Oversized payloads are stored as valid JSON truncation envelopes containing the 
 
 The Admin UI (`http://127.0.0.1:8082/admin`, local-only) is the control center for the whole proxy. It opens on a **Get Started** checklist for first-time setup — provider, model tiers, connecting Claude Code, plus optional web search and analytics — then gets out of the way once dismissed.
 
-- **Providers** — API keys, model catalog, **Validate** / **Apply**, per-provider **Test**, and **Manage keys** for multi-key rotation state (per-key health/usage, key reset).
+- **Providers** — one searchable card per provider (name, id and variable name all match); **Configure** opens its key pool for adding and removing keys with per-key health and usage plus the rotation policy, **Refresh models** makes a live call to that provider, and **Validate** / **Apply** cover the remaining fields.
 - **Model Config** — the `MODEL` picker, model-tier routing (`MODEL_FABLE` / `MODEL_OPUS` / `MODEL_SONNET` / `MODEL_HAIKU`), per-tier fallback chains, the vision adapter, and reasoning control.
 - **Web Search** — configured and last-observed route summaries, strict/fallback policy, provider cards, key health, advanced options, separate route/attempt analytics, and full captured input/output drill-down.
 - **Analytics** — the full model-request observability dashboard (see below).
