@@ -123,12 +123,6 @@
                 precedence over the user file configured above.
               </p>
             </section>
-            <section class="provider-strip" aria-label="Provider status">
-              <div class="strip-header">
-                <h3>Providers</h3>
-              </div>
-              <div id="providerGrid" class="provider-grid"></div>
-            </section>
             <section class="provider-strip" aria-label="Custom providers">
               <div class="strip-header">
                 <h3>Custom providers</h3>
@@ -433,6 +427,15 @@
               <div class="strip-header">
                 <h3>Web Search Providers</h3>
               </div>
+              <label class="pv-search" for="webSearchProviderSearch">
+                <span class="pv-search-label">Search providers</span>
+                <input
+                  id="webSearchProviderSearch"
+                  type="search"
+                  autocomplete="off"
+                  placeholder="Search by name or key…"
+                />
+              </label>
               <div id="webSearchGrid" class="provider-grid"></div>
             </section>
             <div
