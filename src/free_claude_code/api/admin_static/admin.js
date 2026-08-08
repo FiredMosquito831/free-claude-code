@@ -337,6 +337,17 @@ function primaryOnboardingStepId(steps) {
 // the user just closed.
 const ONBOARDING_NOTHING_EXPANDED = "__onboarding_nothing_expanded__";
 
+// A label between the two groups of steps, not a step itself -- listed as
+// presentation so a screen reader announces it as a divider rather than an
+// interactive list item with nothing to activate.
+function onboardingGroupHeading(text) {
+  const heading = document.createElement("li");
+  heading.className = "get-started-group-heading";
+  heading.setAttribute("role", "presentation");
+  heading.textContent = text;
+  return heading;
+}
+
 function renderOnboarding() {
   const onboarding = state.onboarding;
   const progress = byId("getStartedProgress");
@@ -393,8 +404,24 @@ function renderOnboarding() {
     }
   }
 
+  // The 3 required steps are a real causal chain -- a client can't be pointed
+  // anywhere until a model is set, which needs a provider first -- while the
+  // rest are independent extras with no order between them. Rendering all 7
+  // as one undifferentiated list buries that shape behind a per-card
+  // "Optional" pill you have to read every time. Grouping is derived from
+  // `step.optional`, which the step already carries, so nothing new is
+  // stored and the boundary just falls out of the array's existing order.
   list.innerHTML = "";
-  onboarding.steps.forEach((step) => {
+  let optionalHeadingShown = false;
+  onboarding.steps.forEach((step, index) => {
+    if (index === 0 && !step.optional) {
+      list.appendChild(onboardingGroupHeading("Essential"));
+    }
+    if (step.optional && !optionalHeadingShown) {
+      list.appendChild(onboardingGroupHeading("Optional"));
+      optionalHeadingShown = true;
+    }
+
     const expanded = step.id === state.onboardingExpandedStepId;
 
     const item = document.createElement("li");
@@ -430,10 +457,16 @@ function renderOnboarding() {
     label.textContent = step.label;
     header.appendChild(label);
 
+    // A collapsed step reads two ways: closed because it's done, or closed
+    // because it hasn't been opened yet. The pill already says which, but a
+    // scanning eye shouldn't have to read text to tell them apart -- a
+    // finished step gets a check where an unopened one gets the chevron that
+    // invites a click.
     const chevron = document.createElement("span");
-    chevron.className = "get-started-step-chevron";
+    const doneAndCollapsed = step.done && !expanded;
+    chevron.className = `get-started-step-chevron${doneAndCollapsed ? " is-done" : ""}`;
     chevron.setAttribute("aria-hidden", "true");
-    chevron.textContent = "›";
+    chevron.textContent = doneAndCollapsed ? "✓" : "›";
     header.appendChild(chevron);
 
     item.appendChild(header);
@@ -4992,5 +5025,44 @@ function setupGuideScrollspy() {
   mark(headings[0].id);
 }
 
+// Code blocks hold literal env vars, JSON and commands the reader is about to
+// paste elsewhere -- retyping them by hand is exactly the friction this page
+// exists to remove. 127.0.0.1 over plain http is a secure context under the
+// browser's localhost exception, so navigator.clipboard is expected to work
+// here despite the dashboard not being served over https; feature-detected
+// anyway, and a rejected write fails quietly rather than breaking the page --
+// the code stays selectable and readable either way.
+function setupGuideCodeCopy() {
+  if (!navigator.clipboard || !navigator.clipboard.writeText) return;
+  document.querySelectorAll(".guide-body pre").forEach((block) => {
+    const code = block.querySelector("code");
+    if (!code) return;
+
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "guide-copy-button";
+    button.textContent = "Copy";
+    button.setAttribute("aria-label", "Copy code to clipboard");
+    button.addEventListener("click", () => {
+      navigator.clipboard
+        .writeText(code.textContent)
+        .then(() => {
+          button.textContent = "Copied";
+          button.classList.add("is-copied");
+          window.setTimeout(() => {
+            button.textContent = "Copy";
+            button.classList.remove("is-copied");
+          }, 1500);
+        })
+        .catch(() => {
+          // Clipboard writes can fail on permissions or browser policy; the
+          // reader can still select and copy the text by hand.
+        });
+    });
+    block.appendChild(button);
+  });
+}
+
 setupGuideScreenshots();
 setupGuideScrollspy();
+setupGuideCodeCopy();
