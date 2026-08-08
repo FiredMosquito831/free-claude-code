@@ -69,6 +69,9 @@ _LIST_METADATA_COLUMNS = (
     "headers",
     "route_attempt",
     "route_primary_model",
+    "route_chain",
+    "route_diverted_from",
+    "route_diversion",
     "key_index",
     "key_label",
     # Shape of the assistant turn. These are counts, not bodies, so list views
@@ -89,6 +92,9 @@ CREATE TABLE IF NOT EXISTS requests (
     resolved_model TEXT,
     route_attempt INTEGER,
     route_primary_model TEXT,
+    route_chain TEXT,
+    route_diverted_from TEXT,
+    route_diversion TEXT,
     stream INTEGER NOT NULL DEFAULT 0,
     input_text TEXT,
     output_text TEXT,
@@ -138,6 +144,12 @@ _ADDED_COLUMNS = (
         "route_primary_model",
         "ALTER TABLE requests ADD COLUMN route_primary_model TEXT",
     ),
+    ("route_chain", "ALTER TABLE requests ADD COLUMN route_chain TEXT"),
+    (
+        "route_diverted_from",
+        "ALTER TABLE requests ADD COLUMN route_diverted_from TEXT",
+    ),
+    ("route_diversion", "ALTER TABLE requests ADD COLUMN route_diversion TEXT"),
 )
 
 # Indexes over post-release columns, created only once those columns exist.
@@ -179,6 +191,15 @@ class RequestRecord:
     # The model the route resolved to first, recorded only when a later
     # attempt answered -- otherwise it just repeats ``resolved_model``.
     route_primary_model: str | None = None
+    # Every model this request was prepared to try, in order, comma-joined.
+    # Stored even when the primary answers: "the chain existed and was not
+    # needed" and "there was no chain" are different facts about a route.
+    route_chain: str | None = None
+    # The route's own model, when a policy replaced the head of the chain, and
+    # which policy did it (today only the vision adapter). Both null on an
+    # ordinary route, so a non-null pair is the whole signal.
+    route_diverted_from: str | None = None
+    route_diversion: str | None = None
     stream: bool = False
     input_text: str | None = None
     output_text: str | None = None
@@ -436,8 +457,9 @@ class RequestLogStore:
                         duration_ms, status, error_kind, error_message, headers,
                         key_index, key_label, thinking_text, thinking_chars,
                         tool_calls, tool_call_count, route_attempt,
-                        route_primary_model
-                    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                        route_primary_model, route_chain, route_diverted_from,
+                        route_diversion
+                    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                     """,
                     rows,
                 )
@@ -487,6 +509,9 @@ class RequestLogStore:
             record.tool_call_count,
             record.route_attempt,
             record.route_primary_model,
+            record.route_chain,
+            record.route_diverted_from,
+            record.route_diversion,
         )
 
     def close(self, *, timeout: float = 5.0) -> None:
@@ -707,6 +732,8 @@ class RequestLogStore:
                            AS served_by_fallback,
                        SUM(CASE WHEN route_attempt IS NOT NULL THEN 1 ELSE 0 END)
                            AS route_reported,
+                       SUM(CASE WHEN route_diversion IS NOT NULL THEN 1 ELSE 0 END)
+                           AS diverted,
                        AVG(duration_ms) AS avg_duration_ms,
                        AVG(ttft_ms) AS avg_ttft_ms
                 FROM requests{where}
@@ -748,6 +775,24 @@ class RequestLogStore:
                     args,
                 ).fetchall()
             ]
+            diverted_routes = [
+                {
+                    "diverted_from": row[0],
+                    "reason": row[1],
+                    "served_by": row[2],
+                    "count": row[3],
+                }
+                for row in conn.execute(
+                    f"SELECT route_diverted_from, route_diversion,"
+                    " COALESCE(provider, '(unknown)') || '/' ||"
+                    " COALESCE(resolved_model, '(unknown)'), COUNT(*)"
+                    f" FROM requests{where}"
+                    f"{' AND' if where else ' WHERE'} route_diversion IS NOT NULL"
+                    " AND route_diverted_from IS NOT NULL"
+                    " GROUP BY 1, 2, 3 ORDER BY COUNT(*) DESC LIMIT 10",
+                    args,
+                ).fetchall()
+            ]
             series = self._series(conn, where, args, since=since, until=until)
 
         total = totals["total"] or 0
@@ -772,6 +817,8 @@ class RequestLogStore:
             "served_by_fallback": totals["served_by_fallback"] or 0,
             "route_reported": totals["route_reported"] or 0,
             "fallback_routes": fallback_routes,
+            "diverted": totals["diverted"] or 0,
+            "diverted_routes": diverted_routes,
             "avg_duration_ms": _rounded(totals["avg_duration_ms"]),
             "p50_duration_ms": _rounded(percentiles[0.50]),
             "p95_duration_ms": _rounded(percentiles[0.95]),

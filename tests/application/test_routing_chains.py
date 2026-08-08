@@ -2,7 +2,7 @@
 
 import pytest
 
-from free_claude_code.application.routing import ModelRouter
+from free_claude_code.application.routing import ModelRouter, RouteDiversion
 from free_claude_code.config.reasoning import ReasoningPreference
 from free_claude_code.config.settings import Settings
 from free_claude_code.core.anthropic.models import MessagesRequest
@@ -240,3 +240,41 @@ def test_an_image_keeps_the_whole_route_when_nothing_is_known_to_see(settings):
         "nvidia_nim/fallback-model",
         "groq/also-blind",
     )
+
+
+def test_a_plan_records_the_vision_diversion_it_made(settings):
+    """Without this the log cannot tell a diversion from an ordinary route."""
+    settings.model_vision = "open_router/sees-images"
+    router = ModelRouter(settings, vision_lookup=_blind("nvidia_nim/fallback-model"))
+
+    plan = router.resolve_messages_plan(_request(image=True))
+
+    assert plan.diversion is RouteDiversion.VISION
+    assert plan.diverted_from == "nvidia_nim/fallback-model"
+    assert plan.model_refs() == ("open_router/sees-images",)
+
+
+def test_an_undiverted_plan_records_no_diversion(settings):
+    settings.model_vision = "open_router/sees-images"
+    router = ModelRouter(settings, vision_lookup=_blind("nvidia_nim/fallback-model"))
+
+    plan = router.resolve_messages_plan(_request(image=False))
+
+    assert plan.diversion is None
+    assert plan.diverted_from is None
+
+
+def test_a_sighted_chain_promotion_is_recorded_as_a_diversion(settings):
+    """Promoting a sighted fallback also replaces the head of the chain."""
+    settings.model_fallbacks = "cerebras/sees-images"
+    router = ModelRouter(
+        settings,
+        vision_lookup=_sight(
+            {"nvidia_nim/fallback-model": False, "cerebras/sees-images": True}
+        ),
+    )
+
+    plan = router.resolve_messages_plan(_request(image=True))
+
+    assert plan.diversion is RouteDiversion.VISION
+    assert plan.diverted_from == "nvidia_nim/fallback-model"

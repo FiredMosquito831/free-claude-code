@@ -296,11 +296,10 @@ async def test_list_model_ids_returns_known_models(chatgpt_oauth_provider):
     assert "gpt-5.3-codex-spark" in models
     assert "gpt-5.5-pro" not in models
     assert "gpt-5.2-codex" not in models
-    # 5.6 is newer than the 5.4 floor, so the version heuristic admits it. An
-    # explicit exclusion used to contradict that rule and hid the whole 5.6
-    # family from the picker, including the gpt-5.6-luna people configure by
-    # hand.
-    assert "gpt-5.6" in models
+    # "gpt-5.6" is a family name on this plan, not a servable id: only the
+    # -luna, -sol and -terra variants exist, and the bare id 404s.
+    assert "gpt-5.6" not in models
+    assert {"gpt-5.6-luna", "gpt-5.6-sol", "gpt-5.6-terra"} <= models
 
 
 @pytest.mark.asyncio
@@ -669,8 +668,10 @@ def test_model_filter_logic():
     assert _is_chatgpt_oauth_model("gpt-5.4-mini") is True
     assert _is_chatgpt_oauth_model("gpt-5.7") is True
     assert _is_chatgpt_oauth_model("gpt-5.5-pro") is False
-    assert _is_chatgpt_oauth_model("gpt-5.6") is True
+    assert _is_chatgpt_oauth_model("gpt-5.6") is False
     assert _is_chatgpt_oauth_model("gpt-5.6-luna") is True
+    assert _is_chatgpt_oauth_model("gpt-5.6-sol") is True
+    assert _is_chatgpt_oauth_model("gpt-5.6-terra") is True
     assert _is_chatgpt_oauth_model("gpt-5.2-codex") is False
     assert _is_chatgpt_oauth_model("codex-mini-latest") is False
 
@@ -894,4 +895,4 @@ async def test_list_model_ids_falls_back_when_models_dev_is_unavailable(
 
     models = await chatgpt_oauth_provider.list_model_ids()
 
-    assert {"gpt-5.4", "gpt-5.4-mini", "gpt-5.5", "gpt-5.6"} <= models
+    assert {"gpt-5.4", "gpt-5.4-mini", "gpt-5.5", "gpt-5.6-luna"} <= models

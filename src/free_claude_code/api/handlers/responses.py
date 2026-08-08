@@ -78,6 +78,7 @@ class ResponsesHandler:
             )
             require_non_empty_messages(response_request.messages)
             plan = self._model_router.resolve_messages_plan(response_request)
+            capture.set_plan(plan)
             capture.set_routing(plan.primary)
 
             streamed = capture.wrap(

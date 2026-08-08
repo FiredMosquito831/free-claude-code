@@ -893,3 +893,94 @@ def test_cache_reported_distinguishes_unsupported_from_zero(tmp_path) -> None:
     # ...whereas deepseek actively reported zero cached tokens.
     assert rows["deepseek"]["cache_reported"] == 1
     store.close()
+
+
+def test_route_trace_round_trips_chain_attempt_and_diversion(
+    store: RequestLogStore,
+) -> None:
+    """The whole routing decision, not just which model happened to answer.
+
+    Nothing asserted any of this reaching storage before, which is how a vision
+    diversion stayed invisible in the log for three releases: a diverted
+    request looked identical to a route pointing at the adapter model.
+    """
+    store.enqueue(
+        _record(
+            "r_fallback",
+            provider="opencode",
+            resolved_model="deepseek-v4-flash-free",
+            route_attempt=1,
+            route_primary_model="nous_portal/tencent/hy3:free",
+            route_chain=(
+                "nous_portal/tencent/hy3:free,opencode/deepseek-v4-flash-free"
+            ),
+        )
+    )
+    store.enqueue(
+        _record(
+            "r_vision",
+            provider="chatgpt_oauth",
+            resolved_model="gpt-5.6-luna",
+            route_attempt=0,
+            route_chain="chatgpt_oauth/gpt-5.6-luna",
+            route_diverted_from="nous_portal/tencent/hy3:free",
+            route_diversion="vision",
+        )
+    )
+    store.enqueue(_record("r_plain", route_attempt=0, route_chain="nvidia_nim/a"))
+    store.close()
+
+    fallback = store.get_request("r_fallback")
+    assert fallback is not None
+    assert fallback["route_attempt"] == 1
+    assert fallback["route_chain"] == (
+        "nous_portal/tencent/hy3:free,opencode/deepseek-v4-flash-free"
+    )
+    assert fallback["route_diversion"] is None
+
+    vision = store.get_request("r_vision")
+    assert vision is not None
+    assert vision["route_diversion"] == "vision"
+    assert vision["route_diverted_from"] == "nous_portal/tencent/hy3:free"
+    assert vision["route_attempt"] == 0
+
+    stats = store.stats()
+    assert stats["served_by_fallback"] == 1
+    assert stats["diverted"] == 1
+    assert stats["fallback_routes"] == [
+        {
+            "primary": "nous_portal/tencent/hy3:free",
+            "served_by": "opencode/deepseek-v4-flash-free",
+            "count": 1,
+        }
+    ]
+    assert stats["diverted_routes"] == [
+        {
+            "diverted_from": "nous_portal/tencent/hy3:free",
+            "reason": "vision",
+            "served_by": "chatgpt_oauth/gpt-5.6-luna",
+            "count": 1,
+        }
+    ]
+
+
+def test_route_trace_columns_are_added_to_a_pre_existing_database(tmp_path) -> None:
+    """Live databases are 1.7 GB and predate every one of these columns."""
+    path = tmp_path / "requests.db"
+    seed = RequestLogStore(path, max_rows=100)
+    seed.enqueue(_record("old"))
+    seed.close()
+
+    with sqlite3.connect(path) as conn:
+        for column in ("route_chain", "route_diverted_from", "route_diversion"):
+            conn.execute(f"ALTER TABLE requests DROP COLUMN {column}")
+
+    reopened = RequestLogStore(path, max_rows=100)
+    reopened.enqueue(_record("new", route_chain="a/b,c/d", route_diversion="vision"))
+    reopened.close()
+
+    old_row = reopened.get_request("old")
+    new_row = reopened.get_request("new")
+    assert old_row is not None and new_row is not None
+    assert old_row["route_chain"] is None
+    assert new_row["route_chain"] == "a/b,c/d"

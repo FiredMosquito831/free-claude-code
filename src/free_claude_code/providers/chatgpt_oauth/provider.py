@@ -52,7 +52,10 @@ _CHATGPT_OAUTH_ALLOWED_MODELS = frozenset(
         "gpt-5.4-mini",
     }
 )
-_CHATGPT_OAUTH_DISALLOWED_MODELS = frozenset({"gpt-5.5-pro"})
+# Published by models.dev under ``openai`` but not served by the ChatGPT/Codex
+# OAuth backend. ``gpt-5.6`` is a family name here: only the -luna, -sol and
+# -terra variants exist on this plan, and the bare id 404s.
+_CHATGPT_OAUTH_DISALLOWED_MODELS = frozenset({"gpt-5.5-pro", "gpt-5.6"})
 _CHATGPT_OAUTH_GPT_VERSION_RE = re.compile(r"^gpt-(\d+\.\d+)")
 _CHATGPT_OAUTH_MIN_GPT_VERSION = 5.4
 
@@ -64,7 +67,9 @@ _CHATGPT_OAUTH_STATIC_MODELS = frozenset(
         "gpt-5.2",
         "gpt-5.4",
         "gpt-5.5",
-        "gpt-5.6",
+        "gpt-5.6-luna",
+        "gpt-5.6-sol",
+        "gpt-5.6-terra",
         "gpt-5-codex",
         "gpt-5.1-codex",
         "gpt-5.2-codex",

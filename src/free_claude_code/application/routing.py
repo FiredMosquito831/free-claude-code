@@ -2,6 +2,7 @@
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from enum import StrEnum
 
 from loguru import logger
 
@@ -54,6 +55,12 @@ class RoutedTokenCountRequest:
     resolved: ResolvedModel
 
 
+class RouteDiversion(StrEnum):
+    """Why a plan does not start where the route's own model points."""
+
+    VISION = "vision"
+
+
 @dataclass(frozen=True, slots=True)
 class RoutedMessagesPlan:
     """One request and the ordered alternates to try if it cannot be served.
@@ -61,9 +68,16 @@ class RoutedMessagesPlan:
     ``attempts[0]`` is what the route resolves to today; everything after it is
     a configured fallback. A plan with a single attempt behaves exactly like the
     unchained routing it replaces.
+
+    ``diverted_from`` and ``diversion`` record a policy that replaced the head
+    of the chain -- today only the vision adapter. Without them a diverted
+    request is indistinguishable in the log from a route that simply points at
+    that model, so nobody can tell the adapter is doing anything.
     """
 
     attempts: tuple[RoutedMessagesRequest, ...]
+    diverted_from: str | None = None
+    diversion: RouteDiversion | None = None
 
     def __post_init__(self) -> None:
         if not self.attempts:
@@ -260,11 +274,15 @@ class ModelRouter:
 
     def resolve_messages_plan(self, request: MessagesRequest) -> RoutedMessagesPlan:
         """Return the primary routed request plus its configured fallbacks."""
-        chain = self._apply_vision_policy(request, self.resolve_chain(request.model))
+        route_chain = self.resolve_chain(request.model)
+        chain = self._apply_vision_policy(request, route_chain)
+        diverted = chain[0].provider_model_ref != route_chain[0].provider_model_ref
         plan = RoutedMessagesPlan(
-            tuple(self._route_for(request, resolved) for resolved in chain)
+            tuple(self._route_for(request, resolved) for resolved in chain),
+            diverted_from=(route_chain[0].provider_model_ref if diverted else None),
+            diversion=RouteDiversion.VISION if diverted else None,
         )
-        if plan.has_fallbacks:
+        if plan.has_fallbacks or diverted:
             logger.debug(
                 "MODEL CHAIN: '{}' -> {}",
                 request.model,

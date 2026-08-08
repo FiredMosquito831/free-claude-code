@@ -341,6 +341,10 @@
                 <h4>Failover</h4>
                 <div id="reqFallbackRoutes"></div>
               </section>
+              <section class="analytics-panel">
+                <h4>Vision adapter</h4>
+                <div id="reqDivertedRoutes"></div>
+              </section>
             </div>
             <div class="table-scroll">
               <table class="requests-table" aria-label="Request log">
@@ -380,6 +384,7 @@
                   <h3 id="reqDetailTitle">Request detail</h3>
                   <button id="reqDetailClose" class="secondary-button" type="button">Close</button>
                 </div>
+                <div id="reqDetailRoute" class="route-trace" hidden></div>
                 <dl id="reqDetailMeta" class="requests-detail-meta"></dl>
 
                 <div class="transcript">

@@ -14,6 +14,7 @@ from free_claude_code.api.request_capture import (
     extract_request_params,
 )
 from free_claude_code.api.response_streams import ManagedStreamingResponse
+from free_claude_code.application.routing import ModelRouter
 from free_claude_code.config.settings import Settings
 from free_claude_code.core.anthropic.models import Message, MessagesRequest
 from free_claude_code.core.async_iterators import AsyncCloseable
@@ -568,3 +569,142 @@ class TestCacheUsageCapture:
         row = _final_row(store)
         assert row["cache_read_tokens"] == 900
         assert row["cache_write_tokens"] == 50
+
+
+def _vision_router() -> ModelRouter:
+    """A router whose sonnet route is blind and whose vision adapter is not."""
+    settings = Settings()
+    settings.model = "nvidia_nim/blind"
+    settings.model_fable = None
+    settings.model_opus = None
+    settings.model_haiku = None
+    settings.model_sonnet = "nvidia_nim/blind"
+    settings.model_sonnet_fallbacks = "groq/backup"
+    settings.model_fallbacks = None
+    settings.model_vision = "groq/eyes"
+    return ModelRouter(
+        settings,
+        vision_lookup=lambda _provider, model: {"blind": False}.get(model),
+    )
+
+
+def _image_request() -> MessagesRequest:
+    return MessagesRequest.model_validate(
+        {
+            "model": "claude-sonnet-4-6",
+            "max_tokens": 8,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "image",
+                            "source": {
+                                "type": "base64",
+                                "media_type": "image/png",
+                                "data": "aGk=",
+                            },
+                        }
+                    ],
+                }
+            ],
+        }
+    )
+
+
+def test_capture_records_a_vision_diversion(store: RequestLogStore) -> None:
+    """The only trace that the adapter did anything at all."""
+    plan = _vision_router().resolve_messages_plan(_image_request())
+    capture = RequestCapture(
+        store,
+        request_id="req_vision",
+        endpoint="/v1/messages",
+        protocol="anthropic",
+        stream=True,
+        requested_model="claude-sonnet-4-6",
+        input_text="hi",
+        params=None,
+    )
+    capture.set_plan(plan)
+    capture.set_routing(plan.primary, 0)
+    capture.finish_success("ok")
+    store.close()
+
+    row = store.get_request("req_vision")
+    assert row is not None
+    assert row["route_diversion"] == "vision"
+    assert row["route_diverted_from"] == "nvidia_nim/blind"
+    # groq/backup publishes no modality metadata, and silence is not a refusal,
+    # so it survives the diversion as a fallback behind the adapter.
+    assert row["route_chain"] == "groq/eyes,groq/backup"
+    assert row["resolved_model"] == "eyes"
+
+
+def test_capture_records_the_chain_even_when_the_primary_answers(
+    store: RequestLogStore,
+) -> None:
+    """ "A chain existed and was not needed" is not the same as "no chain"."""
+    plan = _vision_router().resolve_messages_plan(
+        MessagesRequest(
+            model="claude-sonnet-4-6",
+            max_tokens=8,
+            messages=[Message(role="user", content="hi")],
+        )
+    )
+    capture = RequestCapture(
+        store,
+        request_id="req_plain",
+        endpoint="/v1/messages",
+        protocol="anthropic",
+        stream=True,
+        requested_model="claude-sonnet-4-6",
+        input_text="hi",
+        params=None,
+    )
+    capture.set_plan(plan)
+    capture.set_routing(plan.primary, 0)
+    capture.finish_success("ok")
+    store.close()
+
+    row = store.get_request("req_plain")
+    assert row is not None
+    assert row["route_chain"] == "nvidia_nim/blind,groq/backup"
+    assert row["route_diversion"] is None
+    assert row["route_attempt"] == 0
+
+
+def test_route_attempt_indexes_the_recorded_chain(store: RequestLogStore) -> None:
+    """The dashboard highlights ``route_chain[route_attempt]``, so it must fit.
+
+    These two columns are written by different calls -- ``set_plan`` once and
+    ``set_routing`` per attempt -- and nothing else checks they stay in step.
+    """
+    plan = _vision_router().resolve_messages_plan(
+        MessagesRequest(
+            model="claude-sonnet-4-6",
+            max_tokens=8,
+            messages=[Message(role="user", content="hi")],
+        )
+    )
+    capture = RequestCapture(
+        store,
+        request_id="req_chain",
+        endpoint="/v1/messages",
+        protocol="anthropic",
+        stream=True,
+        requested_model="claude-sonnet-4-6",
+        input_text="hi",
+        params=None,
+    )
+    capture.set_plan(plan)
+    for index, attempt in enumerate(plan.attempts):
+        capture.set_routing(attempt, index)
+    capture.finish_success("ok")
+    store.close()
+
+    row = store.get_request("req_chain")
+    assert row is not None
+    chain = row["route_chain"].split(",")
+    assert row["route_attempt"] == len(plan.attempts) - 1
+    assert chain[row["route_attempt"]] == "groq/backup"
+    assert chain[row["route_attempt"]] == f"{row['provider']}/{row['resolved_model']}"
