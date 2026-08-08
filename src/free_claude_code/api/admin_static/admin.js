@@ -755,36 +755,27 @@ function prefersReducedMotion() {
   );
 }
 
-// Configured providers surface first within a group: "what do I have
-// working" is the more common question on this page than "what are all my
-// options", so a scan down a group should answer it without reading status
-// pills one by one.
-function providerCardSortRank(provider) {
-  if (provider.status === "configured") return 0;
-  if (provider.status === "missing_key" || provider.status === "missing_url") return 1;
-  if (provider.status === "disabled") return 3;
-  return 2;
-}
-
-function providerCardSort(a, b) {
-  const rank = providerCardSortRank(a) - providerCardSortRank(b);
-  if (rank !== 0) return rank;
-  return (a.display_name || a.provider_id).localeCompare(b.display_name || b.provider_id);
-}
-
-/** Group the providers-section fields by provider and render them as
- * searchable, collapsible card groups instead of one flat grid.
+/** Render the providers section as one flat, searchable grid of cards.
  *
- * Reads `field.provider` and `config.provider_groups` /
- * `provider_status[].group` defensively: those are rollout-in-progress
- * payload keys, and a custom provider may legitimately have no group at all.
- * Anything that cannot be attributed to a provider or a group still renders,
- * just in a fallback bucket, so nothing described in the manifest can ever
- * silently disappear.
+ * There are 35 built-in providers and each one is a small form, not a single
+ * field: a pool of keys with per-key health, a rotation policy, an optional
+ * proxy and base URL, and a model refresh. All 35 forms cannot be open at
+ * once, so a card shows a summary and expands in place to hold the whole
+ * form. That keeps a provider's status and its key fields on ONE card, which
+ * is what the old status-strip-plus-separate-field-grid layout got wrong.
+ *
+ * Deliberately flat: no category grouping, and nothing collapsed by default
+ * beyond a card's own body. Grouping providers by kind hid most of the page
+ * behind headings and made finding one harder rather than easier.
+ *
+ * Reads `field.provider` and `provider_status[]` defensively -- a custom
+ * provider may carry neither, and anything that cannot be attributed to a
+ * provider still renders in an "Other configuration" grid rather than
+ * disappearing.
  */
 function renderProviderGroups(fields) {
   const wrap = document.createElement("div");
-  wrap.className = "pv-groups";
+  wrap.className = "pv-wrap";
 
   const statusById = new Map(
     (state.config?.provider_status || []).map((provider) => [
@@ -804,89 +795,26 @@ function renderProviderGroups(fields) {
     fieldsByProvider.get(field.provider).push(field);
   });
 
-  const groups = state.config?.provider_groups?.length
-    ? state.config.provider_groups
-    : [{ id: "_all", label: "All providers", description: "" }];
-  const fallbackGroupId = groups[0].id;
-
-  const providerIdsByGroup = new Map(groups.map((group) => [group.id, []]));
-  fieldsByProvider.forEach((_fields, providerId) => {
-    const status = statusById.get(providerId);
-    const groupId =
-      status?.group && providerIdsByGroup.has(status.group)
-        ? status.group
-        : fallbackGroupId;
-    providerIdsByGroup.get(groupId).push(providerId);
-  });
-
   wrap.appendChild(renderProviderToolbar(wrap));
 
-  let openedAGroup = false;
-  groups.forEach((group) => {
-    const providerIds = providerIdsByGroup.get(group.id) || [];
-    if (providerIds.length === 0) return;
-    const providers = providerIds
-      .map(
-        (id) =>
-          statusById.get(id) || {
-            provider_id: id,
-            display_name: id,
-            status: "unknown",
-            label: "Unknown",
-          },
-      )
-      .sort(providerCardSort);
-    const configuredCount = providers.filter(
-      (provider) => provider.status === "configured",
-    ).length;
-
-    const details = document.createElement("details");
-    details.className = "pv-group";
-    // The first group with something configured opens by default; if
-    // nothing anywhere is configured yet, the very first group opens
-    // instead, so the page never lands fully collapsed with no visible way
-    // in.
-    if (!openedAGroup && (configuredCount > 0 || group.id === groups[0].id)) {
-      details.open = true;
-      openedAGroup = true;
-    }
-    details.dataset.naturalOpen = details.open ? "true" : "false";
-
-    const summary = document.createElement("summary");
-    summary.className = "pv-group-summary";
-
-    const titleRow = document.createElement("div");
-    titleRow.className = "pv-group-title-row";
-    const title = document.createElement("span");
-    title.className = "pv-group-title";
-    title.textContent = group.label;
-    const count = document.createElement("span");
-    count.className = "pv-group-count";
-    count.textContent = `${configuredCount}/${providers.length} configured`;
-    titleRow.append(title, count);
-    summary.appendChild(titleRow);
-
-    if (group.description) {
-      const desc = document.createElement("p");
-      desc.className = "pv-group-desc";
-      desc.textContent = group.description;
-      summary.appendChild(desc);
-    }
-
-    summary.appendChild(renderProviderDotRail(group, providers, wrap, details));
-    details.appendChild(summary);
-
-    const cardGrid = document.createElement("div");
-    cardGrid.className = "pv-card-grid";
-    providers.forEach((provider) => {
-      cardGrid.appendChild(
-        renderProviderCard(provider, fieldsByProvider.get(provider.provider_id) || []),
-      );
-    });
-    details.appendChild(cardGrid);
-
-    wrap.appendChild(details);
+  const grid = document.createElement("div");
+  grid.className = "provider-grid pv-grid";
+  fieldsByProvider.forEach((providerFields, providerId) => {
+    const provider = statusById.get(providerId) || {
+      provider_id: providerId,
+      display_name: providerId,
+      status: "unknown",
+      label: "Unknown",
+    };
+    grid.appendChild(renderProviderCard(provider, providerFields));
   });
+  wrap.appendChild(grid);
+
+  const empty = document.createElement("p");
+  empty.className = "pv-empty";
+  empty.textContent =
+    "No provider matches that. Try part of the name, or the variable name such as GROQ_API_KEY.";
+  wrap.appendChild(empty);
 
   if (unclaimed.length) {
     const other = document.createElement("section");
@@ -895,56 +823,14 @@ function renderProviderGroups(fields) {
     heading.className = "pv-other-heading";
     heading.textContent = "Other configuration";
     other.appendChild(heading);
-    const grid = document.createElement("div");
-    grid.className = "field-grid";
-    unclaimed.forEach((field) => grid.appendChild(renderField(field)));
-    other.appendChild(grid);
+    const otherGrid = document.createElement("div");
+    otherGrid.className = "field-grid";
+    unclaimed.forEach((field) => otherGrid.appendChild(renderField(field)));
+    other.appendChild(otherGrid);
     wrap.appendChild(other);
   }
 
   return wrap;
-}
-
-// A miniature status map for the group: one dot per provider, colored by
-// status, so "what do I have working in this group" reads before opening it.
-// Each dot is also a jump link -- clicking it expands the group (if
-// collapsed) and scrolls its card into view, which matters most exactly
-// when the dot rail is useful: a big group the person has not opened yet.
-function renderProviderDotRail(group, providers, wrap, details) {
-  const rail = document.createElement("div");
-  rail.className = "pv-dot-rail";
-  rail.setAttribute("role", "list");
-  rail.setAttribute("aria-label", `${group.label} provider status`);
-  providers.forEach((provider) => {
-    const dot = document.createElement("button");
-    dot.type = "button";
-    dot.className = `pv-dot ${statusClass(provider.status)}`;
-    dot.setAttribute("role", "listitem");
-    const dotLabel = `${provider.display_name || provider.provider_id} — ${
-      provider.label || provider.status
-    }`;
-    dot.title = dotLabel;
-    dot.setAttribute("aria-label", dotLabel);
-    dot.addEventListener("click", (event) => {
-      // The dot rail lives inside <summary>; without stopping the event a
-      // click here would also toggle the details element itself, right
-      // after this handler forces it open, and the group would close again.
-      event.preventDefault();
-      event.stopPropagation();
-      details.open = true;
-      const card = wrap.querySelector(`.pv-card[data-provider="${provider.provider_id}"]`);
-      if (!card) return;
-      card.scrollIntoView({
-        behavior: prefersReducedMotion() ? "auto" : "smooth",
-        block: "center",
-      });
-      card.classList.add("pv-card-flash");
-      setTimeout(() => card.classList.remove("pv-card-flash"), 900);
-      card.querySelector("input, select, button")?.focus();
-    });
-    rail.appendChild(dot);
-  });
-  return rail;
 }
 
 function renderProviderToolbar(wrap) {
@@ -958,53 +844,75 @@ function renderProviderToolbar(wrap) {
   searchLabel.textContent = "Search providers";
   const search = document.createElement("input");
   search.type = "search";
-  search.placeholder = "Search by name, key, or URL…";
+  search.placeholder = "Search by name, key, or URL\u2026";
   search.autocomplete = "off";
   searchWrap.append(searchLabel, search);
+
+  const count = document.createElement("span");
+  count.className = "pv-count";
 
   const configuredOnly = document.createElement("label");
   configuredOnly.className = "toggle-control pv-configured-toggle";
   const configuredCheckbox = document.createElement("input");
   configuredCheckbox.type = "checkbox";
-  configuredOnly.append(configuredCheckbox, document.createTextNode("Configured only"));
+  configuredOnly.append(configuredCheckbox, document.createTextNode("Only configured"));
 
   const apply = () =>
-    applyProviderFilter(wrap, search.value.trim().toLowerCase(), configuredCheckbox.checked);
+    applyProviderFilter(
+      wrap,
+      search.value.trim().toLowerCase(),
+      configuredCheckbox.checked,
+      count,
+    );
   search.addEventListener("input", apply);
   configuredCheckbox.addEventListener("change", apply);
+  // Run once after the grid exists so the count is correct on first paint.
+  window.setTimeout(apply, 0);
 
-  toolbar.append(searchWrap, configuredOnly);
+  toolbar.append(searchWrap, count, configuredOnly);
   return toolbar;
 }
 
-// Filtering hides with the `hidden` attribute rather than removing anything:
-// every input stays in the document (so changedValues() and Apply keep
-// working for a provider that is momentarily filtered out) and `hidden`
-// takes the element out of the tab order on its own, so a hidden card cannot
-// trap keyboard focus.
-function applyProviderFilter(wrap, query, configuredOnly) {
-  const filtering = Boolean(query) || configuredOnly;
-  wrap.querySelectorAll(".pv-group").forEach((group) => {
-    let visible = 0;
-    group.querySelectorAll(".pv-card").forEach((card) => {
-      const matchesQuery = !query || (card.dataset.pvSearch || "").includes(query);
-      const matchesConfigured = !configuredOnly || card.dataset.pvConfigured === "true";
-      const show = matchesQuery && matchesConfigured;
-      card.hidden = !show;
-      if (show) visible += 1;
-    });
-    group.hidden = filtering && visible === 0;
-    if (filtering) {
-      if (visible > 0) group.open = true;
-    } else {
-      group.open = group.dataset.naturalOpen === "true";
-    }
+// Filtering hides with the `hidden` attribute and never removes anything:
+// changedValues() finds fields by walking [data-key] across the document, so a
+// detached input would silently stop being saveable. `hidden` also takes an
+// element out of the tab order, so a filtered-out card cannot trap focus.
+function applyProviderFilter(wrap, query, configuredOnly, countEl) {
+  const cards = wrap.querySelectorAll(".pv-card");
+  let shown = 0;
+  let configured = 0;
+  cards.forEach((card) => {
+    if (card.dataset.pvConfigured === "true") configured += 1;
+    const matchesQuery = !query || (card.dataset.pvSearch || "").includes(query);
+    const matchesConfigured = !configuredOnly || card.dataset.pvConfigured === "true";
+    const show = matchesQuery && matchesConfigured;
+    card.hidden = !show;
+    // A filtered-out card must not stay expanded, or it reappears mid-form.
+    if (!show) closeProviderCard(card);
+    if (show) shown += 1;
   });
+  wrap.classList.toggle("pv-no-results", shown === 0);
+  if (countEl) {
+    countEl.textContent =
+      query || configuredOnly
+        ? `${shown} of ${cards.length}`
+        : `${cards.length} providers \u00b7 ${configured} configured`;
+  }
 }
 
+function closeProviderCard(card) {
+  card.classList.remove("pv-open");
+  const configure = card.querySelector(".pv-configure");
+  if (configure) {
+    configure.textContent = "Configure";
+    configure.setAttribute("aria-expanded", "false");
+  }
+}
+
+/** One provider: a summary face, and its whole form behind Configure. */
 function renderProviderCard(provider, fields) {
   const card = document.createElement("article");
-  card.className = "pv-card";
+  card.className = "provider-card pv-card";
   card.dataset.provider = provider.provider_id;
   card.dataset.pvConfigured = provider.status === "configured" ? "true" : "false";
   card.dataset.pvSearch = [
@@ -1029,45 +937,77 @@ function renderProviderCard(provider, fields) {
   title.appendChild(pill);
   card.appendChild(title);
 
-  const metaText =
-    provider.kind === "local"
-      ? provider.base_url || "No local URL configured"
-      : provider.credential_env || "";
-  if (metaText) {
-    const meta = document.createElement("div");
-    meta.className = "provider-meta";
-    meta.textContent = metaText;
-    card.appendChild(meta);
-  }
+  const meta = document.createElement("div");
+  meta.className = "provider-meta";
+  meta.textContent = providerSummaryText(provider);
+  card.appendChild(meta);
 
-  const primaryFields = fields.filter((field) => !field.advanced);
-  const advancedFields = fields.filter((field) => field.advanced);
+  const actions = document.createElement("div");
+  actions.className = "pv-actions";
 
-  const body = document.createElement("div");
-  body.className = "pv-card-fields";
-  primaryFields.forEach((field) => body.appendChild(renderField(field)));
-  card.appendChild(body);
-
-  if (advancedFields.length) {
-    const details = document.createElement("details");
-    details.className = "pv-advanced";
-    const summary = document.createElement("summary");
-    summary.textContent = "Advanced options";
-    details.appendChild(summary);
-    advancedFields.forEach((field) => details.appendChild(renderField(field)));
-    card.appendChild(details);
-  }
+  const configure = document.createElement("button");
+  configure.type = "button";
+  configure.className = "secondary-button pv-configure";
+  configure.textContent = "Configure";
+  configure.setAttribute("aria-expanded", "false");
+  actions.appendChild(configure);
 
   if (provider.custom !== true) {
     const testButton = document.createElement("button");
     testButton.type = "button";
-    testButton.className = "test-button";
-    testButton.textContent = provider.kind === "local" ? "Test" : "Refresh models";
-    testButton.addEventListener("click", () => testProvider(provider.provider_id, testButton));
-    card.appendChild(testButton);
+    testButton.className = "ghost-button test-button";
+    testButton.textContent =
+      provider.kind === "local" ? "Test connection" : "Refresh models";
+    testButton.addEventListener("click", () =>
+      testProvider(provider.provider_id, testButton),
+    );
+    actions.appendChild(testButton);
   }
+  card.appendChild(actions);
+
+  // Every field the provider owns, primary and advanced alike, lives here.
+  // renderField() attaches the multi-key manager and its rotation select for a
+  // credential field, so opening a card gives the whole key pool -- add,
+  // remove, per-key health and rotation policy -- not a single input.
+  const body = document.createElement("div");
+  body.className = "pv-card-body";
+  fields.forEach((field) => body.appendChild(renderField(field)));
+  card.appendChild(body);
+
+  configure.addEventListener("click", () => {
+    if (card.classList.toggle("pv-open")) {
+      configure.textContent = "Done";
+      configure.setAttribute("aria-expanded", "true");
+    } else {
+      closeProviderCard(card);
+    }
+  });
 
   return card;
+}
+
+/** The one line on a card face that says what you actually have. */
+function providerSummaryText(provider) {
+  if (provider.kind === "local") {
+    return provider.base_url || "No local URL configured";
+  }
+  const count = Number(provider.key_count || 0);
+  if (count === 0) return provider.credential_env || "No key yet";
+  const keys = count === 1 ? "1 key" : `${count} keys`;
+  const rotation = count > 1 ? providerRotationLabel(provider) : "";
+  return rotation ? `${keys} \u00b7 ${rotation}` : keys;
+}
+
+function providerRotationLabel(provider) {
+  const field = state.fields?.get(`${provider.credential_env}_ROTATION`);
+  const value = field?.value || field?.default || "";
+  const labels = {
+    single: "Single key",
+    round_robin: "Round robin",
+    least_used: "Least used",
+    failover: "Failover",
+  };
+  return labels[value] || "";
 }
 
 /** Build one field's live control, wired into the dirty/apply machinery.

@@ -3,6 +3,7 @@
 from collections.abc import Mapping
 from typing import Any
 
+from free_claude_code.config.credentials import parse_credential_keys
 from free_claude_code.config.provider_catalog import (
     CUSTOM_PROVIDER_GROUP,
     PROVIDER_CATALOG,
@@ -46,6 +47,11 @@ def provider_config_status(
                 "status": "configured" if configured else "missing_key",
                 "label": "Configured" if configured else "Missing key",
                 "credential_env": descriptor.credential_env,
+                # How many keys are in the pool. Secret values are masked to a
+                # constant before they reach the client, so the Admin UI cannot
+                # derive this itself, and fetching it per provider would mean
+                # one request per provider on every page load.
+                "key_count": len(parse_credential_keys(value)),
             }
         )
     for entry in get_provider_registry().list_custom():
@@ -61,6 +67,7 @@ def provider_config_status(
                 "display_name": entry.display_name,
                 "group": CUSTOM_PROVIDER_GROUP,
                 "kind": "remote",
+                "key_count": len(entry.api_keys),
                 "status": status,
                 "label": label,
                 "custom": True,
