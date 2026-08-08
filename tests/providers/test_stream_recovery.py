@@ -257,3 +257,42 @@ def test_holdback_discard_drops_uncommitted_events() -> None:
     holdback.discard()
 
     assert holdback.flush() == []
+
+
+def test_holdback_window_starts_when_the_upstream_stream_opens() -> None:
+    """Time-to-first-token must not spend the window.
+
+    The opening ``message_start`` frame is built locally and pushed before the
+    upstream request goes out. Anchoring the window there meant a provider with
+    a 9-180s TTFT -- i.e. every provider -- had already blown a 0.75s window by
+    the time its first real byte arrived, so every stream committed on that
+    byte and the model fallback chain could never engage.
+    """
+    now = [10.0]
+    holdback = RecoveryHoldbackBuffer(holdback_seconds=0.75, now=lambda: now[0])
+
+    assert holdback.push("event: message_start\n\n") == []
+    now[0] += 30.0  # the upstream takes half a minute to answer
+    holdback.restart_window()
+
+    assert holdback.push("event: content_block_delta\n\n") == []
+    assert not holdback.committed
+
+    now[0] += 0.76
+    assert holdback.push("event: content_block_stop\n\n") == [
+        "event: message_start\n\n",
+        "event: content_block_delta\n\n",
+        "event: content_block_stop\n\n",
+    ]
+    assert holdback.committed
+
+
+def test_restarting_the_window_after_commit_does_not_uncommit() -> None:
+    holdback = RecoveryHoldbackBuffer(max_bytes=1, now=lambda: 1.0)
+    holdback.push("ab")
+    assert holdback.committed
+
+    holdback.restart_window()
+
+    assert holdback.committed
+    assert holdback.push("cd") == ["cd"]

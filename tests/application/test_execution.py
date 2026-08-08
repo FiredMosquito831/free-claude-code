@@ -81,11 +81,15 @@ class FailingStreamConstructionProvider(FakeProvider):
 
 
 def _routed_request(
-    provider_id: str = "provider", provider_model: str = "provider-model"
+    provider_id: str = "provider",
+    provider_model: str = "provider-model",
+    *,
+    stream: bool = True,
 ) -> RoutedMessagesRequest:
     request = MessagesRequest(
         model=provider_model,
         messages=[Message(role="user", content="hello")],
+        stream=stream,
     )
     return RoutedMessagesRequest(
         request=request,
@@ -261,7 +265,7 @@ async def test_fallback_runs_when_primary_fails_before_the_first_chunk() -> None
 
 @pytest.mark.asyncio
 async def test_failure_after_the_first_chunk_is_never_retried_on_a_fallback() -> None:
-    """The response is committed to the wire; a second model would splice two answers."""
+    """A streaming client has already seen the chunk; a second model would splice."""
     primary = ScriptedProvider(
         chunks=("event: a\n\n",), error=RuntimeError("mid-stream")
     )
@@ -283,6 +287,70 @@ async def test_failure_after_the_first_chunk_is_never_retried_on_a_fallback() ->
     with pytest.raises(RuntimeError, match="mid-stream"):
         await anext(stream)
     assert secondary.stream_calls == []
+
+
+@pytest.mark.asyncio
+async def test_non_streaming_request_falls_back_after_the_first_chunk() -> None:
+    """Nothing reached the client, so a mid-stream failure is still recoverable.
+
+    A non-streaming client is served one aggregated message at the end. Treating
+    the provider's first chunk as a commit made a fallback chain useless for
+    every failure past time-to-first-token, which is where they mostly happen.
+    """
+    primary = ScriptedProvider(
+        chunks=("event: partial\n\n",), error=RuntimeError("mid-stream")
+    )
+    secondary = FakeProvider()
+    executor = _executor({"primary": primary, "secondary": secondary})
+    attempts: list[tuple[int, str]] = []
+
+    stream = executor.stream(
+        _plan(
+            _routed_request("primary", "big", stream=False),
+            _routed_request("secondary", "small", stream=False),
+        ),
+        wire_api="messages",
+        raw_log_label="FULL_PAYLOAD",
+        raw_log_payload={},
+        request_id="req_non_streaming_fallback",
+        on_attempt=lambda routed, index: attempts.append(
+            (index, routed.resolved.provider_model_ref)
+        ),
+    )
+
+    # The failed attempt's partial output is dropped with it: the aggregator
+    # must never see two openings spliced into one message.
+    assert [chunk async for chunk in stream] == ["event: message_stop\ndata: {}\n\n"]
+    assert attempts == [(0, "primary/big"), (1, "secondary/small")]
+    assert primary.stream_close_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_every_attempt_is_announced_even_when_the_chain_is_exhausted() -> None:
+    """The request log must name the last model tried, not the first."""
+    providers = {
+        "primary": FailingPreflightProvider(),
+        "secondary": FailingPreflightProvider(),
+    }
+    executor = _executor(providers)
+    attempts: list[tuple[int, str]] = []
+
+    with pytest.raises(ValueError, match="invalid provider request"):
+        executor.stream(
+            _plan(
+                _routed_request("primary", "big"),
+                _routed_request("secondary", "small"),
+            ),
+            wire_api="messages",
+            raw_log_label="FULL_PAYLOAD",
+            raw_log_payload={},
+            request_id="req_exhausted",
+            on_attempt=lambda routed, index: attempts.append(
+                (index, routed.resolved.provider_model_ref)
+            ),
+        )
+
+    assert attempts == [(0, "primary/big"), (1, "secondary/small")]
 
 
 @pytest.mark.asyncio

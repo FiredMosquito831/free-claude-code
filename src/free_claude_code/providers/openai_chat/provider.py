@@ -376,6 +376,9 @@ class _OpenAIChatStreamRunner:
                 try:
                     stream, body = await self._provider._create_stream(body)
                     stream_opened = True
+                    # Only now can upstream bytes arrive, so only now does the
+                    # holdback window mean anything.
+                    recovery.upstream_opened()
                     tool_argument_aliases = self._provider._tool_argument_aliases(body)
                     async for chunk in stream:
                         chunk_usage = getattr(chunk, "usage", None)

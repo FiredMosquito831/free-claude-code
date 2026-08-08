@@ -60,14 +60,24 @@ class ProviderExecutor:
     ) -> AsyncIterator[str]:
         """Preflight synchronously, then return the traced provider stream.
 
-        Attempts are tried in order until one produces its first chunk. Past
-        that chunk the response is committed to the wire, so a later failure
-        propagates instead of moving to the next model: swapping models
-        mid-stream would splice two different completions into one answer.
+        Attempts are tried in order until one commits to the wire; past that
+        point a failure propagates instead of moving to the next model, because
+        swapping models mid-stream would splice two different completions into
+        one answer.
+
+        What "committed" means depends on the client. A streaming client sees
+        each chunk as it is produced, so the first chunk commits. A
+        non-streaming client is served one aggregated JSON message and sees
+        nothing until the stream ends -- so nothing is committed until the
+        attempt completes, and a failure at any point can still fall back to
+        the next model with the client none the wiser.
         """
         attempts = plan.attempts
+        buffer_until_complete = not plan.primary.request.stream
         failures: list[BaseException] = []
-        prepared = self._prepare_from(attempts, 0, failures, request_id=request_id)
+        prepared = self._prepare_from(
+            attempts, 0, failures, request_id=request_id, on_attempt=on_attempt
+        )
         if prepared is None:
             # Every attempt failed before opening a stream. Raising here keeps
             # the caller's existing synchronous error surface intact.
@@ -106,12 +116,11 @@ class ProviderExecutor:
                     attempt=index,
                     attempt_count=len(attempts),
                 )
-                if on_attempt is not None:
-                    on_attempt(routed, index)
 
                 provider_stream: AsyncIterator[str] | None = None
                 committed = False
                 uncommitted_failure: Exception | None = None
+                held: list[str] = []
                 try:
                     # Baseline attribution for single-credential providers. A
                     # rotating provider overwrites this with the credential it
@@ -124,6 +133,9 @@ class ProviderExecutor:
                         reasoning=routed.reasoning,
                     )
                     async for chunk in provider_stream:
+                        if buffer_until_complete:
+                            held.append(chunk)
+                            continue
                         committed = True
                         yield chunk
                 except Exception as exc:
@@ -139,6 +151,11 @@ class ProviderExecutor:
                             preserved_error=sys.exception(),
                         )
                 if uncommitted_failure is None:
+                    # Empty unless this attempt was held back for a
+                    # non-streaming client; a failed attempt's chunks are
+                    # dropped with it and never reach the aggregator.
+                    for chunk in held:
+                        yield chunk
                     return
 
                 # The failed stream is closed by now, so the next attempt never
@@ -148,7 +165,11 @@ class ProviderExecutor:
                     routed, uncommitted_failure, request_id=request_id, attempt=index
                 )
                 following = self._prepare_from(
-                    attempts, index + 1, failures, request_id=request_id
+                    attempts,
+                    index + 1,
+                    failures,
+                    request_id=request_id,
+                    on_attempt=on_attempt,
                 )
                 if following is None:
                     raise uncommitted_failure
@@ -187,14 +208,22 @@ class ProviderExecutor:
         failures: list[BaseException],
         *,
         request_id: str,
+        on_attempt: AttemptObserver | None = None,
     ) -> tuple[int, ProviderPort] | None:
         """Return the first attempt at or after ``start`` that resolves and preflights.
 
         Preflight runs lazily, one attempt at a time, so a healthy primary never
         pays to validate a fallback it will not use.
+
+        Every candidate is announced to ``on_attempt`` *before* it is tried, so
+        the request log names the last model the chain reached even when every
+        attempt fails. Announcing only the winner made an exhausted three-model
+        chain indistinguishable from a primary that failed on its own.
         """
         for index in range(start, len(attempts)):
             routed = attempts[index]
+            if on_attempt is not None:
+                on_attempt(routed, index)
             try:
                 provider = self._provider_resolver(routed.resolved.provider_id)
                 provider.preflight_stream(routed.request, reasoning=routed.reasoning)

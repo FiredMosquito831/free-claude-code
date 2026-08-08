@@ -62,6 +62,20 @@ class RecoveryHoldbackBuffer:
         self._started_at: float | None = None
         self.committed = False
 
+    def restart_window(self) -> None:
+        """Re-anchor the holdback window to the next event, keeping the buffer.
+
+        The opening ``message_start`` frame is built locally and pushed *before*
+        the upstream request goes out, so anchoring the window to it spends the
+        whole holdback on time-to-first-token -- measured at 9-180s against a
+        0.75s window. Every stream then committed on its first upstream byte,
+        which silently disabled both invisible early retry and the model
+        fallback chain. Re-anchoring when the upstream stream opens makes the
+        window mean what its name says.
+        """
+        if not self.committed:
+            self._started_at = None
+
     def push(self, event: str) -> list[str]:
         if self.committed:
             return [event]
@@ -124,6 +138,10 @@ class RecoveryController:
 
     def push(self, event: str) -> list[str]:
         return self._holdback.push(event)
+
+    def upstream_opened(self) -> None:
+        """Start the holdback window now that upstream bytes can actually flow."""
+        self._holdback.restart_window()
 
     def flush(self) -> list[str]:
         return self._holdback.flush()
