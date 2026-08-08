@@ -51,9 +51,25 @@ class CustomProviderEntry:
     added_at: str = ""
 
 
+def _slug(display_name: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "_", display_name.lower()).strip("_")
+
+
 def _slugify(display_name: str) -> str:
-    slug = re.sub(r"[^a-z0-9]+", "_", display_name.lower()).strip("_")
-    return slug or "provider"
+    return _slug(display_name) or "provider"
+
+
+def custom_provider_id(display_name: str) -> str:
+    """Return the id this display name claims, or ``""`` if it slugs to nothing.
+
+    The admin API needs the id *before* calling :meth:`ProviderRegistry.add`, to
+    reject a duplicate name and a name with no usable characters. Deriving it
+    here keeps one implementation of the rule: a second copy in the API layer
+    drifted from this one and produced ids the registry never allocated.
+    """
+
+    slug = _slug(display_name)
+    return f"{CUSTOM_PROVIDER_ID_PREFIX}{slug}" if slug else ""
 
 
 def _utc_now_iso() -> str:

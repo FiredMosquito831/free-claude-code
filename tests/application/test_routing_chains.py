@@ -170,3 +170,73 @@ def test_blind_fallbacks_are_dropped_from_a_diverted_chain(settings):
         "open_router/sees-images",
         "cerebras/unknown",
     )
+
+
+def _sight(capability: dict[str, bool]):
+    """Vision lookup with explicit per-ref answers; unlisted refs stay unknown."""
+
+    def lookup(provider_id: str, model_id: str) -> bool | None:
+        return capability.get(f"{provider_id}/{model_id}")
+
+    return lookup
+
+
+def test_a_sighted_fallback_leads_when_no_vision_adapter_is_configured(settings):
+    """A chain member that can see beats a model documented to reject images.
+
+    Without this the image went to the known-blind primary, which either fails
+    or -- worse -- answers about an image it never received.
+    """
+    settings.model_fallbacks = "groq/also-blind,cerebras/sees-images"
+    router = ModelRouter(
+        settings,
+        vision_lookup=_sight(
+            {
+                "nvidia_nim/fallback-model": False,
+                "groq/also-blind": False,
+                "cerebras/sees-images": True,
+            }
+        ),
+    )
+
+    assert _refs(router, _request(image=True)) == ("cerebras/sees-images",)
+
+
+def test_a_text_request_keeps_the_blind_models_in_the_chain(settings):
+    settings.model_fallbacks = "groq/also-blind,cerebras/sees-images"
+    router = ModelRouter(
+        settings,
+        vision_lookup=_sight(
+            {
+                "nvidia_nim/fallback-model": False,
+                "groq/also-blind": False,
+                "cerebras/sees-images": True,
+            }
+        ),
+    )
+
+    assert _refs(router, _request(image=False)) == (
+        "nvidia_nim/fallback-model",
+        "groq/also-blind",
+        "cerebras/sees-images",
+    )
+
+
+def test_an_image_keeps_the_whole_route_when_nothing_is_known_to_see(settings):
+    """Every candidate is blind: leave the route intact rather than route nowhere.
+
+    Dropping the blind entries here would leave an empty plan, which is worse
+    than letting the request fail against the model the user actually chose.
+    """
+    settings.model_fallbacks = "groq/also-blind"
+    router = ModelRouter(
+        settings,
+        vision_lookup=_sight(
+            {"nvidia_nim/fallback-model": False, "groq/also-blind": False}
+        ),
+    )
+
+    assert _refs(router, _request(image=True)) == (
+        "nvidia_nim/fallback-model",
+        "groq/also-blind",
+    )

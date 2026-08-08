@@ -295,8 +295,12 @@ async def test_list_model_ids_returns_known_models(chatgpt_oauth_provider):
     assert "gpt-5.4-mini" in models
     assert "gpt-5.3-codex-spark" in models
     assert "gpt-5.5-pro" not in models
-    assert "gpt-5.6" not in models
     assert "gpt-5.2-codex" not in models
+    # 5.6 is newer than the 5.4 floor, so the version heuristic admits it. An
+    # explicit exclusion used to contradict that rule and hid the whole 5.6
+    # family from the picker, including the gpt-5.6-luna people configure by
+    # hand.
+    assert "gpt-5.6" in models
 
 
 @pytest.mark.asyncio
@@ -665,7 +669,8 @@ def test_model_filter_logic():
     assert _is_chatgpt_oauth_model("gpt-5.4-mini") is True
     assert _is_chatgpt_oauth_model("gpt-5.7") is True
     assert _is_chatgpt_oauth_model("gpt-5.5-pro") is False
-    assert _is_chatgpt_oauth_model("gpt-5.6") is False
+    assert _is_chatgpt_oauth_model("gpt-5.6") is True
+    assert _is_chatgpt_oauth_model("gpt-5.6-luna") is True
     assert _is_chatgpt_oauth_model("gpt-5.2-codex") is False
     assert _is_chatgpt_oauth_model("codex-mini-latest") is False
 
@@ -847,3 +852,46 @@ async def test_stream_response_refreshes_managed_credentials_once_after_401(
     assert second_call.kwargs["headers"]["Authorization"] == "Bearer access_new"
     unauthorized.aclose.assert_awaited_once()
     success.aclose.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_list_model_ids_discovers_new_models_from_models_dev(
+    chatgpt_oauth_provider, monkeypatch
+):
+    """The catalog comes from models.dev, so a new GPT-5.x needs no code change.
+
+    The backend's own models endpoint answers 401 for an OAuth session, which
+    is why discovery reads the models.dev index FCC already caches.
+    """
+    from free_claude_code.providers.chatgpt_oauth import provider as provider_module
+
+    monkeypatch.setattr(
+        provider_module,
+        "models_dev_provider_model_ids",
+        lambda _provider: frozenset({"gpt-5.9-nova", "gpt-4o", "gpt-5.5-pro"}),
+    )
+
+    models = await chatgpt_oauth_provider.list_model_ids()
+
+    assert "gpt-5.9-nova" in models
+    assert "gpt-4o" not in models
+    assert "gpt-5.5-pro" not in models
+    # The static ids remain, so an empty or stale cache never empties the picker.
+    assert "gpt-5.5" in models
+
+
+@pytest.mark.asyncio
+async def test_list_model_ids_falls_back_when_models_dev_is_unavailable(
+    chatgpt_oauth_provider, monkeypatch
+):
+    from free_claude_code.providers.chatgpt_oauth import provider as provider_module
+
+    monkeypatch.setattr(
+        provider_module,
+        "models_dev_provider_model_ids",
+        lambda _provider: frozenset(),
+    )
+
+    models = await chatgpt_oauth_provider.list_model_ids()
+
+    assert {"gpt-5.4", "gpt-5.4-mini", "gpt-5.5", "gpt-5.6"} <= models

@@ -1,6 +1,13 @@
-"""Admin custom provider CRUD endpoints with an injected fake registry."""
+"""Admin custom provider CRUD endpoints against the real provider registry.
 
-from dataclasses import dataclass, replace
+These tests used to inject a hand-written fake registry. Its ``add()`` took a
+prebuilt entry, the real ``ProviderRegistry.add()`` takes the fields and
+allocates the id itself, and nothing compared the two -- so every create
+returned HTTP 500 in production while this file stayed green. The registry is
+an in-memory dict plus one JSON file, so there is no reason to double it: point
+the real thing at ``tmp_path`` and the contract cannot drift again.
+"""
+
 from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock
@@ -9,67 +16,35 @@ import pytest
 from fastapi.testclient import TestClient
 
 from free_claude_code.api import admin_custom_routes
+from free_claude_code.config.provider_registry import ProviderRegistry
 from tests.api.support import create_test_app, runtime_for_app
 
 _ENV_KEYS = ("FCC_ENV_FILE",)
 
 
-@dataclass(frozen=True, slots=True)
-class FakeEntry:
-    provider_id: str
-    display_name: str
-    base_url: str
-    api_keys: tuple[str, ...]
-    credential_rotation: str
-    proxy: str | None
-    enabled: bool
-    added_at: str
+def _registry(tmp_path: Path) -> ProviderRegistry:
+    return ProviderRegistry(tmp_path / "custom_providers.json")
 
 
-class FakeRegistry:
-    """In-memory stand-in for config.provider_registry.ProviderRegistry."""
-
-    def __init__(self) -> None:
-        self.entries: dict[str, FakeEntry] = {}
-
-    def list_custom(self) -> list[FakeEntry]:
-        return list(self.entries.values())
-
-    def get(self, provider_id: str) -> FakeEntry | None:
-        return self.entries.get(provider_id)
-
-    def add(self, entry: FakeEntry) -> None:
-        if entry.provider_id in self.entries:
-            raise ValueError(f"duplicate provider id: {entry.provider_id}")
-        self.entries[entry.provider_id] = entry
-
-    def update(self, provider_id: str, **changes) -> None:
-        entry = self.entries[provider_id]  # KeyError when missing
-        self.entries[provider_id] = replace(entry, **changes)
-
-    def remove(self, provider_id: str) -> None:
-        del self.entries[provider_id]  # KeyError when missing
-
-
-def _seed_entry(**overrides: Any) -> FakeEntry:
-    fields: dict[str, Any] = {
-        "provider_id": "custom_acme",
-        "display_name": "Acme",
-        "base_url": "https://api.acme.example/v1",
-        "api_keys": ("sk-acme-aaaa1111bbbb",),
-        "credential_rotation": "failover",
-        "proxy": None,
-        "enabled": True,
-        "added_at": "2026-01-01T00:00:00+00:00",
-    }
-    return FakeEntry(**(fields | overrides))
+def _seeded_registry(tmp_path: Path, **overrides: Any) -> ProviderRegistry:
+    """Return a registry holding one ``custom_acme`` entry."""
+    registry = _registry(tmp_path)
+    entry = registry.add(
+        display_name="Acme",
+        base_url="https://api.acme.example/v1",
+        api_keys=("sk-acme-aaaa1111bbbb",),
+        credential_rotation="failover",
+    )
+    if overrides:
+        registry.update(entry.provider_id, **overrides)
+    return registry
 
 
 def _local_client(app):
     return TestClient(app, client=("127.0.0.1", 50000))
 
 
-def _make_app(monkeypatch, tmp_path: Path, registry: FakeRegistry):
+def _make_app(monkeypatch, tmp_path: Path, registry: ProviderRegistry):
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("USERPROFILE", str(tmp_path))
     monkeypatch.chdir(tmp_path)
@@ -90,7 +65,7 @@ def _make_app(monkeypatch, tmp_path: Path, registry: FakeRegistry):
 
 
 def test_list_custom_providers_empty(monkeypatch, tmp_path):
-    app, _, _ = _make_app(monkeypatch, tmp_path, FakeRegistry())
+    app, _, _ = _make_app(monkeypatch, tmp_path, _registry(tmp_path))
 
     response = _local_client(app).get("/admin/api/custom-providers")
 
@@ -99,8 +74,7 @@ def test_list_custom_providers_empty(monkeypatch, tmp_path):
 
 
 def test_list_custom_providers_serializes_entries(monkeypatch, tmp_path):
-    registry = FakeRegistry()
-    registry.add(_seed_entry())
+    registry = _seeded_registry(tmp_path)
     app, _, _ = _make_app(monkeypatch, tmp_path, registry)
 
     response = _local_client(app).get("/admin/api/custom-providers")
@@ -118,7 +92,7 @@ def test_list_custom_providers_serializes_entries(monkeypatch, tmp_path):
     assert provider["status"] == "configured"
     assert provider["models"] == []
     assert provider["model_count"] == 0
-    assert provider["added_at"] == "2026-01-01T00:00:00+00:00"
+    assert provider["added_at"].startswith("20")
     assert "sk-acme-aaaa1111bbbb" not in response.text
 
 
@@ -131,8 +105,7 @@ def test_list_custom_providers_serializes_entries(monkeypatch, tmp_path):
     ],
 )
 def test_list_custom_providers_status_mapping(monkeypatch, tmp_path, overrides, status):
-    registry = FakeRegistry()
-    registry.add(_seed_entry(**overrides))
+    registry = _seeded_registry(tmp_path, **overrides)
     app, _, _ = _make_app(monkeypatch, tmp_path, registry)
 
     response = _local_client(app).get("/admin/api/custom-providers")
@@ -141,7 +114,7 @@ def test_list_custom_providers_status_mapping(monkeypatch, tmp_path, overrides, 
 
 
 def test_create_custom_provider_registers_and_detects_models(monkeypatch, tmp_path):
-    registry = FakeRegistry()
+    registry = _registry(tmp_path)
     app, reload_providers, test_provider = _make_app(monkeypatch, tmp_path, registry)
 
     response = _local_client(app).post(
@@ -179,7 +152,7 @@ def test_create_custom_provider_registers_and_detects_models(monkeypatch, tmp_pa
 
 
 def test_create_custom_provider_test_failure_is_non_fatal(monkeypatch, tmp_path):
-    registry = FakeRegistry()
+    registry = _registry(tmp_path)
     app, reload_providers, test_provider = _make_app(monkeypatch, tmp_path, registry)
     test_provider.return_value = {
         "provider_id": "custom_acme_ai",
@@ -206,7 +179,7 @@ def test_create_custom_provider_test_failure_is_non_fatal(monkeypatch, tmp_path)
 
 
 def test_create_custom_provider_default_rotation(monkeypatch, tmp_path):
-    registry = FakeRegistry()
+    registry = _registry(tmp_path)
     app, _, _ = _make_app(monkeypatch, tmp_path, registry)
 
     response = _local_client(app).post(
@@ -223,7 +196,7 @@ def test_create_custom_provider_default_rotation(monkeypatch, tmp_path):
 
 
 def test_create_custom_provider_duplicate_slug_is_409(monkeypatch, tmp_path):
-    registry = FakeRegistry()
+    registry = _registry(tmp_path)
     app, _, _ = _make_app(monkeypatch, tmp_path, registry)
     payload = {
         "display_name": "Acme",
@@ -265,7 +238,7 @@ def test_create_custom_provider_duplicate_slug_is_409(monkeypatch, tmp_path):
     ],
 )
 def test_create_custom_provider_validation_errors(monkeypatch, tmp_path, payload):
-    app, reload_providers, _ = _make_app(monkeypatch, tmp_path, FakeRegistry())
+    app, reload_providers, _ = _make_app(monkeypatch, tmp_path, _registry(tmp_path))
 
     response = _local_client(app).post("/admin/api/custom-providers", json=payload)
 
@@ -274,8 +247,7 @@ def test_create_custom_provider_validation_errors(monkeypatch, tmp_path, payload
 
 
 def test_update_custom_provider_applies_changes_and_reloads(monkeypatch, tmp_path):
-    registry = FakeRegistry()
-    registry.add(_seed_entry())
+    registry = _seeded_registry(tmp_path)
     app, reload_providers, _ = _make_app(monkeypatch, tmp_path, registry)
 
     response = _local_client(app).patch(
@@ -301,8 +273,7 @@ def test_update_custom_provider_applies_changes_and_reloads(monkeypatch, tmp_pat
 
 
 def test_update_custom_provider_clears_proxy(monkeypatch, tmp_path):
-    registry = FakeRegistry()
-    registry.add(_seed_entry(proxy="http://127.0.0.1:8080"))
+    registry = _seeded_registry(tmp_path, proxy="http://127.0.0.1:8080")
     app, _, _ = _make_app(monkeypatch, tmp_path, registry)
 
     response = _local_client(app).patch(
@@ -315,7 +286,7 @@ def test_update_custom_provider_clears_proxy(monkeypatch, tmp_path):
 
 
 def test_update_custom_provider_unknown_is_404(monkeypatch, tmp_path):
-    app, reload_providers, _ = _make_app(monkeypatch, tmp_path, FakeRegistry())
+    app, reload_providers, _ = _make_app(monkeypatch, tmp_path, _registry(tmp_path))
 
     response = _local_client(app).patch(
         "/admin/api/custom-providers/custom_nope",
@@ -327,8 +298,7 @@ def test_update_custom_provider_unknown_is_404(monkeypatch, tmp_path):
 
 
 def test_update_custom_provider_empty_body_is_422(monkeypatch, tmp_path):
-    registry = FakeRegistry()
-    registry.add(_seed_entry())
+    registry = _seeded_registry(tmp_path)
     app, reload_providers, _ = _make_app(monkeypatch, tmp_path, registry)
 
     response = _local_client(app).patch(
@@ -349,8 +319,7 @@ def test_update_custom_provider_empty_body_is_422(monkeypatch, tmp_path):
     ],
 )
 def test_update_custom_provider_validation_errors(monkeypatch, tmp_path, payload):
-    registry = FakeRegistry()
-    registry.add(_seed_entry())
+    registry = _seeded_registry(tmp_path)
     app, reload_providers, _ = _make_app(monkeypatch, tmp_path, registry)
 
     response = _local_client(app).patch(
@@ -363,8 +332,7 @@ def test_update_custom_provider_validation_errors(monkeypatch, tmp_path, payload
 
 
 def test_add_custom_provider_key_appends_and_reloads(monkeypatch, tmp_path):
-    registry = FakeRegistry()
-    registry.add(_seed_entry())
+    registry = _seeded_registry(tmp_path)
     app, reload_providers, _ = _make_app(monkeypatch, tmp_path, registry)
 
     response = _local_client(app).post(
@@ -388,8 +356,7 @@ def test_add_custom_provider_key_appends_and_reloads(monkeypatch, tmp_path):
 
 
 def test_add_custom_provider_key_duplicate_is_409(monkeypatch, tmp_path):
-    registry = FakeRegistry()
-    registry.add(_seed_entry())
+    registry = _seeded_registry(tmp_path)
     app, _, _ = _make_app(monkeypatch, tmp_path, registry)
 
     response = _local_client(app).post(
@@ -401,7 +368,7 @@ def test_add_custom_provider_key_duplicate_is_409(monkeypatch, tmp_path):
 
 
 def test_add_custom_provider_key_unknown_provider_is_404(monkeypatch, tmp_path):
-    app, _, _ = _make_app(monkeypatch, tmp_path, FakeRegistry())
+    app, _, _ = _make_app(monkeypatch, tmp_path, _registry(tmp_path))
 
     response = _local_client(app).post(
         "/admin/api/custom-providers/custom_nope/keys",
@@ -415,8 +382,7 @@ def test_add_custom_provider_key_unknown_provider_is_404(monkeypatch, tmp_path):
 def test_add_custom_provider_key_rejects_empty_or_comma_keys(
     monkeypatch, tmp_path, bad_key
 ):
-    registry = FakeRegistry()
-    registry.add(_seed_entry())
+    registry = _seeded_registry(tmp_path)
     app, reload_providers, _ = _make_app(monkeypatch, tmp_path, registry)
 
     response = _local_client(app).post(
@@ -429,8 +395,9 @@ def test_add_custom_provider_key_rejects_empty_or_comma_keys(
 
 
 def test_delete_custom_provider_key_removes_index(monkeypatch, tmp_path):
-    registry = FakeRegistry()
-    registry.add(_seed_entry(api_keys=("sk-acme-aaaa1111bbbb", "sk-acme-cccc2222dddd")))
+    registry = _seeded_registry(
+        tmp_path, api_keys=("sk-acme-aaaa1111bbbb", "sk-acme-cccc2222dddd")
+    )
     app, reload_providers, _ = _make_app(monkeypatch, tmp_path, registry)
 
     response = _local_client(app).delete(
@@ -446,8 +413,7 @@ def test_delete_custom_provider_key_removes_index(monkeypatch, tmp_path):
 
 
 def test_delete_custom_provider_last_key_keeps_provider(monkeypatch, tmp_path):
-    registry = FakeRegistry()
-    registry.add(_seed_entry())
+    registry = _seeded_registry(tmp_path)
     app, _, _ = _make_app(monkeypatch, tmp_path, registry)
 
     response = _local_client(app).delete(
@@ -462,8 +428,7 @@ def test_delete_custom_provider_last_key_keeps_provider(monkeypatch, tmp_path):
 
 
 def test_delete_custom_provider_key_out_of_range_is_404(monkeypatch, tmp_path):
-    registry = FakeRegistry()
-    registry.add(_seed_entry())
+    registry = _seeded_registry(tmp_path)
     app, reload_providers, _ = _make_app(monkeypatch, tmp_path, registry)
 
     response = _local_client(app).delete(
@@ -475,8 +440,7 @@ def test_delete_custom_provider_key_out_of_range_is_404(monkeypatch, tmp_path):
 
 
 def test_delete_custom_provider_removes_and_reloads(monkeypatch, tmp_path):
-    registry = FakeRegistry()
-    registry.add(_seed_entry())
+    registry = _seeded_registry(tmp_path)
     app, reload_providers, _ = _make_app(monkeypatch, tmp_path, registry)
 
     response = _local_client(app).delete("/admin/api/custom-providers/custom_acme")
@@ -492,7 +456,7 @@ def test_delete_custom_provider_removes_and_reloads(monkeypatch, tmp_path):
 
 
 def test_delete_custom_provider_unknown_is_404(monkeypatch, tmp_path):
-    app, reload_providers, _ = _make_app(monkeypatch, tmp_path, FakeRegistry())
+    app, reload_providers, _ = _make_app(monkeypatch, tmp_path, _registry(tmp_path))
 
     response = _local_client(app).delete("/admin/api/custom-providers/custom_nope")
 
@@ -526,8 +490,7 @@ def test_delete_custom_provider_unknown_is_404(monkeypatch, tmp_path):
 def test_custom_provider_endpoints_are_loopback_only(
     monkeypatch, tmp_path, method, path, payload
 ):
-    registry = FakeRegistry()
-    registry.add(_seed_entry())
+    registry = _seeded_registry(tmp_path)
     app, _, _ = _make_app(monkeypatch, tmp_path, registry)
     remote = TestClient(app, client=("203.0.113.10", 50000))
 

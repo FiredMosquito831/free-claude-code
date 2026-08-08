@@ -70,6 +70,30 @@ def read_models_dev_cache(path: Path | None = None) -> ModelsDevCache | None:
     )
 
 
+def models_dev_provider_model_ids(
+    provider: str, path: Path | None = None
+) -> frozenset[str]:
+    """Return the model ids models.dev publishes for one provider.
+
+    Empty when the cache is missing or does not know the provider, so a caller
+    can fall back to whatever it knows statically rather than losing models on
+    a fresh install with no network.
+    """
+
+    cache = read_models_dev_cache(path)
+    if cache is None:
+        return frozenset()
+    bucket = cache.index.get(provider)
+    if not isinstance(bucket, Mapping):
+        return frozenset()
+    models = bucket.get("models")
+    if not isinstance(models, Mapping):
+        return frozenset()
+    return frozenset(
+        model_id for model_id in models if isinstance(model_id, str) and model_id
+    )
+
+
 def write_models_dev_cache(index: Mapping[str, Any], path: Path | None = None) -> Path:
     """Atomically persist the models.dev index with a fetch timestamp."""
     cache_path = path if path is not None else models_dev_cache_path()

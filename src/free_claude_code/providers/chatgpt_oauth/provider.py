@@ -27,6 +27,9 @@ from free_claude_code.providers.base import BaseProvider, ProviderConfig
 from free_claude_code.providers.failure_policy import classify_provider_failure
 from free_claude_code.providers.model_listing import model_infos_from_ids
 from free_claude_code.providers.rate_limit import ProviderRateLimiter
+from free_claude_code.providers.runtime.models_dev import (
+    models_dev_provider_model_ids,
+)
 
 from .conversion import build_chatgpt_oauth_request_body
 from .credentials import (
@@ -51,6 +54,27 @@ _CHATGPT_OAUTH_ALLOWED_MODELS = frozenset(
 )
 _CHATGPT_OAUTH_DISALLOWED_MODELS = frozenset({"gpt-5.5-pro"})
 _CHATGPT_OAUTH_GPT_VERSION_RE = re.compile(r"^gpt-(\d+\.\d+)")
+_CHATGPT_OAUTH_MIN_GPT_VERSION = 5.4
+
+# Known ids to fall back on when the models.dev catalog is unavailable -- a
+# fresh install with no network still gets a usable picker.
+_CHATGPT_OAUTH_STATIC_MODELS = frozenset(
+    {
+        "gpt-5",
+        "gpt-5.2",
+        "gpt-5.4",
+        "gpt-5.5",
+        "gpt-5.6",
+        "gpt-5-codex",
+        "gpt-5.1-codex",
+        "gpt-5.2-codex",
+        "gpt-5.3-codex",
+        "gpt-5.3-codex-spark",
+        "gpt-5.4-mini",
+        "gpt-5.5-pro",
+        "codex-mini-latest",
+    }
+)
 
 
 def _user_agent() -> str:
@@ -69,13 +93,11 @@ def _is_chatgpt_oauth_model(model_id: str) -> bool:
     """
     if model_id in _CHATGPT_OAUTH_DISALLOWED_MODELS:
         return False
-    if model_id == "gpt-5.6":
-        return False
     if model_id in _CHATGPT_OAUTH_ALLOWED_MODELS:
         return True
     match = _CHATGPT_OAUTH_GPT_VERSION_RE.match(model_id)
     if match:
-        return float(match.group(1)) > 5.4
+        return float(match.group(1)) > _CHATGPT_OAUTH_MIN_GPT_VERSION
     return False
 
 
@@ -129,28 +151,18 @@ class ChatGPTOAuthProvider(BaseProvider):
         await self._client.aclose()
 
     async def list_model_ids(self) -> frozenset[str]:
-        """Return a static set of known ChatGPT/Codex OAuth model ids.
+        """Return the ChatGPT/Codex OAuth model ids, discovered where possible.
 
-        The Responses API models endpoint requires a valid session and is not
-        reliably probe-able during discovery, so we expose the ids that the
-        upstream documentation and community implementations reference.
-        The list is filtered to match OpenCode's ChatGPT/Codex OAuth allowlist.
+        The backend's own models endpoint answers 401 for an OAuth session, so
+        the catalog cannot come from the gateway. It comes from models.dev's
+        ``openai`` catalog instead -- which FCC already fetches and caches for
+        other providers -- filtered by the same allowlist rule. That keeps new
+        GPT-5.x releases appearing without a code change, and falls back to the
+        known static ids when the cache is absent.
         """
-        candidates = {
-            "gpt-5",
-            "gpt-5.2",
-            "gpt-5.4",
-            "gpt-5.5",
-            "gpt-5.6",
-            "gpt-5-codex",
-            "gpt-5.1-codex",
-            "gpt-5.2-codex",
-            "gpt-5.3-codex",
-            "gpt-5.3-codex-spark",
-            "gpt-5.4-mini",
-            "gpt-5.5-pro",
-            "codex-mini-latest",
-        }
+        candidates = models_dev_provider_model_ids("openai") | (
+            _CHATGPT_OAUTH_STATIC_MODELS
+        )
         return frozenset(m for m in candidates if _is_chatgpt_oauth_model(m))
 
     async def list_model_infos(self) -> frozenset[ProviderModelInfo]:
