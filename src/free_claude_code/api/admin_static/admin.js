@@ -30,6 +30,9 @@ const state = {
   fields: new Map(),
   localStatus: new Map(),
   modelOptions: [],
+  // Models the provider itself says reject images. Empty is honest:
+  // an unreported capability is not a refusal.
+  blindModels: new Set(),
   modelComboboxes: new Set(),
   activeView: "providers",
   webSearchStatsPeriod: "daily",
@@ -592,6 +595,82 @@ function renderRouteCard(tier, fieldByKey) {
   return card;
 }
 
+/** Where this tier sends a request that carries an image.
+ *
+ * The fallback rail answers "what covers this model when it fails". It cannot
+ * answer "what happens to a screenshot", because the vision adapter fires on
+ * what the request *contains* rather than on a failure -- so it never appeared
+ * on the rail and the routing page simply did not mention it. A tier whose
+ * model is documented not to read images silently sends them somewhere else,
+ * and that was invisible until it showed up in the request log.
+ */
+function buildVisionHop(tierModel, visionModel) {
+  const hop = document.createElement("p");
+  hop.className = `route-vision-hop${visionModel ? "" : " is-unset"}`;
+
+  const label = document.createElement("span");
+  label.className = "route-vision-hop-label";
+  label.textContent = "Images";
+  hop.appendChild(label);
+
+  const arrow = document.createElement("span");
+  arrow.className = "route-vision-hop-arrow";
+  arrow.setAttribute("aria-hidden", "true");
+  arrow.textContent = "→";
+  hop.appendChild(arrow);
+
+  const target = document.createElement("code");
+  target.textContent = visionModel || "nowhere — set a Vision adapter";
+  hop.appendChild(target);
+
+  const why = document.createElement("span");
+  why.className = "route-vision-hop-why";
+  why.textContent = visionModel
+    ? `${tierModel} cannot read them`
+    : `${tierModel} cannot read them, so they will fail here`;
+  hop.appendChild(why);
+  return hop;
+}
+
+/** Current live value of a routing field, falling back to the default route. */
+function routedModelValue(key) {
+  const direct = String((state.fields.get(key) || {}).value || "").trim();
+  if (direct) return direct;
+  return String((state.fields.get("MODEL") || {}).value || "").trim();
+}
+
+/** Re-draw the vision hops and the adapter summary from the current state.
+ *
+ * Called again after the model catalog loads, because the routing section is
+ * rendered from the config payload *before* the blind-model set arrives -- so
+ * the first paint has no idea which tiers need the adapter. Updating in place
+ * rather than re-rendering keeps unsaved edits in the fields untouched.
+ */
+function updateVisionRouting() {
+  const visionModel = String(
+    (state.fields.get("MODEL_VISION") || {}).value || "",
+  ).trim();
+  const covered = [];
+  ROUTE_TIERS.forEach((tier) => {
+    const card = document.querySelector(`.route-card[data-tier="${tier.id}"]`);
+    if (!card) return;
+    const existing = card.querySelector(".route-vision-hop");
+    if (existing) existing.remove();
+    const tierModel = routedModelValue(tier.modelKey);
+    if (!tierModel || !state.blindModels.has(tierModel)) return;
+    covered.push(tier.label);
+    card.appendChild(buildVisionHop(tierModel, visionModel));
+  });
+
+  const summary = document.querySelector(".route-vision-summary");
+  if (!summary) return;
+  summary.classList.toggle("is-idle", covered.length === 0);
+  summary.textContent = covered.length
+    ? `Currently covers ${covered.join(", ")} — those tiers picked a model ` +
+      "that cannot read images."
+    : "No tier needs it right now: no tier's model is known to reject images.";
+}
+
 function renderModelRouting(fields) {
   const fieldByKey = new Map(fields.map((field) => [field.key, field]));
   const wrap = document.createElement("div");
@@ -637,17 +716,34 @@ function renderModelRouting(fields) {
       "the tier resolves to.";
     vision.appendChild(note);
 
+    // The adapter is a route, so it gets a route's rail: its own model on
+    // top and its own fallbacks under it, using the same editor as every
+    // tier rather than a second way to express the same idea.
+    const rail = document.createElement("div");
+    rail.className = "field route-rail route-vision-control";
     const { control } = buildFieldControl(visionField);
-    const visionControl = document.createElement("div");
-    visionControl.className = "field route-vision-control";
-    visionControl.appendChild(control);
-    vision.appendChild(visionControl);
+    rail.appendChild(routeNode("", control, "is-primary"));
+    const visionChainField = fieldByKey.get("MODEL_VISION_FALLBACKS");
+    if (visionChainField) {
+      const { control: chainControl } = buildFieldControl(visionChainField);
+      rail.appendChild(chainControl);
+    }
+    vision.appendChild(rail);
+
+    // Which tiers this actually covers today. "It fires when a model cannot
+    // read images" is a rule; this is the answer for *your* configuration,
+    // which is the thing you came to the page to find out. The text is filled
+    // by updateVisionRouting, which runs again once the catalog has loaded.
+    const summary = document.createElement("p");
+    summary.className = "route-vision-summary is-idle";
+    vision.appendChild(summary);
     wrap.appendChild(vision);
   }
 
   // Anything the manifest adds to this section later still has to appear.
   const claimed = new Set([
     "MODEL_VISION",
+    "MODEL_VISION_FALLBACKS",
     ...ROUTE_TIERS.flatMap((tier) => [tier.modelKey, tier.chainKey]),
   ]);
   const unclaimed = fields.filter((field) => !claimed.has(field.key));
@@ -1898,6 +1994,7 @@ async function loadModelOptions(refresh = false) {
     method: refresh ? "POST" : "GET",
   });
   setModelOptions(result.models);
+  setBlindModels(result.blind_models);
   return result;
 }
 
@@ -2092,6 +2189,13 @@ function providerDisplayName(providerId) {
     (candidate) => candidate.provider_id === providerId,
   );
   return provider?.display_name || providerId;
+}
+
+function setBlindModels(models) {
+  state.blindModels = new Set(
+    (models || []).filter((model) => typeof model === "string" && model.trim()),
+  );
+  updateVisionRouting();
 }
 
 function setModelOptions(models) {
@@ -4458,10 +4562,16 @@ function formatFallbackShare(stats) {
 function formatRouteAttempt(row) {
   const attempt = row.route_attempt;
   if (attempt == null) return null;
-  if (Number(attempt) === 0) return "Primary model";
-  return row.route_primary_model
+  // A diverted request is served by attempt 0 of a chain the vision policy
+  // rewrote, so "Primary model" would name the wrong decision entirely.
+  const diverted = row.route_diverted_from
+    ? `${routeDiversionLabel(row.route_diversion)}, instead of ${row.route_diverted_from}`
+    : null;
+  if (Number(attempt) === 0) return diverted || "Primary model";
+  const fallback = row.route_primary_model
     ? `Fallback ${attempt}, after ${row.route_primary_model}`
     : `Fallback ${attempt}`;
+  return diverted ? `${fallback} (${diverted})` : fallback;
 }
 
 const ROUTE_DIVERSION_LABELS = {

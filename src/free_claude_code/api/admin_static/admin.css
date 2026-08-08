@@ -3369,3 +3369,69 @@ details.turn-pane > summary:focus-visible {
   background: var(--accent-muted);
   color: var(--accent);
 }
+
+/* Where a tier sends an image ----------------------------------------------
+   The fallback rail answers "what covers this model when it fails". This
+   answers "what happens to a screenshot", which is a different question and
+   was not on the page at all. It only appears on a tier whose model is
+   documented not to read images, so its presence is itself the signal. */
+.route-vision-hop {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  margin: 12px 0 0;
+  padding: 9px 12px;
+  border: 1px dashed var(--accent-border);
+  border-radius: var(--radius-sm);
+  background: var(--accent-muted);
+  font-size: 11.5px;
+  line-height: 1.45;
+  min-width: 0;
+}
+
+.route-vision-hop code {
+  font-family: var(--font-mono);
+  color: var(--text-strong);
+  overflow-wrap: anywhere;
+}
+
+.route-vision-hop-label {
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--accent);
+  text-transform: uppercase;
+  font-size: 10.5px;
+}
+
+.route-vision-hop-arrow {
+  color: var(--accent);
+}
+
+.route-vision-hop-why {
+  flex-basis: 100%;
+  color: var(--muted);
+}
+
+/* No adapter configured: the images have nowhere to go, which is a warning
+   rather than a routing fact. */
+.route-vision-hop.is-unset {
+  border-color: var(--warn-border);
+  background: var(--warn-bg);
+}
+
+.route-vision-hop.is-unset .route-vision-hop-label,
+.route-vision-hop.is-unset .route-vision-hop-arrow {
+  color: var(--warn);
+}
+
+.route-vision-summary {
+  margin: 12px 0 0;
+  color: var(--text-strong);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.route-vision-summary.is-idle {
+  color: var(--muted);
+}

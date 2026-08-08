@@ -311,15 +311,20 @@ class ModelRouter:
         if self._supports_vision(chain[0]) is not False:
             return chain
 
-        vision_model = self._vision_adapter_model(chain[0])
-        vision_ref = vision_model.provider_model_ref if vision_model else None
+        vision_chain = self._vision_adapter_chain(chain[0])
+        vision_model = vision_chain[0] if vision_chain else None
+        vision_refs = {resolved.provider_model_ref for resolved in vision_chain}
         # A fallback that is itself known to be blind would answer a question
-        # about an image it cannot see, which is worse than failing.
-        sighted = tuple(
-            resolved
-            for resolved in chain
-            if resolved.provider_model_ref != vision_ref
-            and self._supports_vision(resolved) is not False
+        # about an image it cannot see, which is worse than failing. The
+        # adapter's own chain leads, then whatever on the route can still see.
+        sighted = (
+            *vision_chain[1:],
+            *(
+                resolved
+                for resolved in chain
+                if resolved.provider_model_ref not in vision_refs
+                and self._supports_vision(resolved) is not False
+            ),
         )
         if vision_model is not None:
             logger.info(
@@ -347,28 +352,53 @@ class ModelRouter:
         )
         return chain
 
-    def _vision_adapter_model(self, primary: ResolvedModel) -> ResolvedModel | None:
-        """Resolve ``MODEL_VISION`` into a routable model, or None."""
-        vision_ref = self._settings.model_vision
-        if not vision_ref:
-            return None
-        provider_id = parse_provider_type(vision_ref)
-        try:
-            self._validate_provider_id(provider_id)
-        except UnknownProviderError:
-            logger.warning(
-                "VISION ROUTE SKIPPED: '{}' names unknown provider '{}'",
-                vision_ref,
-                provider_id,
-            )
-            return None
-        return ResolvedModel(
-            original_model=primary.original_model,
-            provider_id=provider_id,
-            provider_model=parse_model_name(vision_ref),
-            provider_model_ref=vision_ref,
-            reasoning_preference=primary.reasoning_preference,
+    def _vision_adapter_chain(
+        self, primary: ResolvedModel
+    ) -> tuple[ResolvedModel, ...]:
+        """Resolve ``MODEL_VISION`` plus its own fallbacks into routable models.
+
+        The adapter is a route like any other and gets the same safety net: a
+        single unreachable vision model would otherwise lose every image on the
+        machine. An entry known to reject images is dropped -- putting a blind
+        model in a *vision* chain is always a mistake, not a preference.
+        """
+        if not self._settings.model_vision:
+            return ()
+        resolved: list[ResolvedModel] = []
+        seen: set[str] = set()
+        candidates = (
+            self._settings.model_vision,
+            *parse_model_ref_list(self._settings.model_vision_fallbacks),
         )
+        for model_ref in candidates:
+            if model_ref in seen:
+                continue
+            seen.add(model_ref)
+            provider_id = parse_provider_type(model_ref)
+            try:
+                self._validate_provider_id(provider_id)
+            except UnknownProviderError:
+                logger.warning(
+                    "VISION ROUTE SKIPPED: '{}' names unknown provider '{}'",
+                    model_ref,
+                    provider_id,
+                )
+                continue
+            candidate = ResolvedModel(
+                original_model=primary.original_model,
+                provider_id=provider_id,
+                provider_model=parse_model_name(model_ref),
+                provider_model_ref=model_ref,
+                reasoning_preference=primary.reasoning_preference,
+            )
+            if self._supports_vision(candidate) is False:
+                logger.warning(
+                    "VISION ROUTE SKIPPED: '{}' is known not to accept images",
+                    model_ref,
+                )
+                continue
+            resolved.append(candidate)
+        return tuple(resolved)
 
     def _supports_vision(self, resolved: ResolvedModel) -> bool | None:
         if self._vision_lookup is None:

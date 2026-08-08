@@ -28,6 +28,7 @@ class ChatModelConfig(Protocol):
     model_sonnet_fallbacks: str | None
     model_haiku_fallbacks: str | None
     model_vision: str | None
+    model_vision_fallbacks: str | None
 
 
 def parse_provider_type(model_ref: str) -> str:
@@ -89,6 +90,7 @@ def configured_chat_model_refs(
         ("MODEL_OPUS_FALLBACKS", settings.model_opus_fallbacks),
         ("MODEL_SONNET_FALLBACKS", settings.model_sonnet_fallbacks),
         ("MODEL_HAIKU_FALLBACKS", settings.model_haiku_fallbacks),
+        ("MODEL_VISION_FALLBACKS", settings.model_vision_fallbacks),
     )
     for source, raw in chains:
         candidates.extend(

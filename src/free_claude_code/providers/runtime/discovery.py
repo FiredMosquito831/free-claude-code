@@ -21,8 +21,6 @@ from .validation import provider_query_failure_reason
 
 ProviderResolver = Callable[[str], BaseProvider]
 
-_MODELS_DEV_ENRICHED_STATIC_PROVIDERS = frozenset({"novita"})
-
 
 def referenced_provider_ids(settings: Settings) -> frozenset[str]:
     """Return provider ids referenced by configured chat model refs."""
@@ -52,13 +50,6 @@ def model_list_provider_ids_for_settings(settings: Settings) -> tuple[str, ...]:
         for provider_id in model_cache_provider_ids_for_settings(settings)
         if not descriptors[provider_id].local or provider_id in referenced_ids
     )
-
-
-def _models_dev_enrichable(provider_id: str) -> bool:
-    if provider_id in _MODELS_DEV_ENRICHED_STATIC_PROVIDERS:
-        return True
-    descriptor = get_provider_registry().all_descriptors().get(provider_id)
-    return descriptor is not None and descriptor.dynamic
 
 
 class ProviderModelDiscovery:
@@ -113,11 +104,14 @@ class ProviderModelDiscovery:
                     self._log_discovery_failure(provider_id, result)
                     failed_provider_ids.append(provider_id)
                     continue
-                model_infos = result
-                if _models_dev_enrichable(provider_id):
-                    model_infos = await models_dev.enrich_provider_model_infos(
-                        model_infos
-                    )
+                # Every provider is enriched from models.dev, not just the
+                # few that report nothing themselves. Enrichment only fills
+                # fields the provider left null, so a gateway that publishes
+                # its own modality metadata keeps it -- and the ~30 providers
+                # that publish none stop being a blind spot. Without this,
+                # "this model cannot read images" was unanswerable for most
+                # of the catalog, and vision routing silently never fired.
+                model_infos = await models_dev.enrich_provider_model_infos(result)
                 self._model_cache.cache_model_infos(provider_id, model_infos)
                 refreshed_provider_ids.append(provider_id)
                 logger.info(
