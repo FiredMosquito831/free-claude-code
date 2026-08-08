@@ -48,7 +48,8 @@ Run your coding agents with free, paid, or local models. Choose and validate pro
 | --- | --- |
 | **Coding agents** | Launch Claude Code with `fcc-claude`, Codex with `fcc-codex`, or Pi with `fcc-pi`; Codex and Pi's native model pickers always list the FCC catalog, Claude Code's needs `fcc-claude --discover-models` (or `fcc-claude-old`). |
 | **Model providers** | 27 cloud and local providers, including Kimi For Coding and an experimental ChatGPT OAuth provider. Switch and validate providers from the Admin UI. |
-| **Model-tier routing** | Route Fable, Opus, Sonnet, Haiku, and fallback traffic to different models. |
+| **Model-tier routing** | Route Fable, Opus, Sonnet, Haiku, and fallback traffic to different models, each with an ordered fallback chain. |
+| **Vision adapter** | Image requests are diverted to a model that can see when the tier's own model cannot, with its own fallback chain. |
 | **Protocol fidelity** | Streaming, tool use, reasoning, and image input preserved across compatible models, with configurable reasoning control. |
 | **Key rotation** | Multi-key credential rotation for both model and web search providers: comma-separated keys, four rotation policies, health tracking with cooldowns/circuit breaking/lockout, and per-key admin management. |
 | **Web search** | Claude Code's official `web_search` server tool fulfilled at the proxy level by 14 search providers, with 66 advanced per-provider options, full-page-text retrieval, domain filtering, rich result digests, and zero-config keyless fallback. |
@@ -416,9 +417,14 @@ Each is a comma-separated list of `provider/model` refs, in priority order — f
 
 A tier with its own override uses only its own chain; the two are never merged. So `MODEL_OPUS` set means Opus tries `MODEL_OPUS` then `MODEL_OPUS_FALLBACKS`, while an unset `MODEL_SONNET` means Sonnet tries `MODEL` then `MODEL_FALLBACKS`.
 
-**Failover stops at the first streamed chunk.** A model that fails while connecting, authenticating, rate-limiting or before emitting anything is replaced silently; one that fails *after* it has begun answering is not, because the reply is already on the wire and switching models mid-answer would splice two different completions together. Requests that name a provider and model directly (`open_router/…`) are never redirected — an explicit choice is honoured as given.
+**Failover stops when the client has actually seen bytes.** A model that fails while connecting, authenticating, rate-limiting, or before emitting anything is replaced silently. What counts as "seen" depends on the client:
 
-Each fallback is recorded in the request log against the model that actually answered, so **Analytics** shows which model served a request rather than which one the route started from.
+- **Streaming requests** commit at the first chunk. A model that fails *after* it has begun answering is not replaced, because the reply is already on the wire and switching mid-answer would splice two different completions together.
+- **Non-streaming requests** commit at the end. The response is assembled into a single message before the client sees anything, so a failure at *any* point still falls back, and the failed attempt's partial output is discarded with it.
+
+Requests that name a provider and model directly (`open_router/…`) are never redirected — an explicit choice is honoured as given.
+
+Every attempt is recorded. **Analytics** shows the model that actually answered rather than the one the route started from, and the request detail draws the whole chain — see [Route tracing](#route-tracing).
 
 ### Vision Adapter
 
@@ -427,6 +433,12 @@ Set `MODEL_VISION` to a model that accepts images and FCC will route image-carry
 Capability is read from what each provider publishes about its own models (OpenRouter-dialect gateways report `input_modalities`; others are enriched from models.dev). A model whose provider reports nothing is left alone rather than diverted: most providers publish no modality data at all, and rerouting on silence would move traffic away from models that handle images perfectly well.
 
 When the diversion happens, any fallbacks that are themselves known to be image-blind are dropped from the chain for that request — answering a question about an image it cannot see is worse than failing.
+
+**The adapter has its own chain.** `MODEL_VISION_FALLBACKS` takes the same comma-separated `provider/model` list as the tier chains, so one unreachable vision model does not lose every image on the machine. An image request tries `MODEL_VISION`, then its fallbacks, then whatever on the original route can still see. An entry known to reject images is skipped — putting a blind model in a *vision* chain is always a mistake rather than a preference.
+
+**Model Config shows which tiers need it.** A tier whose model is known not to read images carries a line under its fallback chain naming where its images actually go, and the Vision adapter card lists the tiers it currently covers. With no adapter configured the same line turns amber and says the images will fail there.
+
+Capability metadata is topped up from the [models.dev](https://models.dev) catalog for **every** provider, not just the ones that publish modality data themselves — without that, "can this model read a screenshot?" is unanswerable for most of the catalog. A provider's own answer always wins where it has one, and a model nobody reports on stays untouched.
 
 ### Reasoning Control
 
@@ -651,7 +663,7 @@ Oversized payloads are stored as valid JSON truncation envelopes containing the 
 The Admin UI (`http://127.0.0.1:8082/admin`, local-only) is the control center for the whole proxy. It opens on a **Get Started** checklist for first-time setup — provider, model tiers, connecting Claude Code, plus optional web search and analytics — then gets out of the way once dismissed.
 
 - **Providers** — one searchable card per provider (name, id and variable name all match); **Configure** opens its key pool for adding and removing keys with per-key health and usage plus the rotation policy, **Refresh models** makes a live call to that provider, and **Validate** / **Apply** cover the remaining fields.
-- **Model Config** — the `MODEL` picker, model-tier routing (`MODEL_FABLE` / `MODEL_OPUS` / `MODEL_SONNET` / `MODEL_HAIKU`), per-tier fallback chains, the vision adapter, and reasoning control.
+- **Model Config** — the `MODEL` picker, model-tier routing (`MODEL_FABLE` / `MODEL_OPUS` / `MODEL_SONNET` / `MODEL_HAIKU`), per-tier fallback chains, the vision adapter and its own chain, and reasoning control.
 - **Web Search** — configured and last-observed route summaries, strict/fallback policy, provider cards, key health, advanced options, separate route/attempt analytics, and full captured input/output drill-down.
 - **Analytics** — the full model-request observability dashboard (see below).
 - **Messaging** — Discord/Telegram bot and voice-note settings.
@@ -678,6 +690,28 @@ REQUEST_LOG_CAPTURE_BODIES=true   # false stores only body lengths + SHA-256 has
   <img src="assets/admin-analytics.png" alt="Request analytics overview with metric cards and charts" width="820">
   <p><em>Analytics overview: metric cards, requests over time, and tokens by model — all obeying the same filter row.</em></p>
 </div>
+
+<a id="route-tracing"></a>
+
+#### Route Tracing
+
+Every request records the **whole routing decision**, not just the model that happened to answer:
+
+| Field | What it records |
+| --- | --- |
+| `route_chain` | every model the request was prepared to try, in order |
+| `route_attempt` | which entry in that chain answered — `0` is the route's own model |
+| `route_primary_model` | what it fell back *from*, when a fallback answered |
+| `route_diverted_from` | the route's own model, when a policy replaced it |
+| `route_diversion` | which policy did — today, `vision` |
+
+The chain is stored **even when the primary answers**, because "a chain existed and was not needed" and "there was no chain" are different facts about a route, and only the first one tells you your fallbacks are configured.
+
+Open any request and the chain is drawn as a path, each hop marked *answered*, *failed*, or *not needed* — in words as well as colour. A request the vision adapter diverted says so in a sentence naming the model that could not read the image.
+
+The Analytics view adds a **Served by fallback** card, a **Failover** panel pairing each failing primary with what covered for it, and a **Vision adapter** panel doing the same for image diversions. Rows in the request table carry a `fallback N` or `vision` badge.
+
+Requests logged before 4.42.0 have no chain recorded, so the panel is hidden for them rather than inventing a single-hop chain — those rows never recorded whether fallbacks existed.
 
 #### Per-Key Attribution
 
@@ -735,7 +769,9 @@ FCC can talk directly to `chatgpt.com/backend-api/codex/responses` (OpenAI Respo
 
 FCC stores its renewable credentials separately at `~/.fcc/auth/chatgpt-oauth.json`. The Admin API and `.env` contain only a non-secret managed-credential reference. A raw `CHATGPT_OAUTH_ACCESS_TOKEN` remains supported as an advanced override, but it cannot be refreshed.
 
-Supported models include `chatgpt_oauth/gpt-5.5`, `chatgpt_oauth/gpt-5.4`, `chatgpt_oauth/gpt-5.4-mini`, and `chatgpt_oauth/gpt-5.3-codex-spark`. Optional overrides: `CHATGPT_OAUTH_ACCOUNT_ID`, `CHATGPT_OAUTH_BASE_URL`, `CHATGPT_OAUTH_PROXY`.
+**The model list is discovered, not hardcoded.** The Codex backend answers `401` on its own models endpoint for an OAuth session, so the catalog cannot come from the gateway. FCC reads the [models.dev](https://models.dev) `openai` catalog it already caches and filters it by the same allowlist the Codex CLI uses — so a new GPT-5.x release appears after a **Refresh models** rather than after a new FCC version. A static list is used when that cache is unavailable, so a fresh offline install still has a usable picker.
+
+Currently exposed: `gpt-5.5`, `gpt-5.4`, `gpt-5.4-mini`, `gpt-5.3-codex-spark`, `gpt-5.6-luna`, `gpt-5.6-sol`, and `gpt-5.6-terra`. Note that `gpt-5.6` is a family name rather than a callable id on this plan — the bare id returns 404, so only the three named variants are offered. Optional overrides: `CHATGPT_OAUTH_ACCOUNT_ID`, `CHATGPT_OAUTH_BASE_URL`, `CHATGPT_OAUTH_PROXY`.
 
 **ChatGPT OAuth is experimental and unsanctioned.** It is not an official OpenAI API product. The ChatGPT/Codex backend only exposes a limited set of built-in tools, so custom FCC tools may be rejected; use it at your own risk.
 

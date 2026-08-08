@@ -378,6 +378,33 @@ So when Claude Code requests "Sonnet", it receives whatever you mapped Sonnet to
 
 **Set the fallback deliberately.** It catches requests for models you haven't mapped. Pointing it at something cheap avoids nasty surprises.
 
+### Fallback chains
+
+Every tier can carry an ordered list of stand-ins. Press **Add fallback** under a tier's model, name a second model, and add a third if you want. When the model a request routes to cannot serve it, the next entry takes over — a free model that rate-limits at an awkward moment stops being the end of the request.
+
+Each chain belongs to its own tier and they are never merged: a tier with its own model tries its own chain, and a tier left on **None** tries `MODEL` and `MODEL_FALLBACKS`.
+
+**Failover stops once you have seen output.** This is the part people get wrong:
+
+| The model fails… | What happens |
+| --- | --- |
+| while connecting, authenticating, or rate-limiting | the next model takes over, invisibly |
+| before it emits anything | the next model takes over, invisibly |
+| halfway through streaming its answer | the request fails |
+| at any point, for a **non-streaming** request | the next model takes over — nothing reached you yet |
+
+A chain rescues the failures that happen before the first word, not the ones that happen at word five hundred. Switching models mid-answer would splice two different replies together, so FCC refuses to.
+
+Requests that name a provider and model directly (`open_router/…`) are never redirected. An explicit choice is honoured as given.
+
+### Images and the vision adapter
+
+Plenty of fast text-only models cannot read a screenshot. Set a **Vision adapter** on Model Config and any request carrying an image goes there instead — but only when the tier's own model is *known* not to accept images. A model whose provider publishes no capability data is left alone, because rerouting on silence would move traffic away from models that handle images perfectly well.
+
+You do not have to work out which of your models are affected: a tier that needs the adapter says so on its own card, naming where its images actually go. If no adapter is set, the same line turns amber to say those images will fail there.
+
+The adapter is a route like any other, so it gets its own **Add fallback** chain. One unreachable vision model would otherwise lose every image on the machine.
+
 ### Reasoning control
 
 Providers expose reasoning differently. FCC resolves your intent once at the boundary and each provider adapter translates it, so you configure it in one place rather than per provider. See the Model Config tab.
@@ -514,7 +541,23 @@ Input is reported in two parts, because cached and uncached prompt tokens bill d
 >
 > Prompt caching is provider-dependent. OpenAI reports it for prefixes of 1,024+ tokens; DeepSeek reports it with its own fields. **NVIDIA NIM's hosted endpoint does not do real prefix caching** — it returns a small constant regardless of repetition — so a near-zero rate there is accurate rather than a fault. NVIDIA exposes prefix caching as a self-hosted deployment toggle (`NIM_ENABLE_KV_CACHE_REUSE`), not on the shared API.
 
-Every row has a **View** dialog showing the full request and response, the resolved configuration, and timing. It's usually the fastest way to see what actually happened.
+#### Which model actually answered
+
+A request does not always go where the tier points. **View** on any row draws the whole path it took:
+
+```
+nous_portal/tencent/hy3:free                    failed
+nvidia_nim/nvidia/nemotron-3-ultra-550b-a55b    failed
+opencode/deepseek-v4-flash-free                 answered
+```
+
+The chain is recorded even when your first choice answers, so you can confirm your fallbacks are configured without waiting for something to break. Rows carry a `fallback N` badge when a stand-in served them, and a `vision` badge when the vision adapter took the request instead — those say, in a sentence, which model could not read the image.
+
+Two panels summarise it across the window: **Failover** pairs each failing primary with what covered for it, and **Vision adapter** does the same for image diversions. The **Served by fallback** card shows how often the safety net engaged; a `—` there means no request in the window recorded routing data at all, which is different from a measured zero.
+
+Requests logged before v4.42.0 have no chain recorded, so the panel is hidden for them rather than inventing one.
+
+Every row's dialog also shows the full request and response, the resolved configuration, and timing. It's usually the fastest way to see what actually happened.
 
 ```bash
 REQUEST_LOG_ENABLED=true
