@@ -68,7 +68,9 @@ _PROVIDER_FIELD_OVERRIDES: dict[str, dict[str, Any]] = {
             "Qwen Coding Plan subscription, Singapore region. The key starts with "
             "`sk-sp-` and comes from the Coding Plan page of "
             "[Model Studio](https://bailian.console.alibabacloud.com/) — a "
-            "pay-per-token key will not work here. Alibaba restricts this plan to "
+            "pay-per-token key will not work here. Pairing the plan with the wrong "
+            "endpoint bills pay-as-you-go instead of drawing on the subscription, "
+            "so keep this key on this provider. Alibaba restricts the plan to "
             "interactive coding tools."
         ),
     },
@@ -86,16 +88,22 @@ _PROVIDER_FIELD_OVERRIDES: dict[str, dict[str, Any]] = {
         "description": (
             "Pay-per-token Model Studio (Bailian) key for the Singapore region, from "
             "[bailian.console.alibabacloud.com](https://bailian.console.alibabacloud.com/). "
-            "Billed per token rather than by subscription. Set the Base URL below to "
-            "reach another region or a workspace-scoped endpoint."
+            "**Billed per token.** If you hold a Coding Plan subscription, use the "
+            "Coding Plan provider instead — a subscription is not consumed through "
+            "this endpoint, and requests here bill pay-as-you-go without warning. "
+            "Set the Base URL below for another region (e.g. "
+            "`dashscope-us.aliyuncs.com`) or a workspace-scoped endpoint."
         ),
     },
     "ALIBABA_CN_API_KEY": {
         "label": "Alibaba Token Plan Key (China)",
         "description": (
             "Pay-per-token Model Studio (Bailian) key for the Beijing region, from "
-            "[bailian.console.aliyun.com](https://bailian.console.aliyun.com/). A key "
-            "issued for the international region is rejected here, and vice versa."
+            "[bailian.console.aliyun.com](https://bailian.console.aliyun.com/). "
+            "**Billed per token**, and the two regions are separate accounts — an "
+            "international key does not work here. If you hold a Coding Plan "
+            "subscription, use the Coding Plan provider instead; requests here bill "
+            "pay-as-you-go rather than drawing on the plan."
         ),
     },
     "FIREWORKS_API_KEY": {
