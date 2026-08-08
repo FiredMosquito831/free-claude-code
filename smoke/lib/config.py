@@ -62,6 +62,10 @@ PROVIDER_SMOKE_DEFAULT_MODELS: dict[str, str] = {
     "cohere": "cohere/command-a-plus-05-2026",
     "github_models": "github_models/openai/gpt-4.1",
     "zai": "zai/glm-5.2",
+    "alibaba_coding": "alibaba_coding/qwen3-coder-plus",
+    "alibaba_coding_cn": "alibaba_coding_cn/qwen3-coder-plus",
+    "alibaba": "alibaba/qwen3-coder-plus",
+    "alibaba_cn": "alibaba_cn/qwen3-coder-plus",
     "gemini": "gemini/models/gemini-3.1-flash-lite",
     "groq": "groq/llama-3.3-70b-versatile",
     "sambanova": "sambanova/Meta-Llama-3.3-70B-Instruct",
@@ -296,6 +300,13 @@ class SmokeConfig:
             return bool(self.settings.github_models_token.strip())
         if provider == "zai":
             return bool(self.settings.zai_api_key.strip())
+        if provider in (
+            "alibaba",
+            "alibaba_cn",
+            "alibaba_coding",
+            "alibaba_coding_cn",
+        ):
+            return bool(getattr(self.settings, f"{provider}_api_key", "").strip())
         if provider == "gemini":
             return bool(self.settings.gemini_api_key.strip())
         if provider == "groq":

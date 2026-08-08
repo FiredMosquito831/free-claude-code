@@ -116,6 +116,28 @@ class Settings(BaseSettings):
     # ==================== Cline Config ====================
     cline_api_key: str = Field(default="", validation_alias="CLINE_API_KEY")
 
+    # ==================== Alibaba Cloud Model Studio Config ====================
+    # Four separate providers because both the plan and the region change the
+    # credential: a Coding Plan key is ``sk-sp-`` prefixed and rejected by the
+    # pay-per-token endpoints, and a key issued in one region is not valid in
+    # the other. Base URLs are overridable for workspace-scoped or US regions.
+    alibaba_api_key: str = Field(default="", validation_alias="ALIBABA_API_KEY")
+    alibaba_base_url: str = Field(default="", validation_alias="ALIBABA_BASE_URL")
+    alibaba_cn_api_key: str = Field(default="", validation_alias="ALIBABA_CN_API_KEY")
+    alibaba_cn_base_url: str = Field(default="", validation_alias="ALIBABA_CN_BASE_URL")
+    alibaba_coding_api_key: str = Field(
+        default="", validation_alias="ALIBABA_CODING_API_KEY"
+    )
+    alibaba_coding_base_url: str = Field(
+        default="", validation_alias="ALIBABA_CODING_BASE_URL"
+    )
+    alibaba_coding_cn_api_key: str = Field(
+        default="", validation_alias="ALIBABA_CODING_CN_API_KEY"
+    )
+    alibaba_coding_cn_base_url: str = Field(
+        default="", validation_alias="ALIBABA_CODING_CN_BASE_URL"
+    )
+
     # ==================== Cloudflare Workers AI Config ====================
     cloudflare_api_token: str = Field(
         default="", validation_alias="CLOUDFLARE_API_TOKEN"
@@ -232,6 +254,14 @@ class Settings(BaseSettings):
     nous_proxy: str = Field(default="", validation_alias="NOUS_PROXY")
     kilo_proxy: str = Field(default="", validation_alias="KILO_PROXY")
     cline_proxy: str = Field(default="", validation_alias="CLINE_PROXY")
+    alibaba_proxy: str = Field(default="", validation_alias="ALIBABA_PROXY")
+    alibaba_cn_proxy: str = Field(default="", validation_alias="ALIBABA_CN_PROXY")
+    alibaba_coding_proxy: str = Field(
+        default="", validation_alias="ALIBABA_CODING_PROXY"
+    )
+    alibaba_coding_cn_proxy: str = Field(
+        default="", validation_alias="ALIBABA_CODING_CN_PROXY"
+    )
     cloudflare_proxy: str = Field(default="", validation_alias="CLOUDFLARE_PROXY")
     gemini_proxy: str = Field(default="", validation_alias="GEMINI_PROXY")
     groq_proxy: str = Field(default="", validation_alias="GROQ_PROXY")

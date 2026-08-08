@@ -44,6 +44,10 @@ class ConfigFieldSpec:
     section_id: str
     field_type: FieldType = "text"
     settings_attr: str | None = None
+    # Provider this field belongs to, for fields in the ``providers`` section.
+    # Empty for everything else, so the Admin UI can group a provider's key,
+    # base URL, proxy and rotation fields together instead of listing them flat.
+    provider: str = ""
     default: str = ""
     options: tuple[str | ConfigOptionSpec, ...] = ()
     secret: bool = False

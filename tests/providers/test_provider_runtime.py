@@ -61,6 +61,14 @@ def _make_settings(**overrides):
     mock.cohere_api_key = "test_cohere_key"
     mock.github_models_token = "test_github_models_token"
     mock.zai_api_key = "test_zai_key"
+    mock.alibaba_api_key = "test_alibaba_key"
+    mock.alibaba_cn_api_key = "test_alibaba_cn_key"
+    mock.alibaba_coding_api_key = "sk-sp-test_alibaba_coding_key"
+    mock.alibaba_coding_cn_api_key = "sk-sp-test_alibaba_coding_cn_key"
+    mock.alibaba_base_url = ""
+    mock.alibaba_cn_base_url = ""
+    mock.alibaba_coding_base_url = ""
+    mock.alibaba_coding_cn_base_url = ""
     mock.lm_studio_base_url = "http://localhost:1234/v1"
     mock.llamacpp_base_url = "http://localhost:8080/v1"
     mock.ollama_base_url = "http://localhost:11434"
@@ -406,6 +414,10 @@ def test_create_provider_instantiates_each_builtin():
         "cohere": OpenAIChatProvider,
         "github_models": GitHubModelsProvider,
         "zai": OpenAIChatProvider,
+        "alibaba": OpenAIChatProvider,
+        "alibaba_cn": OpenAIChatProvider,
+        "alibaba_coding": OpenAIChatProvider,
+        "alibaba_coding_cn": OpenAIChatProvider,
         "gemini": GeminiProvider,
         "groq": OpenAIChatProvider,
         "sambanova": OpenAIChatProvider,
