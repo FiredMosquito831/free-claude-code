@@ -10,7 +10,7 @@ _PROVIDER_FIELD_OVERRIDES: dict[str, dict[str, Any]] = {
         "label": "NVIDIA NIM API Key",
         "description": (
             "Used by NVIDIA NIM chat and optional NIM voice transcription. "
-            "Accepts a comma-separated list of keys for multi-key rotation."
+            "Add as many keys as you like below; requests spread across them."
         ),
     },
     "MISTRAL_API_KEY": {
@@ -281,7 +281,7 @@ def _rotation_field_specs() -> tuple[dict[str, Any], ...]:
                 "advanced": True,
                 "restart_required": True,
                 "description": (
-                    "Rotation policy across a comma-separated list of keys in "
+                    "Rotation policy across the keys you have added for "
                     f"{descriptor.credential_env}. single = use the first key only; "
                     "round_robin = spread requests across healthy keys; "
                     "least_used = least-used healthy key first; "

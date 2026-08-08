@@ -654,17 +654,17 @@ def test_credential_key_management_rejects_duplicates_and_bad_input(
     )
     assert duplicate.status_code == 409
 
-    with_comma = client.post(
-        "/admin/api/credentials/NVIDIA_NIM_API_KEY/keys",
-        json={"key": "one,two"},
-    )
-    assert with_comma.status_code == 400
-
     empty = client.post(
         "/admin/api/credentials/NVIDIA_NIM_API_KEY/keys",
         json={"key": "   "},
     )
     assert empty.status_code == 400
+
+    only_commas = client.post(
+        "/admin/api/credentials/NVIDIA_NIM_API_KEY/keys",
+        json={"key": " , , "},
+    )
+    assert only_commas.status_code == 400
 
     unknown = client.get("/admin/api/credentials/NOT_A_CREDENTIAL/keys")
     assert unknown.status_code == 404
@@ -1557,3 +1557,85 @@ def test_admin_static_styles_every_class_the_script_emits():
         if not re.search(rf"\.{re.escape(name)}[\s,:{{]", styles)
     )
     assert unstyled == [], f"emitted by admin.js with no CSS rule: {unstyled}"
+
+
+def test_credential_add_accepts_a_pasted_pool_and_skips_duplicates(
+    monkeypatch, tmp_path
+):
+    """A comma-separated paste adds every new key at once.
+
+    The raw credential field used to be the only way to enter several keys, and
+    it did so by REPLACING the whole pool -- reading as "replace" directly above
+    a list that adds and removes. That field is no longer shown, so adding a
+    pool has to work here.
+    """
+    _set_home(monkeypatch, tmp_path)
+    _clear_process_config(monkeypatch)
+    client = _local_client(create_test_app())
+
+    seeded = client.post(
+        "/admin/api/config/apply",
+        json={"values": {"NVIDIA_NIM_API_KEY": "sk-first-key-1234"}},
+    )
+    assert seeded.status_code == 200
+
+    added = client.post(
+        "/admin/api/credentials/NVIDIA_NIM_API_KEY/keys",
+        json={"key": " sk-second-key-2345 , sk-third-key-3456 "},
+    )
+    assert added.status_code == 200
+    body = added.json()
+    assert body["added_count"] == 2
+    assert body["count"] == 3
+    assert body["skipped"] == 0
+    # Masked labels only: a raw key must never appear in a response body.
+    assert "sk-second-key-2345" not in added.text
+    assert "sk-third-key-3456" not in added.text
+
+    listed = client.get("/admin/api/credentials/NVIDIA_NIM_API_KEY/keys")
+    assert listed.status_code == 200
+    assert listed.json()["count"] == 3
+
+    # A paste that overlaps the pool adds only what is new rather than failing.
+    mixed = client.post(
+        "/admin/api/credentials/NVIDIA_NIM_API_KEY/keys",
+        json={"key": "sk-first-key-1234,sk-fourth-key-4567"},
+    )
+    assert mixed.status_code == 200
+    assert mixed.json()["added_count"] == 1
+    assert mixed.json()["skipped"] == 1
+    assert mixed.json()["count"] == 4
+
+    # Duplicates within one paste collapse to a single key.
+    repeated = client.post(
+        "/admin/api/credentials/NVIDIA_NIM_API_KEY/keys",
+        json={"key": "sk-fifth-key-5678,sk-fifth-key-5678"},
+    )
+    assert repeated.status_code == 200
+    assert repeated.json()["added_count"] == 1
+    assert repeated.json()["count"] == 5
+
+    # Nothing new at all is still a conflict.
+    nothing_new = client.post(
+        "/admin/api/credentials/NVIDIA_NIM_API_KEY/keys",
+        json={"key": "sk-first-key-1234,sk-fourth-key-4567"},
+    )
+    assert nothing_new.status_code == 409
+
+
+def test_admin_static_hides_the_raw_field_for_a_pooled_credential():
+    """The replace-the-whole-value input must not sit above the add/remove list.
+
+    It stays in the document so the shared dirty/apply machinery is untouched,
+    which is why this asserts on how it is hidden rather than that it is absent.
+    """
+    static = Path("src/free_claude_code/api/admin_static")
+    script = (static / "admin.js").read_text(encoding="utf-8")
+    styles = (static / "admin.css").read_text(encoding="utf-8")
+
+    assert "control.hidden = true;" in script
+    assert 'wrapper.classList.add("field-pooled");' in script
+    # A bare `hidden` attribute loses to any later display rule.
+    assert ".field-pooled > [hidden]" in styles
+    # Opening a card must open the pool, not reveal another button to press.
+    assert "openKeyPool" in script

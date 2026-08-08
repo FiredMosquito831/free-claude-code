@@ -978,6 +978,11 @@ function renderProviderCard(provider, fields) {
     if (card.classList.toggle("pv-open")) {
       configure.textContent = "Done";
       configure.setAttribute("aria-expanded", "true");
+      // Managing keys IS the reason to open a provider, so go straight there
+      // rather than making Configure reveal a second button to press.
+      card.querySelectorAll(".key-manager").forEach((manager) => {
+        if (typeof manager.openKeyPool === "function") manager.openKeyPool();
+      });
     } else {
       closeProviderCard(card);
     }
@@ -1086,6 +1091,21 @@ function renderField(field) {
     state.credentialEnvs &&
     state.credentialEnvs.has(field.key)
   ) {
+    // A provider credential is a POOL, managed by add and remove below. The
+    // raw field replaced the entire comma-separated value, so offering both
+    // put "enter a new value to replace" directly above a list of individual
+    // keys with Remove buttons -- two different mental models, one of them
+    // destructive. The control stays in the document so the shared
+    // dirty/apply machinery is unchanged, but it is not shown and not
+    // focusable; nothing can set it, so it never goes dirty.
+    control.hidden = true;
+    control.tabIndex = -1;
+    control.querySelectorAll("input, select, textarea, button").forEach((node) => {
+      node.tabIndex = -1;
+    });
+    // The label now heads the key pool, so it must not focus a hidden input.
+    label.removeAttribute("for");
+    wrapper.classList.add("field-pooled");
     wrapper.appendChild(keyManagerForField(field));
   }
   return wrapper;
@@ -1149,6 +1169,11 @@ function keyManagerForField(field) {
   });
 
   container.append(header, panel);
+  // Let the provider card open the pool when it expands. Opening eagerly on
+  // render would fire one request per provider on every page load.
+  container.openKeyPool = () => {
+    if (panel.hidden) open();
+  };
 
   if (state.reopenKeyManager === field.key) {
     state.reopenKeyManager = null;
@@ -1213,7 +1238,7 @@ async function renderKeyManager(panel, field) {
   input.autocomplete = "off";
   input.placeholder = info.locked
     ? "Locked by process environment"
-    : "Paste a new key";
+    : "Paste a key, or several separated by commas";
   input.disabled = info.locked;
 
   const add = document.createElement("button");
@@ -3503,7 +3528,7 @@ function customProviderCard(provider) {
   const keyInput = document.createElement("input");
   keyInput.type = "password";
   keyInput.autocomplete = "off";
-  keyInput.placeholder = "Paste a new key";
+  keyInput.placeholder = "Paste a key, or several separated by commas";
   const addButton = document.createElement("button");
   addButton.type = "button";
   addButton.className = "secondary-button";
