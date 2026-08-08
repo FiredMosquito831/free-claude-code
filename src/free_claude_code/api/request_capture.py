@@ -14,7 +14,11 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from typing import Any, Literal
 
-from free_claude_code.application.routing import RoutedMessagesRequest
+from free_claude_code.application.routing import (
+    RoutedMessagesPlan,
+    RoutedMessagesRequest,
+)
+from free_claude_code.config.model_refs import format_model_ref_list
 from free_claude_code.config.settings import Settings
 from free_claude_code.core.anthropic import MessagesRequest
 from free_claude_code.core.async_iterators import try_close_async_iterator
@@ -89,6 +93,24 @@ class RequestCapture:
     @property
     def enabled(self) -> bool:
         return self._store is not None
+
+    def set_plan(self, plan: RoutedMessagesPlan) -> None:
+        """Record the whole routing decision before any attempt is made.
+
+        The chain is stored even when the primary answers: "a chain existed and
+        was not needed" and "there was no chain" are different facts, and only
+        the first one tells you your fallbacks are configured. The diversion
+        pair is the only trace that the vision adapter did anything -- without
+        it a diverted request is indistinguishable from a route that points at
+        the adapter model directly.
+        """
+        if not self.enabled:
+            return
+        self._record.route_chain = format_model_ref_list(plan.model_refs())
+        self._record.route_diverted_from = plan.diverted_from
+        self._record.route_diversion = (
+            plan.diversion.value if plan.diversion is not None else None
+        )
 
     def set_routing(self, routed: RoutedMessagesRequest, attempt: int = 0) -> None:
         """Attach provider/model/reasoning metadata for the attempt in flight.

@@ -4365,6 +4365,7 @@ async function loadRequestsView() {
     byId("reqKeyBreakdown").innerHTML = "";
     byId("reqTopErrors").innerHTML = "";
     byId("reqFallbackRoutes").innerHTML = "";
+    byId("reqDivertedRoutes").innerHTML = "";
     clearChart(byId("reqSeriesChart"));
     clearChart(byId("reqModelChart"));
     reqState.total = 0;
@@ -4385,6 +4386,7 @@ async function loadRequestsView() {
   renderRequestKeyBreakdown(stats.by_key || []);
   renderRequestTopErrors(stats.top_errors || []);
   renderRequestFallbackRoutes(stats.fallback_routes || []);
+  renderRequestDivertedRoutes(stats.diverted_routes || []);
   renderReqBreakdownTruncatedNote(stats);
   reqState.total = list.total || 0;
   renderRequestsTable(list.rows || []);
@@ -4460,6 +4462,110 @@ function formatRouteAttempt(row) {
   return row.route_primary_model
     ? `Fallback ${attempt}, after ${row.route_primary_model}`
     : `Fallback ${attempt}`;
+}
+
+const ROUTE_DIVERSION_LABELS = {
+  vision: "Vision adapter",
+};
+
+function routeDiversionLabel(reason) {
+  return ROUTE_DIVERSION_LABELS[reason] || reason;
+}
+
+/** The models this request was prepared to try, in order.
+ *
+ * A chain is only legible as a path. Rendering it as a list with the hop that
+ * answered marked shows three things at once that no single field can: what
+ * was configured, how far down it had to go, and -- when the head was replaced
+ * -- that a policy chose the starting point rather than the route.
+ */
+function renderRequestRouteTrace(row) {
+  const container = byId("reqDetailRoute");
+  if (!container) return;
+  container.innerHTML = "";
+  const chain = (row.route_chain || "")
+    .split(",")
+    .map((ref) => ref.trim())
+    .filter(Boolean);
+  // Rows written before route tracing have no chain at all. Inventing a
+  // single-hop one from resolved_model would claim the route had no fallbacks
+  // configured, which is not something those rows recorded either way.
+  if (!chain.length) {
+    container.hidden = true;
+    return;
+  }
+  container.hidden = false;
+
+  if (row.route_diverted_from) {
+    const note = document.createElement("p");
+    note.className = "route-trace-note";
+    note.textContent =
+      `${routeDiversionLabel(row.route_diversion)}: this route resolved to ` +
+      `${row.route_diverted_from}, which cannot read the attached image.`;
+    container.appendChild(note);
+  }
+
+  const served = Number(row.route_attempt ?? 0);
+  const list = document.createElement("ol");
+  list.className = "route-trace-hops";
+  chain.forEach((ref, index) => {
+    const hop = document.createElement("li");
+    hop.className = "route-trace-hop";
+    if (index === served) hop.classList.add("route-trace-served");
+    else if (index < served) hop.classList.add("route-trace-failed");
+    else hop.classList.add("route-trace-untried");
+
+    const name = document.createElement("code");
+    name.textContent = ref;
+    hop.appendChild(name);
+
+    const state = document.createElement("span");
+    state.className = "route-trace-state";
+    if (index === served) state.textContent = "answered";
+    else if (index < served) state.textContent = "failed";
+    else state.textContent = "not needed";
+    hop.appendChild(state);
+    list.appendChild(hop);
+  });
+  container.appendChild(list);
+}
+
+function renderRequestDivertedRoutes(rows) {
+  const container = byId("reqDivertedRoutes");
+  if (!container) return;
+  container.innerHTML = "";
+  if (!rows.length) {
+    const empty = document.createElement("p");
+    empty.className = "analytics-empty";
+    empty.textContent =
+      "No request was diverted to a vision model in this window.";
+    container.appendChild(empty);
+    return;
+  }
+  rows.forEach((row) => {
+    const item = document.createElement("div");
+    item.className = "fallback-route";
+
+    const path = document.createElement("div");
+    path.className = "fallback-route-path";
+    const from = document.createElement("code");
+    from.textContent = row.diverted_from;
+    const arrow = document.createElement("span");
+    arrow.className = "fallback-route-arrow";
+    arrow.setAttribute("aria-label", routeDiversionLabel(row.reason));
+    arrow.textContent = "→";
+    const to = document.createElement("code");
+    to.className = "fallback-route-served";
+    to.textContent = row.served_by;
+    path.append(from, arrow, to);
+
+    const count = document.createElement("span");
+    count.className = "fallback-route-count";
+    count.textContent = formatAnalyticsNumber(row.count);
+
+    item.append(path, count);
+    container.appendChild(item);
+  });
 }
 
 function renderRequestFallbackRoutes(rows) {
@@ -4631,6 +4737,13 @@ function buildModelCell(row) {
   const name = document.createElement("span");
   name.textContent = row.resolved_model || row.requested_model || "";
   td.appendChild(name);
+  if (row.route_diverted_from) {
+    const badge = document.createElement("span");
+    badge.className = "fallback-badge route-badge-diverted";
+    badge.textContent = row.route_diversion || "diverted";
+    badge.title = `Diverted from ${row.route_diverted_from}`;
+    td.appendChild(badge);
+  }
   if (Number(row.route_attempt || 0) > 0) {
     const badge = document.createElement("span");
     badge.className = "fallback-badge";
@@ -4895,6 +5008,7 @@ async function openRequestDetail(requestId) {
     dd.textContent = value;
     meta.append(dt, dd);
   });
+  renderRequestRouteTrace(row);
   renderTurnTranscript(row);
   byId("reqDetailModal").hidden = false;
   byId("reqDetailClose").focus();

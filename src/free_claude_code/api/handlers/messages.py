@@ -115,6 +115,7 @@ class MessagesHandler:
             require_non_empty_messages(request_data.messages)
             plan = self._model_router.resolve_messages_plan(request_data)
             plan = self._apply_message_routing_policies(plan)
+            capture.set_plan(plan)
             routed = plan.primary
             self._reject_unsupported_server_tools(routed)
             capture.set_routing(routed)
@@ -317,11 +318,12 @@ class MessagesHandler:
         )
         if not changed:
             return plan
-        return RoutedMessagesPlan(
-            tuple(
+        return replace(
+            plan,
+            attempts=tuple(
                 replace(attempt, reasoning=ReasoningPolicy.off())
                 for attempt in plan.attempts
-            )
+            ),
         )
 
     def _run_message_intercepts(

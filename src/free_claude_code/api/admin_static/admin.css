@@ -3273,3 +3273,99 @@ details.turn-pane > summary:focus-visible {
 .field-pooled .key-manager {
   margin-top: 4px;
 }
+
+/* Route trace --------------------------------------------------------------
+   A chain is only legible as a path, so the request detail draws every model
+   it was prepared to try in order, with the one that answered marked. The
+   colour carries the state; the word next to it carries the same thing for
+   anyone who cannot use the colour. */
+.route-trace {
+  margin: 0 0 18px;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--panel-strong);
+}
+
+.route-trace[hidden] {
+  /* The `hidden` attribute is only a UA-level display:none, which any later
+     display rule silently beats. Pin it. */
+  display: none;
+}
+
+.route-trace-note {
+  margin: 0 0 12px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.route-trace-hops {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  counter-reset: route-hop;
+}
+
+.route-trace-hop {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 6px 10px;
+  border-left: 2px solid var(--line-strong);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  background: var(--card);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  min-width: 0;
+}
+
+.route-trace-hop code {
+  overflow-wrap: anywhere;
+  color: var(--text-strong);
+}
+
+.route-trace-state {
+  margin-left: auto;
+  padding-left: 12px;
+  font-family: var(--font-sans);
+  font-size: 10.5px;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  color: var(--muted);
+}
+
+.route-trace-served {
+  border-left-color: var(--ok);
+}
+
+.route-trace-served .route-trace-state {
+  color: var(--ok);
+  font-weight: 700;
+}
+
+.route-trace-failed {
+  border-left-color: var(--error);
+}
+
+.route-trace-failed code {
+  color: var(--muted);
+  text-decoration: line-through;
+}
+
+.route-trace-failed .route-trace-state {
+  color: var(--error);
+}
+
+.route-trace-untried {
+  opacity: 0.6;
+}
+
+.route-badge-diverted {
+  border-color: var(--accent-border);
+  background: var(--accent-muted);
+  color: var(--accent);
+}
