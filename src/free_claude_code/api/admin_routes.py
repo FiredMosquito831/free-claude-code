@@ -807,15 +807,22 @@ def _model_options(
         ref.model_ref
         for ref in configured_chat_model_refs(services.requests.current_settings())
     }
-    discovered = {
-        info.model_id for info in services.requests.cached_prefixed_model_infos()
-    }
+    infos = services.requests.cached_prefixed_model_infos()
+    discovered = {info.model_id for info in infos}
     failed_provider_ids = (
         refresh_result.failed_provider_ids if refresh_result is not None else ()
     )
+    # Only models the provider *says* reject images. An unreported capability
+    # is not a refusal, so it stays out of this list -- the routing page uses
+    # it to say "this tier needs the vision adapter", which would be a lie for
+    # a model that simply publishes no modality metadata.
     return {
         "models": sorted(configured | discovered, key=str.casefold),
         "failed_providers": list(failed_provider_ids),
+        "blind_models": sorted(
+            (info.model_id for info in infos if info.supports_vision is False),
+            key=str.casefold,
+        ),
     }
 
 

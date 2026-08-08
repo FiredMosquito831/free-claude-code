@@ -278,3 +278,70 @@ def test_a_sighted_chain_promotion_is_recorded_as_a_diversion(settings):
 
     assert plan.diversion is RouteDiversion.VISION
     assert plan.diverted_from == "nvidia_nim/fallback-model"
+
+
+def test_the_vision_adapter_has_its_own_fallback_chain(settings):
+    """One unreachable vision model must not lose every image on the machine."""
+    settings.model_vision = "open_router/sees-images"
+    settings.model_vision_fallbacks = "groq/backup-eyes,cerebras/last-eyes"
+    router = ModelRouter(settings, vision_lookup=_blind("nvidia_nim/fallback-model"))
+
+    assert _refs(router, _request(image=True)) == (
+        "open_router/sees-images",
+        "groq/backup-eyes",
+        "cerebras/last-eyes",
+    )
+
+
+def test_the_vision_chain_leads_the_routes_own_sighted_fallbacks(settings):
+    settings.model_fallbacks = "cerebras/route-eyes"
+    settings.model_vision = "open_router/sees-images"
+    settings.model_vision_fallbacks = "groq/backup-eyes"
+    router = ModelRouter(settings, vision_lookup=_blind("nvidia_nim/fallback-model"))
+
+    assert _refs(router, _request(image=True)) == (
+        "open_router/sees-images",
+        "groq/backup-eyes",
+        "cerebras/route-eyes",
+    )
+
+
+def test_a_blind_entry_is_dropped_from_the_vision_chain(settings):
+    """A blind model in a *vision* chain is a mistake, not a preference."""
+    settings.model_vision = "open_router/sees-images"
+    settings.model_vision_fallbacks = "groq/also-blind,cerebras/last-eyes"
+    router = ModelRouter(
+        settings,
+        vision_lookup=_sight(
+            {
+                "nvidia_nim/fallback-model": False,
+                "groq/also-blind": False,
+                "open_router/sees-images": True,
+            }
+        ),
+    )
+
+    assert _refs(router, _request(image=True)) == (
+        "open_router/sees-images",
+        "cerebras/last-eyes",
+    )
+
+
+def test_a_text_request_never_sees_the_vision_chain(settings):
+    settings.model_vision = "open_router/sees-images"
+    settings.model_vision_fallbacks = "groq/backup-eyes"
+    router = ModelRouter(settings, vision_lookup=_blind("nvidia_nim/fallback-model"))
+
+    assert _refs(router, _request(image=False)) == ("nvidia_nim/fallback-model",)
+
+
+def test_the_vision_chain_is_recorded_as_one_diversion(settings):
+    settings.model_vision = "open_router/sees-images"
+    settings.model_vision_fallbacks = "groq/backup-eyes"
+    router = ModelRouter(settings, vision_lookup=_blind("nvidia_nim/fallback-model"))
+
+    plan = router.resolve_messages_plan(_request(image=True))
+
+    assert plan.diversion is RouteDiversion.VISION
+    assert plan.diverted_from == "nvidia_nim/fallback-model"
+    assert plan.has_fallbacks

@@ -226,6 +226,11 @@ class Settings(BaseSettings):
     # Vision adapter: serves requests carrying images when the model a route
     # resolved to is known not to accept them.
     model_vision: str | None = Field(default=None, validation_alias="MODEL_VISION")
+    # The adapter is a route like any other, so it gets the same safety net:
+    # one unreachable vision model must not lose every image on the machine.
+    model_vision_fallbacks: str | None = Field(
+        default=None, validation_alias="MODEL_VISION_FALLBACKS"
+    )
 
     # ==================== Per-Provider Proxy ====================
     nvidia_nim_proxy: str = Field(default="", validation_alias="NVIDIA_NIM_PROXY")
@@ -512,6 +517,7 @@ class Settings(BaseSettings):
         "model_opus_fallbacks",
         "model_sonnet_fallbacks",
         "model_haiku_fallbacks",
+        "model_vision_fallbacks",
         "ollama_search_api_key",
         "exa_api_key",
         "tavily_api_key",
@@ -648,6 +654,7 @@ class Settings(BaseSettings):
         "model_opus_fallbacks",
         "model_sonnet_fallbacks",
         "model_haiku_fallbacks",
+        "model_vision_fallbacks",
     )
     @classmethod
     def validate_model_fallback_chain(cls, v: str | None) -> str | None:

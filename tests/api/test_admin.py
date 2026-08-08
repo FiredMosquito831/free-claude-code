@@ -461,6 +461,7 @@ def test_admin_models_include_configured_and_cached_canonical_slugs():
             "open_router/meta/llama-3.3",
         ],
         "failed_providers": [],
+        "blind_models": [],
     }
 
 
@@ -486,6 +487,7 @@ def test_admin_model_refresh_returns_the_updated_canonical_catalog():
     assert response.json() == {
         "models": ["deepseek/deepseek-chat", "deepseek/deepseek-reasoner"],
         "failed_providers": [],
+        "blind_models": [],
     }
     runtime.refresh_models.assert_awaited_once_with()
 
@@ -508,6 +510,7 @@ def test_admin_model_refresh_reports_partial_provider_failures():
     assert response.json() == {
         "models": ["deepseek/deepseek-chat"],
         "failed_providers": ["open_router"],
+        "blind_models": [],
     }
 
 
@@ -1639,3 +1642,30 @@ def test_admin_static_hides_the_raw_field_for_a_pooled_credential():
     assert ".field-pooled > [hidden]" in styles
     # Opening a card must open the pool, not reveal another button to press.
     assert "openKeyPool" in script
+
+
+def test_admin_models_report_which_models_reject_images():
+    """The routing page needs this to say a tier requires the vision adapter.
+
+    Only a reported refusal counts. A model with no modality metadata is
+    absent from the list, because claiming a tier "cannot read images" on the
+    strength of silence would be wrong for most of the catalog.
+    """
+    settings = Settings()
+    settings.model = "open_router/text-only"
+    settings.open_router_api_key = "open-router-key"
+    app = create_test_app(settings)
+    provider_manager_for_app(app).cache_model_infos(
+        "open_router",
+        {
+            ProviderModelInfo("text-only", supports_vision=False),
+            ProviderModelInfo("sighted", supports_vision=True),
+            ProviderModelInfo("unreported"),
+        },
+    )
+
+    body = _local_client(app).get("/admin/api/models").json()
+
+    assert body["blind_models"] == ["open_router/text-only"]
+    assert "open_router/sighted" in body["models"]
+    assert "open_router/unreported" in body["models"]

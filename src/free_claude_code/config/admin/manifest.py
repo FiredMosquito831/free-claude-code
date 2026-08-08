@@ -180,6 +180,13 @@ _NON_PROVIDER_FIELDS: tuple[ConfigFieldSpec, ...] = (
         settings_attr="model_vision",
     ),
     ConfigFieldSpec(
+        "MODEL_VISION_FALLBACKS",
+        "Vision Fallback Chain",
+        "models",
+        "model_chain",
+        settings_attr="model_vision_fallbacks",
+    ),
+    ConfigFieldSpec(
         "REASONING_POLICY",
         "Reasoning Policy",
         "reasoning",
