@@ -578,15 +578,15 @@
                 <p class="eyebrow guide-toc-eyebrow">On this page</p>
                 <a href="#guide-start">How it works</a>
                 <a href="#guide-keys">Add a provider</a>
-                <a href="#guide-models">Models</a>
-                <a href="#guide-cli">Claude Code (CLI)</a>
+                <a href="#guide-models">Map model tiers</a>
+                <a href="#guide-cli">Claude Code</a>
                 <a href="#guide-desktop">Claude Desktop</a>
                 <a href="#guide-other">Codex &amp; Pi</a>
-                <a href="#guide-websearch">Web search</a>
-                <a href="#guide-analytics">Analytics</a>
-                <a href="#guide-rotation">Key rotation</a>
-                <a href="#guide-updates">Updating</a>
-                <a href="#guide-security">Security</a>
+                <a href="#guide-websearch">Search the web</a>
+                <a href="#guide-analytics">See what happened</a>
+                <a href="#guide-rotation">Rotate keys safely</a>
+                <a href="#guide-updates">Update the server</a>
+                <a href="#guide-security">Lock it down</a>
                 <a href="#guide-trouble">Troubleshooting</a>
               </nav>
 
@@ -626,7 +626,7 @@
                   <thead><tr><th>Result</th><th>Almost always means</th></tr></thead>
                   <tbody>
                     <tr><td>401 / 403</td><td>The key is wrong, expired or revoked.</td></tr>
-                    <tr><td>404</td><td>The key is fine &mdash; the <em>model id</em> is not on your account.</td></tr>
+                    <tr><td>404</td><td>The key is fine &mdash; the <em><a href="#guide-models">model id</a></em> is not on your account.</td></tr>
                     <tr><td>402</td><td>Billing: no credit, or plan quota exhausted.</td></tr>
                     <tr><td>Timeout</td><td>Network, or a local endpoint that is not running.</td></tr>
                   </tbody>
@@ -646,7 +646,7 @@ OLLAMA_BASE_URL="http://127.0.0.1:11434"</code></pre>
                   if you prefer, then restart the server &mdash; config is read at startup.
                 </p>
 
-                <h3 id="guide-models">Models</h3>
+                <h3 id="guide-models">Map model tiers</h3>
                 <p>
                   Routing is by <strong>tier</strong>: Fable, Opus, Sonnet, Haiku and a
                   fallback each map to a real model on your provider. That is what lets an
@@ -665,7 +665,7 @@ OLLAMA_BASE_URL="http://127.0.0.1:11434"</code></pre>
                   cheap so unmapped requests cannot surprise you.
                 </p>
 
-                <h3 id="guide-cli">Claude Code (CLI)</h3>
+                <h3 id="guide-cli">Point Claude Code here</h3>
                 <p>
                   Claude Code reads its <strong>settings file</strong>, and that file
                   <strong>wins over exported environment variables</strong> &mdash; so
@@ -733,7 +733,7 @@ OLLAMA_BASE_URL="http://127.0.0.1:11434"</code></pre>
                   </p>
                 </details>
 
-                <h3 id="guide-desktop">Claude Desktop</h3>
+                <h3 id="guide-desktop">Point Claude Desktop here</h3>
                 <p>
                   The desktop app has a native gateway setting, so no file editing is
                   required. Menu labels shift slightly between versions; this is the
@@ -777,7 +777,7 @@ OLLAMA_BASE_URL="http://127.0.0.1:11434"</code></pre>
                   active the app runs <strong>local sessions only</strong>.
                 </p>
 
-                <h3 id="guide-other">Codex &amp; Pi</h3>
+                <h3 id="guide-other">Point Codex or Pi here</h3>
                 <pre><code>fcc-codex
 fcc-pi</code></pre>
                 <img class="guide-shot" src="/admin/img/codex-model-picker.png"
@@ -787,7 +787,7 @@ fcc-pi</code></pre>
                   Code, or Claude Code through JetBrains ACP.
                 </p>
 
-                <h3 id="guide-websearch">Web search</h3>
+                <h3 id="guide-websearch">Search the web</h3>
                 <p>
                   Claude Code's <code>web_search</code> is normally executed and billed by
                   Anthropic. This proxy fulfils it locally, so no Anthropic search credits
@@ -839,7 +839,7 @@ TAVILY_CHUNKS_PER_SOURCE=3</code></pre>
                   Advanced options drawers, and each states what leaving it blank does.
                 </p>
 
-                <h3 id="guide-analytics">Analytics</h3>
+                <h3 id="guide-analytics">See what a request actually did</h3>
                 <p>
                   Two local SQLite stores under <code>~/.fcc/logs/</code>, written by a
                   background thread so they never block a request.
@@ -877,7 +877,7 @@ TAVILY_CHUNKS_PER_SOURCE=3</code></pre>
                   never written to either store &mdash; only masked labels.
                 </p>
 
-                <h3 id="guide-rotation">Key rotation</h3>
+                <h3 id="guide-rotation">Use more than one key safely</h3>
                 <p>Both model and web search providers take several keys in one variable:</p>
                 <pre><code>EXA_API_KEY="key-a,key-b,key-c"
 EXA_API_KEY_ROTATION=failover</code></pre>
@@ -895,7 +895,7 @@ EXA_API_KEY_ROTATION=failover</code></pre>
                   invented fixed delay.
                 </p>
 
-                <h3 id="guide-updates">Updating</h3>
+                <h3 id="guide-updates">Update the server</h3>
                 <p>
                   The version panel announces releases with their notes inline.
                   <em>Update now</em> downloads the wheel, verifies the SHA-256 GitHub
@@ -911,7 +911,7 @@ EXA_API_KEY_ROTATION=failover</code></pre>
                   until then, so a failed update cannot strand you.
                 </p>
 
-                <h3 id="guide-security">Security</h3>
+                <h3 id="guide-security">Lock it down</h3>
                 <table class="guide-table">
                   <thead><tr><th>Surface</th><th>Default bind</th><th>Access control</th></tr></thead>
                   <tbody>
@@ -934,11 +934,12 @@ EXA_API_KEY_ROTATION=failover</code></pre>
                     &mdash; close and reopen your terminal; the installer extends
                     <code>PATH</code> and an open shell will not see it.</li>
                   <li><strong>Claude Code still talks to Anthropic</strong> &mdash; the
-                    settings file wins over shell exports. Check <code>/status</code>.</li>
+                    settings file wins over shell exports. Check <code>/status</code>; see
+                    <a href="#guide-cli">Point Claude Code here</a>.</li>
                   <li><strong>401 from the proxy</strong> &mdash; the agent's token does not
                     match this server's <code>ANTHROPIC_AUTH_TOKEN</code>.</li>
-                  <li><strong>Validation fails with 404</strong> &mdash; usually the model
-                    id, not the key.</li>
+                  <li><strong>Validation fails with 404</strong> &mdash; usually the
+                    <a href="#guide-models">model id</a>, not the key.</li>
                   <li><strong>Desktop test buttons fail</strong> &mdash; the server must be
                     running; they make real calls.</li>
                   <li><strong>Two configs on Windows</strong> &mdash; installing under both

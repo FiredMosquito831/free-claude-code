@@ -2634,6 +2634,27 @@ details.turn-pane > summary:focus-visible {
   margin-bottom: 6px;
 }
 
+/* Cross-references between sections, not decoration: each one restates a
+   connection the prose already makes explicit (e.g. "the model id" pointing
+   at the section that explains model ids), so it reads as a real link
+   between two treatments of the same fact rather than a link salad. */
+.guide-body a {
+  color: var(--accent);
+  text-decoration-color: var(--accent-border);
+  text-underline-offset: 2px;
+}
+
+.guide-body a:hover,
+.guide-body a:focus-visible {
+  text-decoration-color: var(--accent);
+}
+
+.guide-body a:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
 .guide-body code {
   font-size: 12.5px;
   padding: 1px 5px;
@@ -2643,8 +2664,9 @@ details.turn-pane > summary:focus-visible {
 }
 
 .guide-body pre {
+  position: relative;
   margin: 0 0 16px;
-  padding: 14px 16px;
+  padding: 14px 60px 14px 16px;
   border-radius: var(--radius-md);
   overflow-x: auto;
   background: var(--input);
@@ -2657,6 +2679,44 @@ details.turn-pane > summary:focus-visible {
   padding: 0;
   color: var(--text);
   line-height: 1.6;
+}
+
+/* What is about to be pasted somewhere else is worth copying exactly, not
+   retyping -- the one utility added to the reference read, kept as quiet as
+   the code block it sits on. */
+.guide-copy-button {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  padding: 4px 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  background: var(--card);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  transition:
+    border-color var(--transition-fast),
+    color var(--transition-fast),
+    background var(--transition-fast);
+}
+
+.guide-copy-button:hover {
+  border-color: var(--accent-border);
+  color: var(--text);
+}
+
+.guide-copy-button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.guide-copy-button.is-copied {
+  border-color: var(--accent-border);
+  background: var(--accent-muted);
+  color: var(--accent);
 }
 
 .guide-note {
@@ -2805,6 +2865,22 @@ details.turn-pane > summary:focus-visible {
   gap: 12px;
 }
 
+/* The 3 required steps are a causal chain; the rest are independent extras.
+   This divider is the only thing that says so -- everything else about a
+   step's own card is unchanged whichever group it's in. */
+.get-started-group-heading {
+  margin: 4px 2px 0;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.get-started-group-heading:first-child {
+  margin-top: 0;
+}
+
 .get-started-step {
   border: 1px solid var(--line);
   border-radius: var(--radius-lg);
@@ -2849,6 +2925,14 @@ details.turn-pane > summary:focus-visible {
 
 .get-started-step.expanded .get-started-step-chevron {
   transform: rotate(90deg);
+}
+
+/* Closed-because-done and closed-because-not-started should not require
+   reading the pill to tell apart. */
+.get-started-step-chevron.is-done {
+  color: var(--accent);
+  font-size: 14px;
+  font-weight: 700;
 }
 
 .get-started-step-body {
