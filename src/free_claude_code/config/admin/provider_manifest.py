@@ -62,6 +62,42 @@ _PROVIDER_FIELD_OVERRIDES: dict[str, dict[str, Any]] = {
         "label": "Z.ai API Key",
         "description": "Z.ai Coding Plan API key.",
     },
+    "ALIBABA_CODING_API_KEY": {
+        "label": "Alibaba Coding Plan Key (International)",
+        "description": (
+            "Qwen Coding Plan subscription, Singapore region. The key starts with "
+            "`sk-sp-` and comes from the Coding Plan page of "
+            "[Model Studio](https://bailian.console.alibabacloud.com/) — a "
+            "pay-per-token key will not work here. Alibaba restricts this plan to "
+            "interactive coding tools."
+        ),
+    },
+    "ALIBABA_CODING_CN_API_KEY": {
+        "label": "Alibaba Coding Plan Key (China)",
+        "description": (
+            "Qwen Coding Plan subscription, Beijing region. Same `sk-sp-` key format "
+            "as the international plan but issued separately at "
+            "[Model Studio](https://bailian.console.aliyun.com/); the two regions do "
+            "not share credentials."
+        ),
+    },
+    "ALIBABA_API_KEY": {
+        "label": "Alibaba Token Plan Key (International)",
+        "description": (
+            "Pay-per-token Model Studio (Bailian) key for the Singapore region, from "
+            "[bailian.console.alibabacloud.com](https://bailian.console.alibabacloud.com/). "
+            "Billed per token rather than by subscription. Set the Base URL below to "
+            "reach another region or a workspace-scoped endpoint."
+        ),
+    },
+    "ALIBABA_CN_API_KEY": {
+        "label": "Alibaba Token Plan Key (China)",
+        "description": (
+            "Pay-per-token Model Studio (Bailian) key for the Beijing region, from "
+            "[bailian.console.aliyun.com](https://bailian.console.aliyun.com/). A key "
+            "issued for the international region is rejected here, and vice versa."
+        ),
+    },
     "FIREWORKS_API_KEY": {
         "label": "Fireworks API Key",
         "description": "Fireworks AI inference API key.",
@@ -206,6 +242,7 @@ def _credential_field_specs() -> tuple[dict[str, Any], ...]:
             "key": descriptor.credential_env,
             "label": f"{descriptor.display_name} API Key",
             "section_id": "providers",
+            "provider": descriptor.provider_id,
             "field_type": "secret",
             "settings_attr": descriptor.credential_attr,
             "secret": True,
@@ -229,6 +266,7 @@ def _rotation_field_specs() -> tuple[dict[str, Any], ...]:
                 "key": f"{descriptor.credential_env}_ROTATION",
                 "label": f"{descriptor.display_name} Key Rotation",
                 "section_id": "providers",
+                "provider": descriptor.provider_id,
                 "field_type": "select",
                 "default": "single",
                 "options": ("single", "round_robin", "least_used", "failover"),
@@ -259,6 +297,7 @@ def _local_base_url_field_specs() -> tuple[dict[str, Any], ...]:
                 "key": _settings_env_key(descriptor.base_url_attr),
                 "label": f"{descriptor.display_name} Base URL",
                 "section_id": "providers",
+                "provider": descriptor.provider_id,
                 "settings_attr": descriptor.base_url_attr,
                 "default": descriptor.default_base_url or "",
             }
@@ -272,6 +311,7 @@ def _chatgpt_oauth_account_field_specs() -> tuple[dict[str, Any], ...]:
             "key": "CHATGPT_OAUTH_ACCOUNT_ID",
             "label": "ChatGPT OAuth Account ID",
             "section_id": "providers",
+            "provider": "chatgpt_oauth",
             "settings_attr": "chatgpt_oauth_account_id",
             "description": (
                 "Experimental/unsanctioned: ChatGPT account ID used for the "
@@ -288,6 +328,7 @@ def _chatgpt_oauth_login_field_specs() -> tuple[dict[str, Any], ...]:
             "key": "CHATGPT_OAUTH_LOGIN",
             "label": "ChatGPT OAuth Login",
             "section_id": "providers",
+            "provider": "chatgpt_oauth",
             "field_type": "oauth_login",
             "description": (
                 "Experimental/unsanctioned: device-code login works across WSL and "
@@ -301,6 +342,7 @@ def _chatgpt_oauth_login_field_specs() -> tuple[dict[str, Any], ...]:
             "key": "CHATGPT_OAUTH_IMPORT_CODEX",
             "label": "Import Codex CLI Tokens",
             "section_id": "providers",
+            "provider": "chatgpt_oauth",
             "field_type": "oauth_login",
             "description": (
                 "Experimental/unsanctioned: if you have already run 'codex login', "
@@ -317,6 +359,7 @@ def _cloudflare_account_field_specs() -> tuple[dict[str, Any], ...]:
             "key": "CLOUDFLARE_ACCOUNT_ID",
             "label": "Cloudflare Account ID",
             "section_id": "providers",
+            "provider": "cloudflare",
             "settings_attr": "cloudflare_account_id",
             "description": (
                 "Cloudflare account ID used to build the /accounts/{id}/ai/v1 endpoint."
@@ -335,6 +378,7 @@ def _proxy_field_specs() -> tuple[dict[str, Any], ...]:
                 "key": _settings_env_key(descriptor.proxy_attr),
                 "label": f"{descriptor.display_name} Proxy",
                 "section_id": "providers",
+                "provider": descriptor.provider_id,
                 "field_type": "secret",
                 "settings_attr": descriptor.proxy_attr,
                 "secret": True,

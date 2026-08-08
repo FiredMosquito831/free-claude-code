@@ -51,6 +51,72 @@ NOUS_PORTAL_DEFAULT_BASE = "https://inference-api.nousresearch.com/v1"
 KILO_DEFAULT_BASE = "https://api.kilo.ai/api/gateway"
 # Cline API gateway OpenAI-compatible Chat Completions.
 CLINE_DEFAULT_BASE = "https://api.cline.bot/api/v1"
+# Alibaba Cloud Model Studio (Bailian) pay-per-token "Token Plan", OpenAI-compatible.
+# Region-specific: a key issued in one region is not valid in the other, which is
+# why the two regions are separate providers rather than one with a base URL flag.
+ALIBABA_DEFAULT_BASE = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
+ALIBABA_CN_DEFAULT_BASE = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+# Alibaba Qwen "Coding Plan" subscription. A dedicated host, NOT compatible-mode,
+# and it takes an ``sk-sp-`` key that the pay-per-token endpoints reject. Alibaba
+# also publishes an Anthropic-protocol path (/apps/anthropic) on these same hosts;
+# FCC uses the OpenAI-compatible one because that is the dialect it speaks upstream.
+ALIBABA_CODING_DEFAULT_BASE = "https://coding-intl.dashscope.aliyuncs.com/v1"
+ALIBABA_CODING_CN_DEFAULT_BASE = "https://coding.dashscope.aliyuncs.com/v1"
+
+
+@dataclass(frozen=True, slots=True)
+class ProviderGroupSpec:
+    """A browsing group for the Admin providers view.
+
+    Groups answer "what kind of thing am I signing up for", which is the
+    question that separates providers usefully once there are more of them
+    than fit on a screen. They carry no runtime behavior.
+    """
+
+    group_id: str
+    label: str
+    description: str
+
+
+# Display order for the Admin providers view. ``custom`` is last because it is
+# empty until the user adds one; it exists so registry-defined providers land in
+# a named group rather than an unlabeled remainder.
+PROVIDER_GROUPS: tuple[ProviderGroupSpec, ...] = (
+    ProviderGroupSpec(
+        "subscription",
+        "Coding & subscription plans",
+        "Flat-rate plans billed by subscription instead of per token.",
+    ),
+    ProviderGroupSpec(
+        "direct",
+        "Model providers",
+        "First-party APIs from the labs that build the models.",
+    ),
+    ProviderGroupSpec(
+        "inference",
+        "Inference platforms",
+        "Hosts that serve open-weight models, usually priced per token.",
+    ),
+    ProviderGroupSpec(
+        "gateway",
+        "Gateways & routers",
+        "One key that reaches many models across upstream providers.",
+    ),
+    ProviderGroupSpec(
+        "local",
+        "Local runtimes",
+        "Models running on this machine or elsewhere on your network.",
+    ),
+    ProviderGroupSpec(
+        "custom",
+        "Custom providers",
+        "OpenAI-compatible endpoints you added yourself.",
+    ),
+)
+
+PROVIDER_GROUP_IDS: tuple[str, ...] = tuple(group.group_id for group in PROVIDER_GROUPS)
+
+CUSTOM_PROVIDER_GROUP = "custom"
 
 
 @dataclass(frozen=True, slots=True)
@@ -68,6 +134,10 @@ class ProviderDescriptor:
     base_url_attr: str | None = None
     proxy_attr: str | None = None
     dynamic: bool = False
+    # Deliberately defaults to empty rather than to a plausible group: a new
+    # provider that forgets this fails ``test_every_provider_declares_a_group``
+    # instead of silently filing itself somewhere wrong.
+    group: str = ""
 
 
 PROVIDER_CATALOG: dict[str, ProviderDescriptor] = {
@@ -79,6 +149,7 @@ PROVIDER_CATALOG: dict[str, ProviderDescriptor] = {
         credential_attr="nvidia_nim_api_key",
         default_base_url=NVIDIA_NIM_DEFAULT_BASE,
         proxy_attr="nvidia_nim_proxy",
+        group="inference",
     ),
     "open_router": ProviderDescriptor(
         provider_id="open_router",
@@ -88,6 +159,7 @@ PROVIDER_CATALOG: dict[str, ProviderDescriptor] = {
         credential_attr="open_router_api_key",
         default_base_url=OPENROUTER_DEFAULT_BASE,
         proxy_attr="open_router_proxy",
+        group="gateway",
     ),
     "gemini": ProviderDescriptor(
         provider_id="gemini",
@@ -97,6 +169,7 @@ PROVIDER_CATALOG: dict[str, ProviderDescriptor] = {
         credential_attr="gemini_api_key",
         default_base_url=GEMINI_DEFAULT_BASE,
         proxy_attr="gemini_proxy",
+        group="direct",
     ),
     "deepseek": ProviderDescriptor(
         provider_id="deepseek",
@@ -105,6 +178,7 @@ PROVIDER_CATALOG: dict[str, ProviderDescriptor] = {
         credential_url="https://platform.deepseek.com/api_keys",
         credential_attr="deepseek_api_key",
         default_base_url=DEEPSEEK_DEFAULT_BASE,
+        group="direct",
     ),
     "mistral": ProviderDescriptor(
         provider_id="mistral",
@@ -114,6 +188,7 @@ PROVIDER_CATALOG: dict[str, ProviderDescriptor] = {
         credential_attr="mistral_api_key",
         default_base_url=MISTRAL_DEFAULT_BASE,
         proxy_attr="mistral_proxy",
+        group="direct",
     ),
     "mistral_codestral": ProviderDescriptor(
         provider_id="mistral_codestral",
@@ -123,6 +198,7 @@ PROVIDER_CATALOG: dict[str, ProviderDescriptor] = {
         credential_attr="codestral_api_key",
         default_base_url=CODESTRAL_DEFAULT_BASE,
         proxy_attr="codestral_proxy",
+        group="direct",
     ),
     "opencode": ProviderDescriptor(
         provider_id="opencode",
@@ -132,6 +208,7 @@ PROVIDER_CATALOG: dict[str, ProviderDescriptor] = {
         credential_attr="opencode_api_key",
         default_base_url=OPENCODE_DEFAULT_BASE,
         proxy_attr="opencode_proxy",
+        group="gateway",
     ),
     "opencode_go": ProviderDescriptor(
         provider_id="opencode_go",
@@ -141,6 +218,7 @@ PROVIDER_CATALOG: dict[str, ProviderDescriptor] = {
         credential_attr="opencode_api_key",
         default_base_url=OPENCODE_GO_DEFAULT_BASE,
         proxy_attr="opencode_go_proxy",
+        group="subscription",
     ),
     "vercel": ProviderDescriptor(
         provider_id="vercel",
@@ -150,6 +228,7 @@ PROVIDER_CATALOG: dict[str, ProviderDescriptor] = {
         credential_attr="vercel_ai_gateway_api_key",
         default_base_url=VERCEL_AI_GATEWAY_DEFAULT_BASE,
         proxy_attr="vercel_ai_gateway_proxy",
+        group="gateway",
     ),
     "huggingface": ProviderDescriptor(
         provider_id="huggingface",
@@ -159,6 +238,7 @@ PROVIDER_CATALOG: dict[str, ProviderDescriptor] = {
         credential_attr="huggingface_api_key",
         default_base_url=HUGGINGFACE_DEFAULT_BASE,
         proxy_attr="huggingface_proxy",
+        group="gateway",
     ),
     "cohere": ProviderDescriptor(
         provider_id="cohere",
@@ -168,6 +248,7 @@ PROVIDER_CATALOG: dict[str, ProviderDescriptor] = {
         credential_attr="cohere_api_key",
         default_base_url=COHERE_DEFAULT_BASE,
         proxy_attr="cohere_proxy",
+        group="direct",
     ),
     "github_models": ProviderDescriptor(
         provider_id="github_models",
@@ -177,6 +258,7 @@ PROVIDER_CATALOG: dict[str, ProviderDescriptor] = {
         credential_attr="github_models_token",
         default_base_url=GITHUB_MODELS_DEFAULT_BASE,
         proxy_attr="github_models_proxy",
+        group="gateway",
     ),
     "wafer": ProviderDescriptor(
         provider_id="wafer",
@@ -186,6 +268,7 @@ PROVIDER_CATALOG: dict[str, ProviderDescriptor] = {
         credential_attr="wafer_api_key",
         default_base_url=WAFER_DEFAULT_BASE,
         proxy_attr="wafer_proxy",
+        group="gateway",
     ),
     "kimi": ProviderDescriptor(
         provider_id="kimi",
@@ -195,6 +278,7 @@ PROVIDER_CATALOG: dict[str, ProviderDescriptor] = {
         credential_attr="kimi_api_key",
         default_base_url=KIMI_DEFAULT_BASE,
         proxy_attr="kimi_proxy",
+        group="direct",
     ),
     "kimi_coding": ProviderDescriptor(
         provider_id="kimi_coding",
@@ -204,6 +288,7 @@ PROVIDER_CATALOG: dict[str, ProviderDescriptor] = {
         credential_attr="kimi_coding_api_key",
         default_base_url=KIMI_CODING_DEFAULT_BASE,
         proxy_attr="kimi_coding_proxy",
+        group="subscription",
     ),
     "chatgpt_oauth": ProviderDescriptor(
         provider_id="chatgpt_oauth",
@@ -213,6 +298,7 @@ PROVIDER_CATALOG: dict[str, ProviderDescriptor] = {
         default_base_url=CHATGPT_OAUTH_DEFAULT_BASE,
         base_url_attr="chatgpt_oauth_base_url",
         proxy_attr="chatgpt_oauth_proxy",
+        group="subscription",
     ),
     "minimax": ProviderDescriptor(
         provider_id="minimax",
@@ -222,6 +308,7 @@ PROVIDER_CATALOG: dict[str, ProviderDescriptor] = {
         credential_attr="minimax_api_key",
         default_base_url=MINIMAX_DEFAULT_BASE,
         proxy_attr="minimax_proxy",
+        group="direct",
     ),
     "cerebras": ProviderDescriptor(
         provider_id="cerebras",
@@ -231,6 +318,7 @@ PROVIDER_CATALOG: dict[str, ProviderDescriptor] = {
         credential_attr="cerebras_api_key",
         default_base_url=CEREBRAS_DEFAULT_BASE,
         proxy_attr="cerebras_proxy",
+        group="inference",
     ),
     "groq": ProviderDescriptor(
         provider_id="groq",
@@ -240,6 +328,7 @@ PROVIDER_CATALOG: dict[str, ProviderDescriptor] = {
         credential_attr="groq_api_key",
         default_base_url=GROQ_DEFAULT_BASE,
         proxy_attr="groq_proxy",
+        group="inference",
     ),
     "sambanova": ProviderDescriptor(
         provider_id="sambanova",
@@ -249,6 +338,7 @@ PROVIDER_CATALOG: dict[str, ProviderDescriptor] = {
         credential_attr="sambanova_api_key",
         default_base_url=SAMBANOVA_DEFAULT_BASE,
         proxy_attr="sambanova_proxy",
+        group="inference",
     ),
     "fireworks": ProviderDescriptor(
         provider_id="fireworks",
@@ -258,6 +348,7 @@ PROVIDER_CATALOG: dict[str, ProviderDescriptor] = {
         credential_attr="fireworks_api_key",
         default_base_url=FIREWORKS_DEFAULT_BASE,
         proxy_attr="fireworks_proxy",
+        group="inference",
     ),
     "novita": ProviderDescriptor(
         provider_id="novita",
@@ -267,6 +358,7 @@ PROVIDER_CATALOG: dict[str, ProviderDescriptor] = {
         credential_attr="novita_api_key",
         default_base_url=NOVITA_DEFAULT_BASE,
         proxy_attr="novita_proxy",
+        group="inference",
     ),
     "nous_portal": ProviderDescriptor(
         provider_id="nous_portal",
@@ -276,6 +368,7 @@ PROVIDER_CATALOG: dict[str, ProviderDescriptor] = {
         credential_attr="nous_api_key",
         default_base_url=NOUS_PORTAL_DEFAULT_BASE,
         proxy_attr="nous_proxy",
+        group="gateway",
     ),
     "kilo": ProviderDescriptor(
         provider_id="kilo",
@@ -285,6 +378,7 @@ PROVIDER_CATALOG: dict[str, ProviderDescriptor] = {
         credential_attr="kilo_api_key",
         default_base_url=KILO_DEFAULT_BASE,
         proxy_attr="kilo_proxy",
+        group="gateway",
     ),
     "cline": ProviderDescriptor(
         provider_id="cline",
@@ -294,6 +388,7 @@ PROVIDER_CATALOG: dict[str, ProviderDescriptor] = {
         credential_attr="cline_api_key",
         default_base_url=CLINE_DEFAULT_BASE,
         proxy_attr="cline_proxy",
+        group="gateway",
     ),
     "cloudflare": ProviderDescriptor(
         provider_id="cloudflare",
@@ -303,6 +398,7 @@ PROVIDER_CATALOG: dict[str, ProviderDescriptor] = {
         credential_attr="cloudflare_api_token",
         default_base_url=CLOUDFLARE_AI_REST_ROOT,
         proxy_attr="cloudflare_proxy",
+        group="gateway",
     ),
     "zai": ProviderDescriptor(
         provider_id="zai",
@@ -311,6 +407,51 @@ PROVIDER_CATALOG: dict[str, ProviderDescriptor] = {
         credential_attr="zai_api_key",
         default_base_url=ZAI_DEFAULT_BASE,
         proxy_attr="zai_proxy",
+        group="subscription",
+    ),
+    "alibaba_coding": ProviderDescriptor(
+        provider_id="alibaba_coding",
+        display_name="Alibaba Coding Plan (International)",
+        credential_env="ALIBABA_CODING_API_KEY",
+        credential_url="https://bailian.console.alibabacloud.com/",
+        credential_attr="alibaba_coding_api_key",
+        default_base_url=ALIBABA_CODING_DEFAULT_BASE,
+        base_url_attr="alibaba_coding_base_url",
+        proxy_attr="alibaba_coding_proxy",
+        group="subscription",
+    ),
+    "alibaba_coding_cn": ProviderDescriptor(
+        provider_id="alibaba_coding_cn",
+        display_name="Alibaba Coding Plan (China)",
+        credential_env="ALIBABA_CODING_CN_API_KEY",
+        credential_url="https://bailian.console.aliyun.com/",
+        credential_attr="alibaba_coding_cn_api_key",
+        default_base_url=ALIBABA_CODING_CN_DEFAULT_BASE,
+        base_url_attr="alibaba_coding_cn_base_url",
+        proxy_attr="alibaba_coding_cn_proxy",
+        group="subscription",
+    ),
+    "alibaba": ProviderDescriptor(
+        provider_id="alibaba",
+        display_name="Alibaba Token Plan (International)",
+        credential_env="ALIBABA_API_KEY",
+        credential_url="https://bailian.console.alibabacloud.com/",
+        credential_attr="alibaba_api_key",
+        default_base_url=ALIBABA_DEFAULT_BASE,
+        base_url_attr="alibaba_base_url",
+        proxy_attr="alibaba_proxy",
+        group="direct",
+    ),
+    "alibaba_cn": ProviderDescriptor(
+        provider_id="alibaba_cn",
+        display_name="Alibaba Token Plan (China)",
+        credential_env="ALIBABA_CN_API_KEY",
+        credential_url="https://bailian.console.aliyun.com/",
+        credential_attr="alibaba_cn_api_key",
+        default_base_url=ALIBABA_CN_DEFAULT_BASE,
+        base_url_attr="alibaba_cn_base_url",
+        proxy_attr="alibaba_cn_proxy",
+        group="direct",
     ),
     "ollama_cloud": ProviderDescriptor(
         provider_id="ollama_cloud",
@@ -320,6 +461,7 @@ PROVIDER_CATALOG: dict[str, ProviderDescriptor] = {
         credential_attr="ollama_api_key",
         default_base_url=OLLAMA_CLOUD_DEFAULT_BASE,
         proxy_attr="ollama_cloud_proxy",
+        group="inference",
     ),
     "lmstudio": ProviderDescriptor(
         provider_id="lmstudio",
@@ -329,6 +471,7 @@ PROVIDER_CATALOG: dict[str, ProviderDescriptor] = {
         base_url_attr="lm_studio_base_url",
         proxy_attr="lmstudio_proxy",
         local=True,
+        group="local",
     ),
     "llamacpp": ProviderDescriptor(
         provider_id="llamacpp",
@@ -338,6 +481,7 @@ PROVIDER_CATALOG: dict[str, ProviderDescriptor] = {
         base_url_attr="llamacpp_base_url",
         proxy_attr="llamacpp_proxy",
         local=True,
+        group="local",
     ),
     "ollama": ProviderDescriptor(
         provider_id="ollama",
@@ -346,6 +490,7 @@ PROVIDER_CATALOG: dict[str, ProviderDescriptor] = {
         default_base_url=OLLAMA_DEFAULT_BASE,
         base_url_attr="ollama_base_url",
         local=True,
+        group="local",
     ),
 }
 

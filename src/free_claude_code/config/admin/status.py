@@ -3,7 +3,10 @@
 from collections.abc import Mapping
 from typing import Any
 
-from free_claude_code.config.provider_catalog import PROVIDER_CATALOG
+from free_claude_code.config.provider_catalog import (
+    CUSTOM_PROVIDER_GROUP,
+    PROVIDER_CATALOG,
+)
 from free_claude_code.config.provider_registry import get_provider_registry
 
 from .manifest import FIELDS
@@ -23,6 +26,7 @@ def provider_config_status(
                 {
                     "provider_id": provider_id,
                     "display_name": descriptor.display_name,
+                    "group": descriptor.group,
                     "kind": "local",
                     "status": "missing_url" if not base_url.strip() else "unknown",
                     "label": "Missing URL" if not base_url.strip() else "Not checked",
@@ -37,6 +41,7 @@ def provider_config_status(
             {
                 "provider_id": provider_id,
                 "display_name": descriptor.display_name,
+                "group": descriptor.group,
                 "kind": "remote",
                 "status": "configured" if configured else "missing_key",
                 "label": "Configured" if configured else "Missing key",
@@ -54,6 +59,7 @@ def provider_config_status(
             {
                 "provider_id": entry.provider_id,
                 "display_name": entry.display_name,
+                "group": CUSTOM_PROVIDER_GROUP,
                 "kind": "remote",
                 "status": status,
                 "label": label,

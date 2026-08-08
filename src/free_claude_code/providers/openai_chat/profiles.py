@@ -323,6 +323,50 @@ OPENAI_CHAT_PROFILES: dict[str, OpenAIChatProfile] = {
             disabled={"type": "disabled"},
         ),
     ),
+    # Alibaba Model Studio speaks OpenAI Chat Completions and streams thinking
+    # back as ``reasoning_content``, so reasoning is READ. It is deliberately not
+    # REQUESTED: DashScope's control is ``enable_thinking``, which is rejected
+    # outright by some models on these endpoints -- and the Coding Plan roster
+    # proxies third-party models (GLM, Kimi, MiniMax) whose handling of it we
+    # cannot check without a subscription. An unsent control costs thinking on
+    # some models; a wrongly-sent one 400s every request. ``extra_body`` passes
+    # through, so a user who knows their model supports it can send it.
+    "alibaba": OpenAIChatProfile(
+        _policy(
+            "ALIBABA",
+            ReasoningReplayMode.REASONING_CONTENT,
+            include_extra_body=True,
+            extra_body_validator=validate_extra_body_does_not_override_reasoning_fields,
+        ),
+        NO_REASONING,
+    ),
+    "alibaba_cn": OpenAIChatProfile(
+        _policy(
+            "ALIBABA_CN",
+            ReasoningReplayMode.REASONING_CONTENT,
+            include_extra_body=True,
+            extra_body_validator=validate_extra_body_does_not_override_reasoning_fields,
+        ),
+        NO_REASONING,
+    ),
+    "alibaba_coding": OpenAIChatProfile(
+        _policy(
+            "ALIBABA_CODING",
+            ReasoningReplayMode.REASONING_CONTENT,
+            include_extra_body=True,
+            extra_body_validator=validate_extra_body_does_not_override_reasoning_fields,
+        ),
+        NO_REASONING,
+    ),
+    "alibaba_coding_cn": OpenAIChatProfile(
+        _policy(
+            "ALIBABA_CODING_CN",
+            ReasoningReplayMode.REASONING_CONTENT,
+            include_extra_body=True,
+            extra_body_validator=validate_extra_body_does_not_override_reasoning_fields,
+        ),
+        NO_REASONING,
+    ),
     "ollama_cloud": OpenAIChatProfile(
         _policy(
             "OLLAMA_CLOUD",

@@ -8,6 +8,7 @@ from free_claude_code.config.model_refs import (
     parse_model_ref_list,
 )
 from free_claude_code.config.paths import managed_env_path
+from free_claude_code.config.provider_catalog import PROVIDER_GROUPS
 
 from .manifest import (
     FIELD_BY_KEY,
@@ -104,6 +105,7 @@ def load_config_response() -> dict[str, Any]:
                 "key": field.key,
                 "label": field.label,
                 "section": field.section_id,
+                "provider": field.provider or None,
                 "type": field.field_type,
                 "value": display_value(field, raw_value),
                 "configured": bool(str(raw_value).strip()),
@@ -134,6 +136,14 @@ def load_config_response() -> dict[str, Any]:
                 "advanced": section.advanced,
             }
             for section in SECTIONS
+        ],
+        "provider_groups": [
+            {
+                "id": group.group_id,
+                "label": group.label,
+                "description": group.description,
+            }
+            for group in PROVIDER_GROUPS
         ],
         "fields": fields,
         "paths": {

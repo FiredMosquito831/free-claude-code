@@ -688,6 +688,30 @@ _NON_PROVIDER_FIELDS: tuple[ConfigFieldSpec, ...] = (
         advanced=True,
     ),
     ConfigFieldSpec(
+        "FCC_SMOKE_MODEL_ALIBABA_CODING",
+        "Smoke Alibaba Coding Plan (International) Model",
+        "smoke",
+        advanced=True,
+    ),
+    ConfigFieldSpec(
+        "FCC_SMOKE_MODEL_ALIBABA_CODING_CN",
+        "Smoke Alibaba Coding Plan (China) Model",
+        "smoke",
+        advanced=True,
+    ),
+    ConfigFieldSpec(
+        "FCC_SMOKE_MODEL_ALIBABA",
+        "Smoke Alibaba Token Plan (International) Model",
+        "smoke",
+        advanced=True,
+    ),
+    ConfigFieldSpec(
+        "FCC_SMOKE_MODEL_ALIBABA_CN",
+        "Smoke Alibaba Token Plan (China) Model",
+        "smoke",
+        advanced=True,
+    ),
+    ConfigFieldSpec(
         "FCC_SMOKE_MODEL_FIREWORKS",
         "Smoke Fireworks Model",
         "smoke",
