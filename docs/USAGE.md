@@ -307,7 +307,7 @@ Codex reads a model catalog that FCC generates, so its own picker works normally
 
 ## 7. Providers and API keys
 
-Open the **Providers** tab. Each provider has a card with a credential field, a **Validate** button, and **Apply**.
+Open the **Providers** tab. Every provider is one card in a single searchable grid — there are 35 of them, so start by typing in **Search providers**. It matches the provider's name, its id and its environment variable, so `groq`, `GROQ_API_KEY` and `alibaba` all find what you would expect. **Only configured** hides everything you have not set up yet.
 
 <div align="center">
   <img src="../assets/admin-requests.png" alt="Provider configuration in the Admin UI" width="860">
@@ -315,12 +315,17 @@ Open the **Providers** tab. Each provider has a card with a credential field, a 
 
 ### The workflow
 
-1. **Paste the key** into the provider you want to use.
-2. **Validate** — this makes a real API call. A green result means the key works *and* the model currently selected is reachable with it.
-3. **Apply** to save.
-4. **Select** that provider as the active one.
+1. **Find the provider** — search by name or by variable name.
+2. **Press Configure.** The card expands and opens that provider's key pool.
+3. **Paste your key into "Add key"** and press it. Keys are saved immediately — you do not need **Apply** for them. To add several at once, paste them separated by commas; keys you already have are skipped rather than rejecting the whole paste.
+4. **Press Refresh models.** This makes a real API call to that provider. A model count means the key works *and* FCC can read that provider's catalog.
+5. **Choose the model** on the **Model Config** tab. There is no "active provider" to select — the model ref you set there decides which provider serves a request.
 
-### Reading validation failures
+A provider holds a **pool** of keys, not a single value. Each key in the pool shows its own health (healthy, cooling down, locked out) and has its own **Remove**, which also takes effect immediately. If you added more than one key, pick a **Rotation** policy and press **Apply** — rotation is a restart-required setting, so the server restarts when you apply it.
+
+Local backends (LM Studio, llama.cpp, Ollama) take a base URL instead of a key, and offer **Test connection** where remote providers offer Refresh models.
+
+### Reading a failed Refresh models
 
 | Result | Almost always means |
 | --- | --- |
@@ -329,7 +334,7 @@ Open the **Providers** tab. Each provider has a card with a credential field, a 
 | **402** | Billing: no credit, or plan quota exhausted. |
 | **Timeout** | Network, or a self-hosted endpoint that isn't running. |
 
-That 404 case trips people up constantly. If validation fails with 404, check the exact model id against the provider's own model list before assuming the key is bad.
+That 404 case trips people up constantly. If Refresh models fails with 404, check the exact model id against the provider's own model list before assuming the key is bad.
 
 ### Doing it by file instead
 

@@ -620,10 +620,21 @@
 
                 <h3 id="guide-keys">Add a provider</h3>
                 <p>
-                  On the <strong>Providers</strong> tab, paste a key, press
-                  <em>Validate</em>, then <em>Apply</em> and select it as active.
-                  <em>Validate</em> makes a real API call, so a green result means the key
-                  works <strong>and</strong> the selected model is reachable with it.
+                  On the <strong>Providers</strong> tab, type the provider's name into
+                  <em>Search providers</em> &mdash; it also matches the variable name, so
+                  <code>GROQ_API_KEY</code> finds Groq. Press <em>Configure</em> to open
+                  that provider's key pool, paste your key into <em>Add key</em> and press
+                  it. Keys save immediately; <em>Apply</em> is not needed for them.
+                </p>
+                <p>
+                  A provider holds a <strong>pool</strong> of keys rather than one value.
+                  Paste several separated by commas to add them together, give each its own
+                  <em>Remove</em>, and pick a <em>Rotation</em> policy when you have more
+                  than one (that one does need <em>Apply</em>, and restarts the server).
+                  Then press <em>Refresh models</em>: it makes a real API call, so a model
+                  count means the key works <strong>and</strong> FCC can read that
+                  provider's catalog. Choose the model itself on
+                  <a href="#guide-models">Model Config</a>.
                 </p>
                 <table class="guide-table">
                   <thead><tr><th>Result</th><th>Almost always means</th></tr></thead>
@@ -639,8 +650,8 @@
                   against the provider's own list before assuming the key is bad.
                 </p>
                 <p>
-                  Local backends take a base URL instead of a key, and the credential field
-                  stays empty:
+                  Local backends take a base URL instead of a key, and offer
+                  <em>Test connection</em> where remote providers offer Refresh models:
                 </p>
                 <pre><code>LM_STUDIO_BASE_URL="http://127.0.0.1:1234/v1"
 OLLAMA_BASE_URL="http://127.0.0.1:11434"</code></pre>
