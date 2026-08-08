@@ -341,22 +341,42 @@ async def add_credential_key(
     request: Request,
     services: ApiServices = Depends(get_services),
 ):
-    """Append one key to a provider credential and apply immediately."""
+    """Append one or more keys to a provider credential and apply immediately.
+
+    Accepts a comma-separated list so a pool can be pasted in one go. This used
+    to reject commas outright, which left pasting several keys possible only
+    through the raw credential field -- a control that replaced the whole pool
+    and read as "replace" next to a list that adds and removes. That field is no
+    longer offered, so the capability lives here instead.
+    """
     require_loopback_admin(request)
     entry = _credential_entry_or_404(env_key)
     _require_unlocked_credential(entry)
 
-    new_key = payload.key.strip()
-    if not new_key:
+    submitted = parse_credential_keys(payload.key)
+    if not submitted:
         raise HTTPException(status_code=400, detail="Key is empty")
-    if "," in new_key:
-        raise HTTPException(status_code=400, detail="Paste a single key without commas")
 
     keys = list(parse_credential_keys(str(entry["value"])))
-    if new_key in keys:
-        raise HTTPException(status_code=409, detail="Key is already configured")
-    keys.append(new_key)
+    added: list[str] = []
+    for candidate in submitted:
+        # Skip duplicates rather than failing the batch: pasting a pool that
+        # overlaps what is already configured should add the new ones.
+        if candidate in keys or candidate in added:
+            continue
+        added.append(candidate)
 
+    if not added:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Key is already configured"
+                if len(submitted) == 1
+                else "Every key pasted is already configured"
+            ),
+        )
+
+    keys.extend(added)
     result = await services.admin.apply_admin_config({env_key: ",".join(keys)})
     if not result.get("applied"):
         raise HTTPException(
@@ -367,7 +387,9 @@ async def add_credential_key(
         "applied": True,
         "env_key": env_key,
         "count": len(keys),
-        "added": _mask_credential_key(new_key),
+        "added": ", ".join(_mask_credential_key(key) for key in added),
+        "added_count": len(added),
+        "skipped": len(submitted) - len(added),
         "restart": result.get("restart"),
     }
 

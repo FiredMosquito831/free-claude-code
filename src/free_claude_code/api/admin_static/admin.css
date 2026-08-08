@@ -3259,3 +3259,17 @@ details.turn-pane > summary:focus-visible {
   font-weight: 700;
   font-variant-numeric: tabular-nums;
 }
+
+/* A pooled credential is managed by its key list, not by a single field: the
+   raw control is kept in the document for the shared apply machinery but is
+   never shown, so "enter a new value to replace" cannot sit above a list of
+   individual keys with Remove buttons. */
+.field-pooled > [hidden] {
+  /* The `hidden` attribute only sets display:none at UA level, which any
+     later display rule silently beats. Pin it for this wrapper. */
+  display: none;
+}
+
+.field-pooled .key-manager {
+  margin-top: 4px;
+}
