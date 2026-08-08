@@ -117,3 +117,41 @@ def test_cloudflare_account_id_is_admin_provider_field() -> None:
     assert entry.settings_attr == "cloudflare_account_id"
     assert entry.section_id == "providers"
     assert entry.secret is False
+
+
+def test_provider_status_reports_the_size_of_each_key_pool(monkeypatch) -> None:
+    """The card face shows "3 keys - Round robin" without one request per provider.
+
+    Secret values are masked to a constant before they reach the client, so the
+    Admin UI cannot count a comma-separated pool itself, and fetching the count
+    per provider would mean 35 requests on every page load.
+    """
+    from free_claude_code.config.admin.status import provider_config_status
+
+    state = {
+        "NVIDIA_NIM_API_KEY": {"value": "key-one, key-two ,key-three"},
+        "GROQ_API_KEY": {"value": "solo-key"},
+        "CEREBRAS_API_KEY": {"value": ""},
+    }
+
+    by_id = {entry["provider_id"]: entry for entry in provider_config_status(state)}
+
+    assert by_id["nvidia_nim"]["key_count"] == 3
+    assert by_id["groq"]["key_count"] == 1
+    assert by_id["cerebras"]["key_count"] == 0
+    # A blank pool must not read as configured.
+    assert by_id["cerebras"]["status"] == "missing_key"
+    assert by_id["nvidia_nim"]["status"] == "configured"
+
+
+def test_every_remote_provider_reports_a_key_count() -> None:
+    """A provider missing this renders a card face with no summary line."""
+    from free_claude_code.config.admin.status import provider_config_status
+
+    remote = [
+        entry for entry in provider_config_status({}) if entry["kind"] == "remote"
+    ]
+
+    assert remote
+    assert all("key_count" in entry for entry in remote)
+    assert all(entry["key_count"] == 0 for entry in remote)
