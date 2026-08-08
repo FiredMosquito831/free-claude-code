@@ -294,11 +294,18 @@ textarea:focus-visible,
 .provider-title {
   display: flex;
   align-items: center;
+  /* flex-wrap, not nowrap: some display names are long ("Alibaba Coding
+     Plan (International)") and a flex item's default min-content sizing
+     would otherwise refuse to shrink below its longest word, pushing the
+     status pill out of the card instead of wrapping the name under it. */
+  flex-wrap: wrap;
   justify-content: space-between;
-  gap: 12px;
+  gap: 8px 12px;
 }
 
 .provider-title strong {
+  min-width: 0;
+  overflow-wrap: break-word;
   font-size: 14px;
   font-weight: 700;
   color: var(--text-strong);
@@ -345,6 +352,265 @@ textarea:focus-visible,
   line-height: 1.4;
   word-break: break-all;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+/* Providers tab: searchable, grouped provider cards ---------------------- */
+
+.pv-groups {
+  display: flex;
+  flex-direction: column;
+}
+
+.pv-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+.pv-search {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 1 1 280px;
+  min-width: 220px;
+}
+
+.pv-search-label {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--muted);
+}
+
+.pv-search input[type="search"] {
+  width: 100%;
+  min-height: 40px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-md);
+  background: var(--input);
+  color: var(--text-strong);
+  padding: 10px 14px;
+  font-size: 14px;
+  transition: all var(--transition-fast);
+}
+
+.pv-search input[type="search"]:focus {
+  outline: none;
+  border-color: var(--accent-border);
+  background: var(--input-focus);
+}
+
+.pv-configured-toggle {
+  flex: 0 0 auto;
+}
+
+/* Groups nest one tone lighter than the section they sit in (var(--panel)
+   -> var(--panel-strong)), and provider cards nest one tone lighter again
+   (-> var(--card)). The same three-step ladder already used for
+   panel/panel-strong/card elsewhere in this file, applied to depth instead
+   of state, so how deep you are reads from brightness alone. */
+.pv-group {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--panel-strong);
+  margin-bottom: 14px;
+  padding: 4px 20px 18px;
+}
+
+.pv-group[hidden] {
+  display: none;
+}
+
+.pv-group-summary {
+  cursor: pointer;
+  list-style: none;
+  padding: 16px 0;
+}
+
+.pv-group-summary::-webkit-details-marker {
+  display: none;
+}
+
+.pv-group-summary::before {
+  content: "▸";
+  display: inline-block;
+  margin-right: 8px;
+  color: var(--muted);
+  transition: transform var(--transition-fast);
+}
+
+.pv-group[open] > .pv-group-summary::before {
+  transform: rotate(90deg);
+}
+
+.pv-group-title-row {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.pv-group-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text-strong);
+}
+
+.pv-group-count {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.pv-group-desc {
+  margin: 6px 0 0 20px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.pv-dot-rail {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 10px 0 0 20px;
+}
+
+.pv-dot {
+  width: 10px;
+  height: 10px;
+  padding: 0;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--neutral-border);
+  background: var(--neutral-bg);
+  cursor: pointer;
+  transition: transform var(--transition-fast);
+}
+
+.pv-dot:hover {
+  transform: scale(1.3);
+}
+
+.pv-dot.ok {
+  background: var(--ok);
+  border-color: var(--ok);
+}
+
+.pv-dot.warn {
+  background: var(--warn);
+  border-color: var(--warn);
+}
+
+.pv-dot.error {
+  background: var(--error);
+  border-color: var(--error);
+}
+
+.pv-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 16px;
+}
+
+.pv-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  padding: 16px;
+  background: var(--card);
+  transition: border-color var(--transition-normal), box-shadow var(--transition-normal);
+}
+
+.pv-card[hidden] {
+  display: none;
+}
+
+/* Momentary highlight after a dot-rail jump lands on this card -- it needs
+   to be findable the instant the scroll settles, not just eventually
+   visible. */
+.pv-card-flash {
+  border-color: var(--accent-border);
+  box-shadow: var(--glow-accent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pv-card {
+    transition: none;
+  }
+  .pv-dot,
+  .pv-group-summary::before {
+    transition: none;
+  }
+}
+
+.pv-card-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.pv-advanced {
+  border-top: 1px solid var(--line);
+  padding-top: 10px;
+}
+
+.pv-advanced summary {
+  cursor: pointer;
+  user-select: none;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.pv-advanced summary:hover {
+  color: var(--text);
+}
+
+.pv-advanced[open] summary {
+  margin-bottom: 10px;
+}
+
+/* Advanced fields live inside a per-card <details>, outside the section's
+   own show-advanced toggle, so undo the generic grid's default hiding here
+   -- same fix the web search provider cards already use for the same
+   reason. */
+.pv-advanced .field.advanced-field {
+  display: flex;
+  margin: 0 0 10px 0;
+}
+
+.pv-other {
+  margin-top: 4px;
+}
+
+.pv-other-heading {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin: 0 0 12px;
+}
+
+.pv-group-summary:focus-visible,
+.pv-dot:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+@media (max-width: 720px) {
+  .pv-card-grid {
+    grid-template-columns: 1fr;
+  }
+  .pv-toolbar {
+    flex-direction: column;
+    align-items: stretch;
+  }
 }
 
 /* Button & Form Controls styling */

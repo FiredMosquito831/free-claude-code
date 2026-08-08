@@ -1531,7 +1531,7 @@ def test_admin_static_styles_every_class_the_script_emits():
     script = (static / "admin.js").read_text(encoding="utf-8")
     styles = (static / "admin.css").read_text(encoding="utf-8")
 
-    prefixes = ("fallback-", "route-", "get-started-", "ws-", "model-chain-")
+    prefixes = ("fallback-", "route-", "get-started-", "ws-", "model-chain-", "pv-")
     emitted: set[str] = set()
     # Template literals and plain strings are matched separately: one class
     # covering both would stop at the first quote *inside* an interpolation and

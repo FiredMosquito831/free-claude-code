@@ -182,11 +182,11 @@ def build_state(
                 "Open the Providers page from the left nav.",
                 "Pick a provider with a free tier — Cerebras, Groq, and "
                 "NVIDIA NIM all have one.",
-                "Paste the API key into that provider's key field further "
-                "down the page.",
+                "Type its name into 'Search providers' to jump straight to its card.",
+                "Paste the API key into that card's key field.",
                 "Click Apply at the bottom of the page to save it.",
             ),
-            target="#providerGrid",
+            target="#providersSections",
         ),
         OnboardingStep(
             id="models",
