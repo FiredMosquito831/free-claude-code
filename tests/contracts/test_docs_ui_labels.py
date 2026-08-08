@@ -34,6 +34,9 @@ DOCUMENTED_CONTROLS: tuple[str, ...] = (
     "Validate",
     "Apply",
     "Manage keys",
+    # Model Config: the guide and the README tell you to press these.
+    "Add fallback",
+    "Vision adapter",
 )
 
 

@@ -683,6 +683,35 @@ OLLAMA_BASE_URL="http://127.0.0.1:11434"</code></pre>
                   Reserve the big tier for real work, and point the fallback at something
                   cheap so unmapped requests cannot surprise you.
                 </p>
+                <p>
+                  <strong>Give each tier a fallback chain.</strong> Press
+                  <em>Add fallback</em> under a tier's model to name a stand-in, and
+                  another for a stand-in after that. If the model a request routes to
+                  cannot serve it, the next entry takes over &mdash; a free model that
+                  rate-limits at the wrong moment stops being the end of the request.
+                </p>
+                <p class="guide-note">
+                  <strong>Failover stops once you have seen output.</strong> A model that
+                  fails while connecting, authenticating or rate-limiting is replaced
+                  silently. One that dies <em>halfway through streaming an answer</em> is
+                  not, because switching then would splice two different replies together
+                  &mdash; so a chain rescues the failures that happen before the first
+                  word, not the ones that happen at word five hundred.
+                </p>
+                <p>
+                  <strong>Images are routed separately.</strong> Plenty of fast text models
+                  cannot read a screenshot at all. Set a <em>Vision adapter</em> and any
+                  request carrying an image goes there instead, but only when the tier's own
+                  model is <em>known</em> not to accept images &mdash; a model nobody
+                  publishes capabilities for is left alone rather than diverted. When that
+                  applies to one of your tiers, its card says so directly, and the adapter
+                  gets its own <em>Add fallback</em> chain like any other route.
+                </p>
+                <p>
+                  Afterwards, <a href="#guide-analytics">Analytics</a> shows the whole path
+                  a request took: which models were tried, which one answered, and whether
+                  the vision adapter stepped in.
+                </p>
 
                 <h3 id="guide-cli">Point Claude Code here</h3>
                 <p>
