@@ -8,11 +8,20 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from .constants import (
     CHATGPT_OAUTH_MANAGED_CREDENTIAL_REFERENCE,
+    CREDENTIAL_CIRCUIT_THRESHOLD_DEFAULT,
     FALLBACK_EJECT_AFTER_FAILURES_DEFAULT,
     FALLBACK_EJECT_SECONDS_DEFAULT,
     FALLBACK_FIRST_TOKEN_TIMEOUT_DEFAULT,
     FALLBACK_TOTAL_TIMEOUT_DEFAULT,
     HTTP_CONNECT_TIMEOUT_DEFAULT,
+    PROVIDER_RETRY_ATTEMPTS_DEFAULT,
+    RATE_LIMIT_COOLDOWN_SECONDS_DEFAULT,
+    REQUEST_LOG_COMPRESSION_LEVEL_DEFAULT,
+    REQUEST_LOG_QUEUE_MAX_SIZE_DEFAULT,
+    REQUEST_LOG_TEXT_MAX_CHARS_DEFAULT,
+    STREAM_COMMIT_HOLDBACK_SECONDS_DEFAULT,
+    STREAM_EARLY_RETRY_ATTEMPTS_DEFAULT,
+    STREAM_MIDSTREAM_RECOVERY_ATTEMPTS_DEFAULT,
 )
 from .env_files import (
     ANTHROPIC_AUTH_TOKEN_ENV,
@@ -266,6 +275,61 @@ class Settings(BaseSettings):
     fallback_eject_seconds: float = Field(
         default=FALLBACK_EJECT_SECONDS_DEFAULT,
         validation_alias="FALLBACK_EJECT_SECONDS",
+    )
+
+    # How many times one model is retried on a 429 or 5xx before the chain
+    # moves on. Each retry waits longer than the last, so this is the delay a
+    # healthy fallback waits behind.
+    provider_retry_attempts: int = Field(
+        default=PROVIDER_RETRY_ATTEMPTS_DEFAULT,
+        validation_alias="PROVIDER_RETRY_ATTEMPTS",
+    )
+    # Retries inside one provider before the failure reaches routing at all.
+    stream_early_retry_attempts: int = Field(
+        default=STREAM_EARLY_RETRY_ATTEMPTS_DEFAULT,
+        validation_alias="STREAM_EARLY_RETRY_ATTEMPTS",
+    )
+    # After output has started and the connection drops, how many times the same
+    # model is asked to finish. No chain can help here, so this bounds how long
+    # a dying stream may hold a request.
+    stream_midstream_recovery_attempts: int = Field(
+        default=STREAM_MIDSTREAM_RECOVERY_ATTEMPTS_DEFAULT,
+        validation_alias="STREAM_MIDSTREAM_RECOVERY_ATTEMPTS",
+    )
+    # How long the first output is held before it commits. Raising it widens the
+    # window in which a failure can still fall back invisibly, at the cost of
+    # exactly that much time-to-first-token. 0 commits immediately, which
+    # disables invisible recovery entirely.
+    stream_commit_holdback_seconds: float = Field(
+        default=STREAM_COMMIT_HOLDBACK_SECONDS_DEFAULT,
+        validation_alias="STREAM_COMMIT_HOLDBACK_SECONDS",
+    )
+    # Applied only when a rate-limited provider sends no Retry-After header.
+    rate_limit_cooldown_seconds: float = Field(
+        default=RATE_LIMIT_COOLDOWN_SECONDS_DEFAULT,
+        validation_alias="RATE_LIMIT_COOLDOWN_SECONDS",
+    )
+    # Consecutive failures before one credential is benched by rotation.
+    credential_circuit_threshold: int = Field(
+        default=CREDENTIAL_CIRCUIT_THRESHOLD_DEFAULT,
+        validation_alias="CREDENTIAL_CIRCUIT_THRESHOLD",
+    )
+    # Longest text stored per field; longer text is truncated, which also bounds
+    # what content search can ever find.
+    request_log_text_max_chars: int = Field(
+        default=REQUEST_LOG_TEXT_MAX_CHARS_DEFAULT,
+        validation_alias="REQUEST_LOG_TEXT_MAX_CHARS",
+    )
+    # zstd level for stored bodies. Measured on a real log, level 19 was 4.9%
+    # smaller than 9 at a ninth of the speed.
+    request_log_compression_level: int = Field(
+        default=REQUEST_LOG_COMPRESSION_LEVEL_DEFAULT,
+        validation_alias="REQUEST_LOG_COMPRESSION_LEVEL",
+    )
+    # Pending writes held in memory. When this fills, records are dropped.
+    request_log_queue_max_size: int = Field(
+        default=REQUEST_LOG_QUEUE_MAX_SIZE_DEFAULT,
+        validation_alias="REQUEST_LOG_QUEUE_MAX_SIZE",
     )
 
     # ==================== Per-Provider Proxy ====================

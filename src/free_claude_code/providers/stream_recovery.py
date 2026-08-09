@@ -79,6 +79,11 @@ class RecoveryHoldbackBuffer:
     def push(self, event: str) -> list[str]:
         if self.committed:
             return [event]
+        if self._holdback_seconds <= 0:
+            # No window at all: commit immediately rather than hold the first
+            # event until some later push happens to check the clock.
+            self._events.append(event)
+            return self.flush()
         if self._started_at is None:
             self._started_at = self._now()
         self._events.append(event)
@@ -113,10 +118,22 @@ class RecoveryHoldbackBuffer:
 class RecoveryController:
     """Own holdback and retry counters for one provider stream lifecycle."""
 
-    def __init__(self, *, provider_name: str, request_id: str | None) -> None:
+    def __init__(
+        self,
+        *,
+        provider_name: str,
+        request_id: str | None,
+        holdback_seconds: float = EARLY_HOLDBACK_SECONDS,
+        early_retry_attempts: int = EARLY_TRANSPARENT_TOTAL_ATTEMPTS,
+        midstream_recovery_attempts: int = MIDSTREAM_RECOVERY_ATTEMPTS,
+    ) -> None:
         self._provider_name = provider_name
         self._request_id = request_id
-        self._holdback = RecoveryHoldbackBuffer()
+        self._holdback_seconds = holdback_seconds
+        # Attempts are counted as retries *after* the first try.
+        self._max_early_retries = max(0, early_retry_attempts - 1)
+        self._max_midstream_recoveries = max(0, midstream_recovery_attempts)
+        self._holdback = RecoveryHoldbackBuffer(holdback_seconds=holdback_seconds)
         self._early_retry_count = 0
         self._midstream_recovery_count = 0
 
@@ -171,11 +188,13 @@ class RecoveryController:
             and stream_opened
             and not committed
             and not complete_tool_salvageable
-            and self._early_retry_count < EARLY_TRANSPARENT_MAX_RETRIES
+            and self._early_retry_count < self._max_early_retries
         ):
             self._early_retry_count += 1
             self._holdback.discard()
-            self._holdback = RecoveryHoldbackBuffer()
+            self._holdback = RecoveryHoldbackBuffer(
+                holdback_seconds=self._holdback_seconds
+            )
             trace_event(
                 stage="provider",
                 event="provider.recovery.early_retry",
@@ -196,7 +215,7 @@ class RecoveryController:
         if (
             retryable
             and generated_output
-            and self._midstream_recovery_count < MIDSTREAM_RECOVERY_ATTEMPTS
+            and self._midstream_recovery_count < self._max_midstream_recoveries
         ):
             self._midstream_recovery_count += 1
             return RecoveryDecision(

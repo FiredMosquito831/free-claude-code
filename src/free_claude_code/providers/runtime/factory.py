@@ -186,6 +186,7 @@ def _create_single_provider(
         rate_limit=config.rate_limit or 40,
         rate_window=config.rate_window or 60.0,
         max_concurrency=config.max_concurrency,
+        max_retries=max(0, config.retry_attempts - 1),
     )
     factory = _SPECIAL_PROVIDER_FACTORIES.get(descriptor.provider_id)
     if factory is not None:
@@ -230,6 +231,10 @@ def create_provider(provider_id: str, settings: Settings) -> BaseProvider:
         )
         for key in keys
     ]
-    state = CredentialRotationState(len(providers), config.credential_rotation)
+    state = CredentialRotationState(
+        len(providers),
+        config.credential_rotation,
+        circuit_open_threshold=config.circuit_open_threshold,
+    )
     labels = tuple(mask_key_label(key) for key in keys)
     return RotatingProvider(config, providers, state, key_labels=labels)

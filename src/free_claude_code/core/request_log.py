@@ -467,17 +467,23 @@ class RequestLogStore:
         db_path: Path | str,
         *,
         max_rows: int = 50_000,
+        text_max_chars: int = MAX_TEXT_CHARS,
+        compression_level: int = _BODY_COMPRESSION_LEVEL,
+        queue_max_size: int = _QUEUE_MAX_SIZE,
         compress_bodies: bool = True,
     ) -> None:
         self._db_path = Path(db_path)
         self._max_rows = max(0, max_rows)
+        self._text_max_chars = max(0, text_max_chars)
+        self._compression_level = compression_level
+        self._queue_max_size = max(1, queue_max_size)
         self._compress_bodies = compress_bodies
         # Dictionaries are immutable once written, so caching them by id is
         # safe for the lifetime of the process.
         self._dict_cache: dict[int, Any] = {}
         self._dict_lock = threading.Lock()
         self._active_dict_id: int | None = None
-        self._queue: queue.Queue[Any] = queue.Queue(maxsize=_QUEUE_MAX_SIZE)
+        self._queue: queue.Queue[Any] = queue.Queue(maxsize=self._queue_max_size)
         self._inserts_since_prune = 0
         self._closed = threading.Event()
         self._stats_lock = threading.Lock()
@@ -1048,8 +1054,8 @@ class RequestLogStore:
         # Cap before queueing, not at flush time: an uncapped record sits in the
         # queue holding its full body, so a backlog could retain far more than
         # the persisted per-row limit.
-        record.input_text = cap_text(record.input_text)
-        record.output_text = cap_text(record.output_text)
+        record.input_text = cap_text(record.input_text, self._text_max_chars)
+        record.output_text = cap_text(record.output_text, self._text_max_chars)
         record.error_message = cap_text(record.error_message, MAX_ERROR_CHARS)
         try:
             self._queue.put_nowait(record)
@@ -1165,13 +1171,13 @@ class RequestLogStore:
             [(*key, *counters) for key, counters in buckets.items()],
         )
 
-    @staticmethod
-    def _pack_record(record: RequestRecord) -> tuple[bytes | None, bytes | None]:
+    def _pack_record(self, record: RequestRecord) -> tuple[bytes | None, bytes | None]:
         """Return this record's (prompt, everything-else) blobs."""
+        cap = self._text_max_chars
         values = {
-            "input_text": cap_text(record.input_text),
-            "output_text": cap_text(record.output_text),
-            "thinking_text": cap_text(record.thinking_text),
+            "input_text": cap_text(record.input_text, cap),
+            "output_text": cap_text(record.output_text, cap),
+            "thinking_text": cap_text(record.thinking_text, cap),
             "tool_calls": record.tool_calls,
         }
         return (
@@ -1180,8 +1186,9 @@ class RequestLogStore:
         )
 
     def _compress_packed(
-        self, packed: bytes, *, level: int = _BODY_COMPRESSION_LEVEL
+        self, packed: bytes, *, level: int | None = None
     ) -> tuple[int | None, bytes]:
+        level = self._compression_level if level is None else level
         dict_id = self._active_dict_id
         return dict_id, zstd.compress(
             packed, level=level, zstd_dict=self._dictionary(dict_id)
@@ -1287,7 +1294,7 @@ class RequestLogStore:
         inline = not self._compress_bodies
 
         def body(text: str | None) -> str | None:
-            return cap_text(text) if inline else None
+            return cap_text(text, self._text_max_chars) if inline else None
 
         return (
             record.id,
@@ -2114,6 +2121,9 @@ def get_request_log_store(
     max_rows: int = 50_000,
     enabled: bool = True,
     compress_bodies: bool = True,
+    text_max_chars: int = MAX_TEXT_CHARS,
+    compression_level: int = _BODY_COMPRESSION_LEVEL,
+    queue_max_size: int = _QUEUE_MAX_SIZE,
 ) -> RequestLogStore | None:
     """Return the shared store for a database path, creating it on first use."""
     if not enabled:
@@ -2123,7 +2133,12 @@ def get_request_log_store(
         store = _stores.get(path)
         if store is None or store._closed.is_set():
             store = RequestLogStore(
-                path, max_rows=max_rows, compress_bodies=compress_bodies
+                path,
+                max_rows=max_rows,
+                compress_bodies=compress_bodies,
+                text_max_chars=text_max_chars,
+                compression_level=compression_level,
+                queue_max_size=queue_max_size,
             )
             _stores[path] = store
         return store
@@ -2317,5 +2332,17 @@ def store_from_settings(settings: Any) -> RequestLogStore | None:
         return None
     return get_request_log_store(
         max_rows=int(getattr(settings, "request_log_max_rows", 50_000) or 50_000),
+        text_max_chars=int(
+            getattr(settings, "request_log_text_max_chars", MAX_TEXT_CHARS)
+            or MAX_TEXT_CHARS
+        ),
+        compression_level=int(
+            getattr(settings, "request_log_compression_level", _BODY_COMPRESSION_LEVEL)
+            or _BODY_COMPRESSION_LEVEL
+        ),
+        queue_max_size=int(
+            getattr(settings, "request_log_queue_max_size", _QUEUE_MAX_SIZE)
+            or _QUEUE_MAX_SIZE
+        ),
         compress_bodies=bool(getattr(settings, "request_log_compress_bodies", True)),
     )

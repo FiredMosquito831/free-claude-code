@@ -7,7 +7,15 @@ from dataclasses import dataclass
 from loguru import logger
 
 from free_claude_code.application.model_metadata import ProviderModelInfo
-from free_claude_code.config.constants import HTTP_CONNECT_TIMEOUT_DEFAULT
+from free_claude_code.config.constants import (
+    CREDENTIAL_CIRCUIT_THRESHOLD_DEFAULT,
+    HTTP_CONNECT_TIMEOUT_DEFAULT,
+    PROVIDER_RETRY_ATTEMPTS_DEFAULT,
+    RATE_LIMIT_COOLDOWN_SECONDS_DEFAULT,
+    STREAM_COMMIT_HOLDBACK_SECONDS_DEFAULT,
+    STREAM_EARLY_RETRY_ATTEMPTS_DEFAULT,
+    STREAM_MIDSTREAM_RECOVERY_ATTEMPTS_DEFAULT,
+)
 from free_claude_code.config.credentials import mask_key_label
 from free_claude_code.core.anthropic.models import MessagesRequest
 from free_claude_code.core.diagnostics import (
@@ -45,6 +53,13 @@ class ProviderConfig:
     log_api_error_tracebacks: bool = False
     api_keys: tuple[str, ...] = ()
     credential_rotation: str = "single"
+    # Resilience: how long a failing model may hold one request.
+    retry_attempts: int = PROVIDER_RETRY_ATTEMPTS_DEFAULT
+    early_retry_attempts: int = STREAM_EARLY_RETRY_ATTEMPTS_DEFAULT
+    midstream_recovery_attempts: int = STREAM_MIDSTREAM_RECOVERY_ATTEMPTS_DEFAULT
+    commit_holdback_seconds: float = STREAM_COMMIT_HOLDBACK_SECONDS_DEFAULT
+    rate_limit_cooldown_seconds: float = RATE_LIMIT_COOLDOWN_SECONDS_DEFAULT
+    circuit_open_threshold: int = CREDENTIAL_CIRCUIT_THRESHOLD_DEFAULT
 
 
 class BaseProvider(ABC):

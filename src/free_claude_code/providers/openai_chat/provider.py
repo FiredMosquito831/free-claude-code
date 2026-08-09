@@ -328,9 +328,13 @@ class _OpenAIChatStreamRunner:
         tag = self._provider._provider_name
         req_tag = f" request_id={self._request_id}" if self._request_id else ""
         ledger = self._new_ledger()
+        config = self._provider._config
         recovery = RecoveryController(
             provider_name=tag,
             request_id=self._request_id,
+            holdback_seconds=config.commit_holdback_seconds,
+            early_retry_attempts=config.early_retry_attempts,
+            midstream_recovery_attempts=config.midstream_recovery_attempts,
         )
 
         def hold_event(event: str) -> Iterator[str]:
@@ -546,6 +550,7 @@ class _OpenAIChatStreamRunner:
                         provider_failure_override=(
                             self._provider._provider_failure_override
                         ),
+                        cooldown_seconds=config.rate_limit_cooldown_seconds,
                     )
                     error_trace: dict[str, Any] = {
                         "stage": "provider",
