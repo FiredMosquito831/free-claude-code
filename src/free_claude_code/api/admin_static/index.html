@@ -292,6 +292,20 @@
               <button id="reqClearButton" class="secondary-button danger" type="button">Clear log</button>
             </div>
             <div id="reqStatsCards" class="requests-cards"></div>
+            <p id="reqRetentionNote" class="requests-retention" hidden></p>
+            <div class="requests-lifetime">
+              <div class="chart-heading">
+                <h4>All time</h4>
+                <span id="reqLifetimeSpan" class="requests-indicator"></span>
+              </div>
+              <p class="requests-retention">
+                Counted once per request and never pruned, so these keep rising
+                after the stored rows above start rolling over. Filters and the
+                time range do not apply.
+              </p>
+              <div id="reqLifetimeCards" class="requests-cards"></div>
+              <div id="reqLifetimeModels"></div>
+            </div>
             <div class="requests-charts">
               <div class="requests-chart">
                 <div class="chart-heading">
@@ -301,6 +315,7 @@
                     <span><i class="legend-swatch errors"></i>Errors</span>
                   </div>
                 </div>
+                <p id="reqCoverageNote" class="requests-retention" hidden></p>
                 <canvas
                   id="reqSeriesChart"
                   width="640"
@@ -917,6 +932,38 @@ TAVILY_CHUNKS_PER_SOURCE=3</code></pre>
                   actually happened. Web search analytics separate <em>logical
                   searches</em> from <em>provider attempts</em>, so one search that fell
                   back shows as one search and several attempts.
+                </p>
+                <h4>When the numbers stop moving</h4>
+                <p>
+                  <code>REQUEST_LOG_MAX_ROWS</code> caps stored rows, so once the log is
+                  full one row is deleted for each one that arrives. Everything above
+                  <strong>All time</strong> is therefore a rolling window, and at the cap
+                  it stops rising however much traffic you run. Analytics tells you when
+                  that happens rather than leaving a frozen counter looking broken.
+                </p>
+                <p>
+                  <strong>All time</strong> is a small permanent tally kept per day,
+                  provider and model. It keeps counting after stored rows roll over, so
+                  per-model requests and token usage stay true. It ignores the filters and
+                  the time range deliberately. Upgrading seeds it from the history still
+                  retained &mdash; anything already pruned is gone &mdash; and
+                  <em>Clear log</em> erases it along with everything else.
+                </p>
+                <p>
+                  Bodies dominate the disk cost, at roughly 30 KB a request, so 50,000 rows
+                  is about 1.7 GB. Raise the cap for more history, or set
+                  <code>REQUEST_LOG_CAPTURE_BODIES=false</code> to keep far more of it per
+                  gigabyte and give up the drill-down.
+                </p>
+                <h4>No traffic, or no server?</h4>
+                <p>
+                  A flat stretch in <em>Requests over time</em> means one of two very
+                  different things and the chart cannot tell them apart. FCC records when a
+                  server was actually running, so a line under the chart says whether one
+                  covered the range you picked, or how much of it had none. Choose a time
+                  range to see it; over all time there is no bounded window to measure.
+                  Restarts are ignored, and periods before you upgraded report nothing
+                  rather than claiming downtime nobody measured.
                 </p>
                 <p>
                   Search content routinely includes private queries and page text.

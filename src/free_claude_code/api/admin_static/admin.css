@@ -2008,6 +2008,30 @@ textarea:focus-visible,
   line-height: 1.35;
 }
 
+/* Explains a plateau where the reader would otherwise see a broken counter:
+   the stored rows are capped, and uptime gaps are not idle time. */
+.requests-retention {
+  margin: -6px 0 16px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--muted, #888);
+}
+
+.requests-lifetime {
+  margin-bottom: 20px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border, #333);
+}
+
+.requests-lifetime .chart-heading {
+  margin-bottom: 4px;
+}
+
+.requests-lifetime .requests-retention {
+  margin: 0 0 14px;
+  max-width: 70ch;
+}
+
 .requests-charts {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));

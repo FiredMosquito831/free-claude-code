@@ -37,6 +37,10 @@ DOCUMENTED_CONTROLS: tuple[str, ...] = (
     # Model Config: the guide and the README tell you to press these.
     "Add fallback",
     "Vision adapter",
+    # Analytics: the docs send the reader to these by name to explain why the
+    # windowed totals stop rising.
+    "All time",
+    "Clear log",
 )
 
 
@@ -113,3 +117,25 @@ def test_readme_points_at_configure_rather_than_a_removed_path() -> None:
     assert "Providers → Manage keys" not in readme
     assert "**Configure**" in readme
     assert "Refresh models" in readme
+
+
+def test_all_three_docs_explain_that_stored_rows_are_capped() -> None:
+    """The gap that produced a real bug report.
+
+    A user watched their request count sit at ~50,000 and their per-model token
+    usage stop moving, and concluded the dashboard was broken. It was not: the
+    cap was doing exactly what it says, and nothing anywhere told them that the
+    figures derived from those rows are a rolling window. Whichever doc they
+    reach for has to say so.
+    """
+    readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
+    usage = (REPO_ROOT / "docs/USAGE.md").read_text(encoding="utf-8")
+    guide = (ADMIN_STATIC / "index.html").read_text(encoding="utf-8")
+
+    for name, text in (("README", readme), ("USAGE.md", usage), ("the Guide", guide)):
+        assert "REQUEST_LOG_MAX_ROWS" in text, f"{name} never names the cap"
+        assert "All time" in text, f"{name} does not explain All time"
+        lowered = text.lower()
+        assert "rolling window" in lowered or "roll over" in lowered, (
+            f"{name} does not say the windowed figures stop rising at the cap"
+        )

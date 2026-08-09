@@ -1090,6 +1090,35 @@ async def request_log_stats(
     )
     result["enabled"] = True
     result["capture_bodies"] = bool(settings.request_log_capture_bodies)
+    # Lets the dashboard say "these totals have stopped rising" when the table
+    # is at its cap, instead of leaving the plateau unexplained.
+    result["retained_rows_max"] = int(settings.request_log_max_rows)
+    # Uptime over the same window, so a flat stretch in the series can be read
+    # as "no traffic" or "no server" instead of being ambiguous.
+    result["coverage"] = await asyncio.to_thread(
+        store.coverage, since=since, until=until
+    )
+    return result
+
+
+@router.get("/admin/api/requests/lifetime")
+async def request_log_lifetime(
+    request: Request,
+    settings: Settings = Depends(get_settings),
+):
+    """All-time counters, which retention never prunes.
+
+    ``/admin/api/requests/stats`` aggregates the ``requests`` table, and that
+    table is capped at ``REQUEST_LOG_MAX_ROWS``. Once the cap is reached its
+    sums stop growing. These come from a separate rollup that is only added to.
+    """
+    require_loopback_admin(request)
+    store = _request_log_store_or_none(settings)
+    if store is None:
+        return {"enabled": False}
+    result = await asyncio.to_thread(store.lifetime)
+    result["enabled"] = True
+    result["retained_rows_max"] = int(settings.request_log_max_rows)
     return result
 
 

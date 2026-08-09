@@ -984,3 +984,201 @@ def test_route_trace_columns_are_added_to_a_pre_existing_database(tmp_path) -> N
     assert old_row is not None and new_row is not None
     assert old_row["route_chain"] is None
     assert new_row["route_chain"] == "a/b,c/d"
+
+
+# --------------------------------------------------------- lifetime totals ---
+
+
+def test_lifetime_totals_survive_the_retention_cap(tmp_path) -> None:
+    """The bug this table exists for.
+
+    Every figure in ``stats`` is a sum over ``requests``, which ``prune`` caps.
+    Once the cap is reached one row leaves for each one that arrives, so those
+    sums stop moving however much traffic runs. The all-time counters must not.
+    """
+    store = RequestLogStore(tmp_path / "requests.db", max_rows=3)
+    base = time.time()
+    for index in range(10):
+        store.enqueue(_record(f"r{index}", ts_epoch=base + index))
+    store.close()
+    store.prune()
+
+    windowed = store.stats()
+    lifetime = store.lifetime()
+
+    assert windowed["total"] == 3
+    assert windowed["tokens_in"] == 30
+    assert lifetime["requests"] == 10
+    assert lifetime["tokens_in"] == 100
+    assert lifetime["tokens_out"] == 200
+
+
+def test_lifetime_breaks_down_by_provider_and_model(store: RequestLogStore) -> None:
+    store.enqueue(_record("a", provider="nous_portal", resolved_model="hy3"))
+    store.enqueue(_record("b", provider="nous_portal", resolved_model="hy3"))
+    store.enqueue(_record("c", provider="open_router", resolved_model="other"))
+    store.close()
+
+    lifetime = store.lifetime()
+    by_model = {row["name"]: row for row in lifetime["by_model"]}
+    by_provider = {row["name"]: row for row in lifetime["by_provider"]}
+
+    assert by_model["hy3"]["requests"] == 2
+    assert by_model["hy3"]["tokens_in"] == 20
+    assert by_provider["nous_portal"]["requests"] == 2
+    assert by_provider["open_router"]["requests"] == 1
+
+
+def test_lifetime_counts_statuses_fallbacks_and_diversions(
+    store: RequestLogStore,
+) -> None:
+    store.enqueue(_record("ok"))
+    store.enqueue(_record("bad", status="error"))
+    store.enqueue(_record("gone", status="cancelled"))
+    store.enqueue(_record("fell", route_attempt=2))
+    store.enqueue(_record("saw", route_diversion="vision"))
+    store.close()
+
+    lifetime = store.lifetime()
+    assert lifetime["requests"] == 5
+    assert (lifetime["success"], lifetime["error"], lifetime["cancelled"]) == (3, 1, 1)
+    assert lifetime["served_by_fallback"] == 1
+    assert lifetime["diverted"] == 1
+
+
+def test_lifetime_does_not_double_count_a_replayed_record(
+    store: RequestLogStore,
+) -> None:
+    """The insert is ``INSERT OR REPLACE``; the counters are add-only."""
+    store.enqueue(_record("same"))
+    store.close()
+    assert store.lifetime()["requests"] == 1
+
+    reopened = RequestLogStore(store.db_path, max_rows=100)
+    reopened.enqueue(_record("same", tokens_in=999))
+    reopened.close()
+
+    lifetime = reopened.lifetime()
+    assert lifetime["requests"] == 1
+    assert lifetime["tokens_in"] == 10
+
+
+def test_lifetime_is_seeded_from_rows_written_before_the_upgrade(tmp_path) -> None:
+    """Upgrading must not report zero all-time on a database full of history."""
+    path = tmp_path / "requests.db"
+    seed = RequestLogStore(path, max_rows=100)
+    seed.enqueue(_record("old1"))
+    seed.enqueue(_record("old2", status="error"))
+    seed.close()
+
+    # Reproduce a database written by a version that had no rollup at all.
+    with sqlite3.connect(path) as conn:
+        conn.execute("DELETE FROM request_totals")
+        conn.execute("DELETE FROM request_log_meta")
+
+    reopened = RequestLogStore(path, max_rows=100)
+    reopened.close()
+
+    lifetime = reopened.lifetime()
+    assert lifetime["requests"] == 2
+    assert lifetime["error"] == 1
+    assert lifetime["tokens_in"] == 20
+
+
+def test_backfill_runs_once_and_new_rows_still_count(tmp_path) -> None:
+    path = tmp_path / "requests.db"
+    seed = RequestLogStore(path, max_rows=100)
+    seed.enqueue(_record("old"))
+    seed.close()
+    with sqlite3.connect(path) as conn:
+        conn.execute("DELETE FROM request_totals")
+        conn.execute("DELETE FROM request_log_meta")
+
+    first = RequestLogStore(path, max_rows=100)
+    first.enqueue(_record("new"))
+    first.close()
+    assert first.lifetime()["requests"] == 2
+
+    # A second start must not re-seed the buckets it already wrote.
+    second = RequestLogStore(path, max_rows=100)
+    second.enqueue(_record("newer"))
+    second.close()
+    assert second.lifetime()["requests"] == 3
+
+
+def test_clear_erases_the_lifetime_counters_too(store: RequestLogStore) -> None:
+    store.enqueue(_record("r1"))
+    store.close()
+    assert store.lifetime()["requests"] == 1
+    store.clear()
+    assert store.lifetime()["requests"] == 0
+
+
+def test_lifetime_on_an_empty_database_is_zero_not_null(store: RequestLogStore) -> None:
+    lifetime = store.lifetime()
+    assert lifetime["requests"] == 0
+    assert lifetime["tokens_in"] == 0
+    assert lifetime["first_day"] is None
+    assert lifetime["by_model"] == []
+
+
+# ------------------------------------------------------------- server uptime -
+
+
+def test_coverage_records_a_session_for_a_running_store(tmp_path) -> None:
+    """A quiet stretch is ambiguous unless uptime is recorded separately."""
+    before = time.time()
+    store = RequestLogStore(tmp_path / "requests.db", max_rows=100)
+    store.enqueue(_record("r1"))
+    store.close()
+
+    coverage = store.coverage()
+    assert len(coverage["sessions"]) == 1
+    session = coverage["sessions"][0]
+    assert session["started_at"] >= before
+    assert session["last_seen_at"] >= session["started_at"]
+    assert coverage["tracking_since"] is not None
+
+
+def test_coverage_reports_nothing_before_tracking_began(tmp_path) -> None:
+    store = RequestLogStore(tmp_path / "requests.db", max_rows=100)
+    store.close()
+    coverage = store.coverage(since=1.0, until=2.0)
+    assert coverage["sessions"] == []
+    assert coverage["covered_seconds"] == 0.0
+    # Still set, so a caller can say "not recorded" rather than "down".
+    assert coverage["tracking_since"] is not None
+
+
+def test_coverage_merges_overlapping_sessions(tmp_path) -> None:
+    """Two servers on one database must not add up to 200% uptime."""
+    path = tmp_path / "requests.db"
+    store = RequestLogStore(path, max_rows=100)
+    store.close()
+    with sqlite3.connect(path) as conn:
+        conn.execute("DELETE FROM server_sessions")
+        conn.executemany(
+            "INSERT INTO server_sessions (started_at, last_seen_at, pid)"
+            " VALUES (?, ?, ?)",
+            [(100.0, 200.0, 1), (150.0, 250.0, 2), (400.0, 500.0, 3)],
+        )
+
+    coverage = store.coverage()
+    # 100->250 merged (150s) plus 400->500 (100s), not 100+100+100.
+    assert coverage["covered_seconds"] == 250.0
+
+
+def test_coverage_clips_sessions_to_the_requested_window(tmp_path) -> None:
+    path = tmp_path / "requests.db"
+    store = RequestLogStore(path, max_rows=100)
+    store.close()
+    with sqlite3.connect(path) as conn:
+        conn.execute("DELETE FROM server_sessions")
+        conn.execute(
+            "INSERT INTO server_sessions (started_at, last_seen_at, pid)"
+            " VALUES (?, ?, ?)",
+            (100.0, 300.0, 1),
+        )
+
+    assert store.coverage(since=200.0, until=250.0)["covered_seconds"] == 50.0
+    assert store.coverage(since=250.0)["covered_seconds"] == 50.0
