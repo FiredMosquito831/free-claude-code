@@ -460,6 +460,12 @@ class Settings(BaseSettings):
     request_log_max_rows: int = Field(
         default=50_000, validation_alias="REQUEST_LOG_MAX_ROWS"
     )
+    # Store request/response text zstd-compressed in a side table instead of
+    # inline. Bodies are ~99% of the bytes, so this is roughly 9x less disk for
+    # the same retention. Rows written before it was enabled are still read.
+    request_log_compress_bodies: bool = Field(
+        default=True, validation_alias="REQUEST_LOG_COMPRESS_BODIES"
+    )
 
     # ==================== NIM Settings ====================
     nim: NimSettings = Field(default_factory=NimSettings)

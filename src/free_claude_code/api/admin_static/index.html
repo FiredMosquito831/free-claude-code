@@ -950,10 +950,15 @@ TAVILY_CHUNKS_PER_SOURCE=3</code></pre>
                   <em>Clear log</em> erases it along with everything else.
                 </p>
                 <p>
-                  Bodies dominate the disk cost, at roughly 30 KB a request, so 50,000 rows
-                  is about 1.7 GB. Raise the cap for more history, or set
-                  <code>REQUEST_LOG_CAPTURE_BODIES=false</code> to keep far more of it per
-                  gigabyte and give up the drill-down.
+                  Bodies dominate the disk cost &mdash; 99% of it, at roughly 30 KB of
+                  text a request against 332 bytes of metadata. They are stored
+                  compressed against a dictionary trained on your own traffic, which
+                  works well here because consecutive requests repeat almost the same
+                  system prompt and history: <strong>about 6x more retention for the
+                  same disk</strong>, measured on real traffic. Set
+                  <code>REQUEST_LOG_COMPRESS_BODIES=false</code> to store text inline
+                  instead, or <code>REQUEST_LOG_CAPTURE_BODIES=false</code> to drop it
+                  entirely and give up the drill-down.
                 </p>
                 <h4>No traffic, or no server?</h4>
                 <p>

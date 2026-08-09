@@ -1182,3 +1182,301 @@ def test_coverage_clips_sessions_to_the_requested_window(tmp_path) -> None:
 
     assert store.coverage(since=200.0, until=250.0)["covered_seconds"] == 50.0
     assert store.coverage(since=250.0)["covered_seconds"] == 50.0
+
+
+# ------------------------------------------------------- compressed bodies ---
+
+
+def test_bodies_round_trip_through_compression(store: RequestLogStore) -> None:
+    store.enqueue(
+        _record(
+            "r1",
+            input_text="question " * 100,
+            output_text="answer " * 100,
+            thinking_text="pondering",
+            tool_calls=[{"name": "Read", "input": {"path": "a.py"}}],
+        )
+    )
+    store.close()
+
+    row = store.get_request("r1")
+    assert row is not None
+    assert row["input_text"] == "question " * 100
+    assert row["output_text"] == "answer " * 100
+    assert row["thinking_text"] == "pondering"
+    assert row["tool_calls"] == [{"name": "Read", "input": {"path": "a.py"}}]
+
+
+def test_bodies_are_not_stored_inline_when_compressing(store: RequestLogStore) -> None:
+    """The whole point: the text must leave the row it used to bloat."""
+    store.enqueue(_record("r1", input_text="x" * 5000))
+    store.close()
+
+    with sqlite3.connect(store.db_path) as conn:
+        inline = conn.execute(
+            "SELECT input_text, output_text FROM requests WHERE id = 'r1'"
+        ).fetchone()
+        blobs = conn.execute("SELECT COUNT(*) FROM request_bodies").fetchone()[0]
+    assert inline == (None, None)
+    assert blobs == 1
+
+
+def test_compression_actually_shrinks_repetitive_bodies(tmp_path) -> None:
+    store = RequestLogStore(tmp_path / "requests.db", max_rows=100)
+    body = "the quick brown fox jumps over the lazy dog. " * 500
+    store.enqueue(_record("r1", input_text=body, output_text=body))
+    store.close()
+
+    with sqlite3.connect(store.db_path) as conn:
+        stored = conn.execute(
+            "SELECT LENGTH(payload) FROM request_bodies WHERE request_id = 'r1'"
+        ).fetchone()[0]
+    assert stored < len(body) * 2 / 10
+
+
+def test_list_view_truncates_a_compressed_body(store: RequestLogStore) -> None:
+    store.enqueue(_record("r1", input_text="y" * (LIST_BODY_PREVIEW_CHARS + 500)))
+    store.close()
+
+    rows, _ = store.list_requests(limit=1)
+    assert len(rows[0]["input_text"]) == LIST_BODY_PREVIEW_CHARS
+    assert rows[0]["input_text_truncated"] is True
+    # The detail view still returns the whole thing.
+    full = store.get_request("r1")
+    assert full is not None
+    assert len(full["input_text"]) == LIST_BODY_PREVIEW_CHARS + 500
+    assert full["input_text_truncated"] is False
+
+
+def test_list_view_of_a_compressed_row_keeps_its_shape(store: RequestLogStore) -> None:
+    """List rows carry thinking_chars, never thinking_text."""
+    store.enqueue(_record("r1", thinking_text="private reasoning"))
+    store.close()
+
+    rows, _ = store.list_requests(limit=1)
+    assert "thinking_text" not in rows[0]
+
+
+def test_search_finds_text_inside_compressed_bodies(store: RequestLogStore) -> None:
+    store.enqueue(_record("hit", input_text="a needle in the haystack"))
+    store.enqueue(_record("miss", input_text="nothing of interest"))
+    store.close()
+
+    rows, total = store.list_requests(q="needle")
+    assert total == 1
+    assert rows[0]["id"] == "hit"
+    assert store.stats(q="needle")["total"] == 1
+
+
+def test_search_is_case_insensitive_like_the_inline_form(
+    store: RequestLogStore,
+) -> None:
+    store.enqueue(_record("r1", input_text="A Needle In The Haystack"))
+    store.close()
+    assert store.list_requests(q="needle")[1] == 1
+
+
+def test_search_spans_legacy_inline_rows_and_compressed_rows(tmp_path) -> None:
+    """Both storage forms coexist after an upgrade; search must cover both."""
+    path = tmp_path / "requests.db"
+    legacy = RequestLogStore(path, max_rows=100, compress_bodies=False)
+    legacy.enqueue(_record("old", input_text="shared marker, stored inline"))
+    legacy.close()
+
+    modern = RequestLogStore(path, max_rows=100)
+    modern.enqueue(_record("new", input_text="shared marker, compressed"))
+    modern.close()
+
+    rows, total = modern.list_requests(q="shared marker")
+    assert total == 2
+    assert {row["id"] for row in rows} == {"old", "new"}
+
+
+def test_rows_written_before_the_upgrade_are_still_readable(tmp_path) -> None:
+    path = tmp_path / "requests.db"
+    legacy = RequestLogStore(path, max_rows=100, compress_bodies=False)
+    legacy.enqueue(_record("old", input_text="written the old way"))
+    legacy.close()
+
+    modern = RequestLogStore(path, max_rows=100)
+    modern.close()
+
+    row = modern.get_request("old")
+    assert row is not None
+    assert row["input_text"] == "written the old way"
+
+
+def test_compression_can_be_turned_off(tmp_path) -> None:
+    store = RequestLogStore(
+        tmp_path / "requests.db", max_rows=100, compress_bodies=False
+    )
+    store.enqueue(_record("r1", input_text="kept inline"))
+    store.close()
+
+    with sqlite3.connect(store.db_path) as conn:
+        inline = conn.execute(
+            "SELECT input_text FROM requests WHERE id = 'r1'"
+        ).fetchone()[0]
+        blobs = conn.execute("SELECT COUNT(*) FROM request_bodies").fetchone()[0]
+    assert inline == "kept inline"
+    assert blobs == 0
+    row = store.get_request("r1")
+    assert row is not None
+    assert row["input_text"] == "kept inline"
+
+
+def test_pruning_removes_the_bodies_of_deleted_rows(tmp_path) -> None:
+    """Orphaned blobs would defeat the entire point of retention."""
+    store = RequestLogStore(tmp_path / "requests.db", max_rows=2)
+    base = time.time()
+    for index in range(6):
+        store.enqueue(_record(f"r{index}", ts_epoch=base + index, input_text="body"))
+    store.close()
+    store.prune()
+
+    with sqlite3.connect(store.db_path) as conn:
+        remaining = conn.execute("SELECT COUNT(*) FROM request_bodies").fetchone()[0]
+        orphans = conn.execute(
+            "SELECT COUNT(*) FROM request_bodies b"
+            " WHERE NOT EXISTS (SELECT 1 FROM requests r WHERE r.id = b.request_id)"
+        ).fetchone()[0]
+    assert remaining == 2
+    assert orphans == 0
+
+
+def test_clear_removes_bodies_too(store: RequestLogStore) -> None:
+    store.enqueue(_record("r1", input_text="body"))
+    store.close()
+    store.clear()
+    with sqlite3.connect(store.db_path) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM request_bodies").fetchone()[0] == 0
+
+
+def test_a_corrupt_blob_degrades_instead_of_raising(store: RequestLogStore) -> None:
+    store.enqueue(_record("r1", input_text="original"))
+    store.close()
+    with sqlite3.connect(store.db_path) as conn:
+        conn.execute(
+            "UPDATE request_bodies SET payload = ? WHERE request_id = 'r1'",
+            (b"not zstd at all",),
+        )
+
+    row = store.get_request("r1")
+    assert row is not None
+    assert row["id"] == "r1"
+    assert row["input_text"] is None
+
+
+def test_a_record_with_no_bodies_writes_no_blob(store: RequestLogStore) -> None:
+    store.enqueue(
+        _record(
+            "r1", input_text=None, output_text=None, thinking_text=None, tool_calls=None
+        )
+    )
+    store.close()
+    with sqlite3.connect(store.db_path) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM request_bodies").fetchone()[0] == 0
+
+
+def _chatty(index: int) -> str:
+    """A body shaped like real traffic: a long shared prefix, a small tail."""
+    return (
+        "You are Claude Code, an AI assistant. Follow the project conventions. " * 40
+        + f"\n\nUser turn {index}: please explain the failure in module {index}."
+    )
+
+
+def test_a_dictionary_is_trained_once_there_is_enough_traffic(tmp_path) -> None:
+    """A fresh install must start compressing well without waiting for a restart."""
+    path = tmp_path / "requests.db"
+    store = RequestLogStore(path, max_rows=5000)
+    for index in range(300):
+        store.enqueue(_record(f"r{index}", input_text=_chatty(index)))
+    store.close()
+    store.enqueue(_record("after", input_text=_chatty(999)))
+
+    trained = RequestLogStore(path, max_rows=5000)
+    trained.enqueue(_record("after", input_text=_chatty(999)))
+    trained.close()
+
+    with sqlite3.connect(path) as conn:
+        dicts = conn.execute("SELECT COUNT(*) FROM body_dictionaries").fetchone()[0]
+        used = conn.execute(
+            "SELECT dict_id FROM request_bodies WHERE request_id = 'after'"
+        ).fetchone()[0]
+        # r0 predates training, so it carries no dictionary.
+        before = conn.execute(
+            "SELECT LENGTH(payload) FROM request_bodies WHERE request_id = 'r0'"
+        ).fetchone()[0]
+        after = conn.execute(
+            "SELECT LENGTH(payload) FROM request_bodies WHERE request_id = 'after'"
+        ).fetchone()[0]
+    assert dicts == 1
+    assert used is not None
+    assert after < before
+
+
+def test_rows_written_before_training_stay_readable_after_it(tmp_path) -> None:
+    """Blobs record their own dictionary, so training must never orphan them."""
+    path = tmp_path / "requests.db"
+    store = RequestLogStore(path, max_rows=5000)
+    for index in range(300):
+        store.enqueue(_record(f"r{index}", input_text=_chatty(index)))
+    store.close()
+
+    trained = RequestLogStore(path, max_rows=5000)
+    trained.enqueue(_record("after", input_text=_chatty(999)))
+    trained.close()
+
+    with sqlite3.connect(path) as conn:
+        assert (
+            conn.execute(
+                "SELECT dict_id FROM request_bodies WHERE request_id = 'r0'"
+            ).fetchone()[0]
+            is None
+        )
+
+    old_row = trained.get_request("r0")
+    new_row = trained.get_request("after")
+    assert old_row is not None and new_row is not None
+    assert old_row["input_text"] == _chatty(0)
+    assert new_row["input_text"] == _chatty(999)
+    # And search still spans both dictionary generations.
+    assert trained.list_requests(q="failure in module 999")[1] == 1
+    assert trained.list_requests(q="failure in module 0")[1] == 1
+
+
+def test_training_does_not_repeat_on_every_restart(tmp_path) -> None:
+    path = tmp_path / "requests.db"
+    store = RequestLogStore(path, max_rows=5000)
+    for index in range(300):
+        store.enqueue(_record(f"r{index}", input_text=_chatty(index)))
+    store.close()
+
+    for _ in range(3):
+        reopened = RequestLogStore(path, max_rows=5000)
+        reopened.close()
+
+    with sqlite3.connect(path) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM body_dictionaries").fetchone()[0] == 1
+
+
+def test_close_drains_a_deep_queue_instead_of_abandoning_it(tmp_path) -> None:
+    """Regression: a fixed close deadline silently dropped queued records.
+
+    Compressing bodies is real CPU work on the writer thread, so a backlog can
+    outlive a fixed timeout. Replaying 4,000 real requests lost 2,950 of them
+    before the shutdown wait was made to scale with the queue.
+    """
+    store = RequestLogStore(tmp_path / "requests.db", max_rows=100_000)
+    body = "a plausible assistant reply with some structure. " * 500
+    for index in range(1_500):
+        store.enqueue(_record(f"r{index}", input_text=body, output_text=body))
+    store.close()
+
+    _, total = store.list_requests(limit=1)
+    assert total == 1_500
+    with sqlite3.connect(store.db_path) as conn:
+        assert (
+            conn.execute("SELECT COUNT(*) FROM request_bodies").fetchone()[0] == 1_500
+        )
