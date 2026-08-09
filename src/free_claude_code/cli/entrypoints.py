@@ -44,3 +44,13 @@ def _print_version_if_requested(argv: Sequence[str] | None) -> bool:
         return False
     print(f"free-claude-code {package_version()}")
     return True
+
+
+def compact_log(argv: Sequence[str] | None = None) -> None:
+    """Compact the request log in place (``fcc-compact-log``)."""
+    if _print_version_if_requested(argv):
+        return
+
+    from free_claude_code.cli.commands import compact_log as run_compaction
+
+    run_compaction()

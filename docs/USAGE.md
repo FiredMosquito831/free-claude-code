@@ -610,7 +610,22 @@ REQUEST_LOG_COMPRESS_BODIES=true   # false stores text inline, as before
 REQUEST_LOG_CAPTURE_BODIES=true    # false drops text entirely, ~77x more rows/GB
 ```
 
-Two things not to worry about: the dictionary trains itself once the log has seen a few hundred requests, and each blob records which dictionary compressed it, so retraining never orphans an older row. Nothing migrates either — rows written before the upgrade keep their inline text and are read from there until retention drains them.
+Two things not to worry about: the dictionary trains itself once the log has seen a few hundred requests, and each blob records which dictionary compressed it, so retraining never orphans an older row.
+
+#### Compacting a log that predates compression
+
+Compression only ever applies to **newly written** requests, so a database carried across the upgrade keeps paying the old price for its whole history. On a real 1.7 GB log that meant every one of its 50,000 rows.
+
+`fcc-compact-log` rewrites them in place:
+
+```bash
+# stop the server first, or the final vacuum cannot reclaim the space
+fcc-compact-log
+```
+
+Measured on a copy of that 1.7 GB database: **1.73 GB → 0.29 GB in 4.9 minutes**, and all 49,934 bodies verified byte-identical against the original afterwards. It is safe to interrupt — each batch commits on its own and a row is converted only after its body is stored, so a kill leaves a consistent database with the work merely unfinished. Running it again resumes.
+
+It also deduplicates: identical bodies are stored once and shared, and a repeat skips compression entirely. In practice whole-body duplicates are rare (1.4% of a real log) because two requests sharing a prompt almost always differ in their reply.
 
 #### No traffic, or no server?
 

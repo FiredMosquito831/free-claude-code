@@ -13,6 +13,7 @@ from free_claude_code.core.request_log import (
     MAX_TEXT_CHARS,
     RequestLogStore,
     RequestRecord,
+    compact_request_log,
     get_request_log_store,
     reset_request_log_stores,
 )
@@ -1229,7 +1230,8 @@ def test_compression_actually_shrinks_repetitive_bodies(tmp_path) -> None:
 
     with sqlite3.connect(store.db_path) as conn:
         stored = conn.execute(
-            "SELECT LENGTH(payload) FROM request_bodies WHERE request_id = 'r1'"
+            "SELECT LENGTH(b.payload) FROM request_bodies r"
+            " JOIN body_blobs b ON b.sha = r.sha WHERE r.request_id = 'r1'"
         ).fetchone()[0]
     assert stored < len(body) * 2 / 10
 
@@ -1357,7 +1359,8 @@ def test_a_corrupt_blob_degrades_instead_of_raising(store: RequestLogStore) -> N
     store.close()
     with sqlite3.connect(store.db_path) as conn:
         conn.execute(
-            "UPDATE request_bodies SET payload = ? WHERE request_id = 'r1'",
+            "UPDATE body_blobs SET payload = ? WHERE sha = ("
+            " SELECT sha FROM request_bodies WHERE request_id = 'r1')",
             (b"not zstd at all",),
         )
 
@@ -1401,16 +1404,14 @@ def test_a_dictionary_is_trained_once_there_is_enough_traffic(tmp_path) -> None:
 
     with sqlite3.connect(path) as conn:
         dicts = conn.execute("SELECT COUNT(*) FROM body_dictionaries").fetchone()[0]
-        used = conn.execute(
-            "SELECT dict_id FROM request_bodies WHERE request_id = 'after'"
-        ).fetchone()[0]
+        blob = (
+            "SELECT {} FROM request_bodies r JOIN body_blobs b ON b.sha = r.sha"
+            " WHERE r.request_id = ?"
+        )
+        used = conn.execute(blob.format("b.dict_id"), ("after",)).fetchone()[0]
         # r0 predates training, so it carries no dictionary.
-        before = conn.execute(
-            "SELECT LENGTH(payload) FROM request_bodies WHERE request_id = 'r0'"
-        ).fetchone()[0]
-        after = conn.execute(
-            "SELECT LENGTH(payload) FROM request_bodies WHERE request_id = 'after'"
-        ).fetchone()[0]
+        before = conn.execute(blob.format("LENGTH(b.payload)"), ("r0",)).fetchone()[0]
+        after = conn.execute(blob.format("LENGTH(b.payload)"), ("after",)).fetchone()[0]
     assert dicts == 1
     assert used is not None
     assert after < before
@@ -1431,7 +1432,8 @@ def test_rows_written_before_training_stay_readable_after_it(tmp_path) -> None:
     with sqlite3.connect(path) as conn:
         assert (
             conn.execute(
-                "SELECT dict_id FROM request_bodies WHERE request_id = 'r0'"
+                "SELECT b.dict_id FROM request_bodies r JOIN body_blobs b"
+                " ON b.sha = r.sha WHERE r.request_id = 'r0'"
             ).fetchone()[0]
             is None
         )
@@ -1602,3 +1604,151 @@ def test_search_ignores_surrounding_whitespace(searchable: RequestLogStore) -> N
     searchable.close()
     assert searchable.list_requests(q="  distinctive  ")[1] == 1
     assert searchable.list_requests(q="   ")[1] == 1  # no terms: not a filter
+
+
+# ------------------------------------------------------------ deduplication --
+
+
+def test_identical_bodies_are_stored_once(store: RequestLogStore) -> None:
+    """62.7% of real request inputs are byte-identical repeats."""
+    body = "the very same context, sent again " * 200
+    for index in range(5):
+        store.enqueue(_record(f"r{index}", input_text=body, output_text="same"))
+    store.close()
+
+    with sqlite3.connect(store.db_path) as conn:
+        mappings = conn.execute("SELECT COUNT(*) FROM request_bodies").fetchone()[0]
+        blobs = conn.execute("SELECT COUNT(*) FROM body_blobs").fetchone()[0]
+    assert mappings == 5
+    assert blobs == 1
+    for index in range(5):
+        row = store.get_request(f"r{index}")
+        assert row is not None
+        assert row["input_text"] == body
+
+
+def test_a_shared_blob_survives_until_its_last_request_goes(tmp_path) -> None:
+    """Deleting one request must not blank the others that share its body."""
+    store = RequestLogStore(tmp_path / "requests.db", max_rows=2)
+    base = time.time()
+    body = "shared between several requests " * 100
+    for index in range(4):
+        store.enqueue(_record(f"r{index}", ts_epoch=base + index, input_text=body))
+    store.close()
+    store.prune()
+
+    with sqlite3.connect(store.db_path) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM requests").fetchone()[0] == 2
+        assert conn.execute("SELECT COUNT(*) FROM body_blobs").fetchone()[0] == 1
+    survivor = store.get_request("r3")
+    assert survivor is not None
+    assert survivor["input_text"] == body
+
+
+def test_orphaned_blobs_are_collected(tmp_path) -> None:
+    store = RequestLogStore(tmp_path / "requests.db", max_rows=1)
+    base = time.time()
+    for index in range(4):
+        store.enqueue(
+            _record(f"r{index}", ts_epoch=base + index, input_text=f"unique {index}")
+        )
+    store.close()
+    store.prune()
+
+    with sqlite3.connect(store.db_path) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM body_blobs").fetchone()[0] == 1
+
+
+# --------------------------------------------------------------- compaction --
+
+
+def test_compaction_converts_inline_history_and_shrinks_the_file(tmp_path) -> None:
+    """Compression only ever applied to new writes; history kept paying full price."""
+    path = tmp_path / "requests.db"
+    legacy = RequestLogStore(path, max_rows=10_000, compress_bodies=False)
+    body = "a realistic assistant transcript with structure. " * 400
+    for index in range(300):
+        legacy.enqueue(
+            _record(
+                f"r{index}",
+                input_text=body + f" turn {index}",
+                output_text="answered",
+                thinking_text="considered it",
+                tool_calls=[{"name": "Bash", "input": {"command": f"echo {index}"}}],
+            )
+        )
+    legacy.close()
+    before = path.stat().st_size
+
+    result = compact_request_log(path)
+
+    assert result["converted"] == 300
+    assert result["vacuumed"] is True
+    assert path.stat().st_size < before / 2
+
+    with sqlite3.connect(path) as conn:
+        assert (
+            conn.execute(
+                "SELECT COUNT(*) FROM requests WHERE input_text IS NOT NULL"
+            ).fetchone()[0]
+            == 0
+        )
+        assert conn.execute("SELECT COUNT(*) FROM request_bodies").fetchone()[0] == 300
+
+    reopened = RequestLogStore(path, max_rows=10_000)
+    try:
+        row = reopened.get_request("r7")
+        assert row is not None
+        assert row["input_text"] == body + " turn 7"
+        assert row["output_text"] == "answered"
+        assert row["thinking_text"] == "considered it"
+        assert row["tool_calls"] == [{"name": "Bash", "input": {"command": "echo 7"}}]
+        # Search must keep working across the converted rows.
+        assert reopened.list_requests(q="echo 123")[1] == 1
+        assert reopened.list_requests(q="considered")[1] == 300
+    finally:
+        reopened.close()
+
+
+def test_compaction_is_idempotent(tmp_path) -> None:
+    path = tmp_path / "requests.db"
+    legacy = RequestLogStore(path, max_rows=10_000, compress_bodies=False)
+    for index in range(300):
+        legacy.enqueue(_record(f"r{index}", input_text=f"body {index} " * 200))
+    legacy.close()
+
+    first = compact_request_log(path)
+    second = compact_request_log(path)
+
+    assert first["converted"] == 300
+    assert second["converted"] == 0
+    store = RequestLogStore(path, max_rows=10_000)
+    try:
+        row = store.get_request("r5")
+        assert row is not None
+        assert row["input_text"] == "body 5 " * 200
+    finally:
+        store.close()
+
+
+def test_compaction_preserves_every_body_exactly(tmp_path) -> None:
+    """Row-for-row equality, because this rewrites real history in place."""
+    path = tmp_path / "requests.db"
+    legacy = RequestLogStore(path, max_rows=10_000, compress_bodies=False)
+    expected = {}
+    for index in range(300):
+        text = f"unique-{index} " + ("shared filler " * 50)
+        expected[f"r{index}"] = text
+        legacy.enqueue(_record(f"r{index}", input_text=text))
+    legacy.close()
+
+    compact_request_log(path)
+
+    store = RequestLogStore(path, max_rows=10_000)
+    try:
+        for request_id, text in expected.items():
+            row = store.get_request(request_id)
+            assert row is not None, request_id
+            assert row["input_text"] == text, request_id
+    finally:
+        store.close()
