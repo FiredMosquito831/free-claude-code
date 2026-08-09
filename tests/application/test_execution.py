@@ -1,12 +1,17 @@
 """Application-owned provider execution contracts."""
 
+import asyncio
 from collections.abc import AsyncIterator, Mapping
 from unittest.mock import MagicMock
 
 import pytest
 
-from free_claude_code.application.execution import ProviderExecutor
+from free_claude_code.application.execution import (
+    ProviderExecutor,
+    RouteExecutionPolicy,
+)
 from free_claude_code.application.ports import ProviderPort
+from free_claude_code.application.route_health import RouteHealthRegistry
 from free_claude_code.application.routing import (
     ResolvedModel,
     RoutedMessagesPlan,
@@ -15,6 +20,7 @@ from free_claude_code.application.routing import (
 from free_claude_code.config.reasoning import ReasoningPreference
 from free_claude_code.core.anthropic.models import Message, MessagesRequest
 from free_claude_code.core.async_iterators import AsyncCloseable
+from free_claude_code.core.failures import ExecutionFailure, FailureKind
 from free_claude_code.core.reasoning import ReasoningPolicy
 
 
@@ -419,3 +425,248 @@ async def test_last_attempt_failure_propagates_its_own_error() -> None:
 def test_a_plan_needs_at_least_one_attempt() -> None:
     with pytest.raises(ValueError, match="at least one attempt"):
         RoutedMessagesPlan(())
+
+
+class StallingProvider(FakeProvider):
+    """Opens a stream, then produces nothing -- the shape a deadline exists for."""
+
+    def __init__(self, *, stall_seconds: float = 3600.0, before: tuple[str, ...] = ()):
+        super().__init__()
+        self._stall_seconds = stall_seconds
+        self._before = before
+
+    async def stream_response(
+        self,
+        request: MessagesRequest,
+        input_tokens: int = 0,
+        *,
+        request_id: str | None = None,
+        reasoning: ReasoningPolicy,
+    ) -> AsyncIterator[str]:
+        self.stream_calls.append({"request": request, "request_id": request_id})
+        try:
+            for chunk in self._before:
+                yield chunk
+            await asyncio.sleep(self._stall_seconds)
+            yield "event: never\n\n"
+        finally:
+            self.stream_close_calls += 1
+
+
+def _deadline_executor(
+    providers: Mapping[str, ProviderPort],
+    *,
+    first_token_timeout: float = 0.05,
+    total_timeout: float = 0.0,
+    health: RouteHealthRegistry | None = None,
+) -> ProviderExecutor:
+    return ProviderExecutor(
+        lambda provider_id: providers[provider_id],
+        token_counter=lambda _messages, _system, _tools: 17,
+        policy=RouteExecutionPolicy(
+            first_token_timeout=first_token_timeout,
+            total_timeout=total_timeout,
+        ),
+        health=health or RouteHealthRegistry(eject_after_failures=0),
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_model_that_sends_no_first_token_hands_over_to_the_fallback() -> None:
+    """Nothing reached the client, so swapping models is invisible to it."""
+    primary = StallingProvider()
+    secondary = FakeProvider()
+    executor = _deadline_executor({"primary": primary, "secondary": secondary})
+
+    stream = executor.stream(
+        _plan(
+            _routed_request("primary", "big"),
+            _routed_request("secondary", "small"),
+        ),
+        wire_api="messages",
+        raw_log_label="FULL_PAYLOAD",
+        raw_log_payload={},
+        request_id="req_ttft",
+    )
+
+    assert [chunk async for chunk in stream] == ["event: message_stop\ndata: {}\n\n"]
+    assert primary.stream_close_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_the_first_token_deadline_stops_applying_once_output_started() -> None:
+    """A slow generation is not a stalled one; only the total budget bounds it."""
+    primary = StallingProvider(stall_seconds=0.2, before=("event: a\n\n",))
+    secondary = FakeProvider()
+    executor = _deadline_executor(
+        {"primary": primary, "secondary": secondary},
+        first_token_timeout=0.05,
+        total_timeout=0.0,
+    )
+
+    stream = executor.stream(
+        _plan(
+            _routed_request("primary", "big"),
+            _routed_request("secondary", "small"),
+        ),
+        wire_api="messages",
+        raw_log_label="FULL_PAYLOAD",
+        raw_log_payload={},
+        request_id="req_slow",
+    )
+
+    chunks = [chunk async for chunk in stream]
+    assert chunks[0] == "event: a\n\n"
+    assert secondary.stream_calls == []
+
+
+@pytest.mark.asyncio
+async def test_a_committed_stall_ends_at_the_total_budget() -> None:
+    """No chain can rescue a committed stream, but it must still stop."""
+    primary = StallingProvider(before=("event: a\n\n",))
+    executor = _deadline_executor(
+        {"primary": primary},
+        first_token_timeout=0.0,
+        total_timeout=0.05,
+    )
+
+    stream = executor.stream(
+        _plan(_routed_request("primary", "big")),
+        wire_api="messages",
+        raw_log_label="FULL_PAYLOAD",
+        raw_log_payload={},
+        request_id="req_budget",
+    )
+
+    # Drained by hand: what reached the client *before* the failure is the
+    # assertion, and a comprehension would discard it along with the exception.
+    chunks = stream.__aiter__()
+    received: list[str] = []
+    with pytest.raises(ExecutionFailure) as failure:
+        while True:
+            received.append(await anext(chunks))
+
+    assert received == ["event: a\n\n"]
+    assert failure.value.kind is FailureKind.TIMEOUT
+
+
+@pytest.mark.asyncio
+async def test_the_chain_is_not_extended_once_the_budget_is_spent() -> None:
+    """Starting another model with no time left only delays the same error."""
+    primary = StallingProvider()
+    secondary = FakeProvider()
+    executor = _deadline_executor(
+        {"primary": primary, "secondary": secondary},
+        first_token_timeout=0.05,
+        total_timeout=0.05,
+    )
+
+    stream = executor.stream(
+        _plan(
+            _routed_request("primary", "big"),
+            _routed_request("secondary", "small"),
+        ),
+        wire_api="messages",
+        raw_log_label="FULL_PAYLOAD",
+        raw_log_payload={},
+        request_id="req_spent",
+    )
+
+    with pytest.raises(ExecutionFailure):
+        async for _chunk in stream:
+            pass
+    assert secondary.stream_calls == []
+
+
+@pytest.mark.asyncio
+async def test_deadlines_disabled_never_abandon_an_attempt() -> None:
+    primary = StallingProvider(stall_seconds=0.05, before=("event: a\n\n",))
+    executor = _deadline_executor(
+        {"primary": primary}, first_token_timeout=0.0, total_timeout=0.0
+    )
+
+    stream = executor.stream(
+        _plan(_routed_request("primary", "big")),
+        wire_api="messages",
+        raw_log_label="FULL_PAYLOAD",
+        raw_log_payload={},
+        request_id="req_off",
+    )
+
+    assert [chunk async for chunk in stream] == ["event: a\n\n", "event: never\n\n"]
+
+
+@pytest.mark.asyncio
+async def test_an_upstream_timeout_is_not_reported_as_a_routing_deadline() -> None:
+    """The upstream giving up and us declining to wait are different facts."""
+    primary = ScriptedProvider(chunks=(), error=TimeoutError("upstream read timeout"))
+    secondary = FakeProvider()
+    executor = _deadline_executor(
+        {"primary": primary, "secondary": secondary},
+        first_token_timeout=30.0,
+        total_timeout=30.0,
+    )
+
+    stream = executor.stream(
+        _plan(
+            _routed_request("primary", "big"),
+            _routed_request("secondary", "small"),
+        ),
+        wire_api="messages",
+        raw_log_label="FULL_PAYLOAD",
+        raw_log_payload={},
+        request_id="req_upstream_timeout",
+    )
+
+    assert [chunk async for chunk in stream] == ["event: message_stop\ndata: {}\n\n"]
+
+
+@pytest.mark.asyncio
+async def test_a_model_benched_by_earlier_failures_is_skipped_entirely() -> None:
+    """The point of ejection: the fallback answers without re-paying the timeout."""
+    primary = FakeProvider()
+    secondary = FakeProvider()
+    health = RouteHealthRegistry(eject_after_failures=1, eject_seconds=300.0)
+    health.record_failure("primary/big")
+    executor = _deadline_executor(
+        {"primary": primary, "secondary": secondary}, health=health
+    )
+    attempts: list[tuple[int, str]] = []
+
+    stream = executor.stream(
+        _plan(
+            _routed_request("primary", "big"),
+            _routed_request("secondary", "small"),
+        ),
+        wire_api="messages",
+        raw_log_label="FULL_PAYLOAD",
+        raw_log_payload={},
+        request_id="req_ejected",
+        on_attempt=lambda routed, index: attempts.append(
+            (index, routed.resolved.provider_model_ref)
+        ),
+    )
+
+    assert [chunk async for chunk in stream] == ["event: message_stop\ndata: {}\n\n"]
+    assert primary.stream_calls == []
+    assert attempts == [(1, "secondary/small")]
+
+
+@pytest.mark.asyncio
+async def test_a_served_request_clears_the_models_failure_streak() -> None:
+    provider = FakeProvider()
+    health = RouteHealthRegistry(eject_after_failures=2, eject_seconds=300.0)
+    health.record_failure("primary/big")
+    executor = _deadline_executor({"primary": provider}, health=health)
+
+    stream = executor.stream(
+        _plan(_routed_request("primary", "big")),
+        wire_api="messages",
+        raw_log_label="FULL_PAYLOAD",
+        raw_log_payload={},
+        request_id="req_recovered",
+    )
+    assert [chunk async for chunk in stream] == ["event: message_stop\ndata: {}\n\n"]
+
+    health.record_failure("primary/big")
+    assert not health.is_ejected("primary/big")
