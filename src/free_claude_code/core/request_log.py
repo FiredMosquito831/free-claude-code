@@ -2,6 +2,7 @@
 
 import contextlib
 import json
+import os
 import queue
 import sqlite3
 import threading
@@ -124,6 +125,83 @@ CREATE INDEX IF NOT EXISTS idx_requests_status ON requests(status);
 CREATE INDEX IF NOT EXISTS idx_requests_provider ON requests(provider);
 CREATE INDEX IF NOT EXISTS idx_requests_model ON requests(resolved_model);
 """
+
+# Permanent aggregates, deliberately outside ``requests``.
+#
+# ``prune`` caps ``requests`` at ``max_rows``, so every figure derived from that
+# table is a rolling window: once the cap is reached one row leaves for every
+# row that arrives and the sums stop moving. These counters are incremented once
+# per request and never deleted by retention, so "all time" stays true however
+# far the window has slid.
+#
+# ``server_sessions`` answers the other half of the same question. A flat
+# stretch in the request series is ambiguous on its own -- no traffic and no
+# server look identical -- so the writer records when a server was actually
+# running.
+_TOTALS_SCHEMA = """
+CREATE TABLE IF NOT EXISTS request_totals (
+    day TEXT NOT NULL,
+    provider TEXT NOT NULL,
+    model TEXT NOT NULL,
+    requests INTEGER NOT NULL DEFAULT 0,
+    success INTEGER NOT NULL DEFAULT 0,
+    error INTEGER NOT NULL DEFAULT 0,
+    cancelled INTEGER NOT NULL DEFAULT 0,
+    tokens_in INTEGER NOT NULL DEFAULT 0,
+    tokens_out INTEGER NOT NULL DEFAULT 0,
+    cache_read_tokens INTEGER NOT NULL DEFAULT 0,
+    cache_write_tokens INTEGER NOT NULL DEFAULT 0,
+    tool_calls INTEGER NOT NULL DEFAULT 0,
+    served_by_fallback INTEGER NOT NULL DEFAULT 0,
+    diverted INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (day, provider, model)
+);
+CREATE TABLE IF NOT EXISTS server_sessions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    started_at REAL NOT NULL,
+    last_seen_at REAL NOT NULL,
+    pid INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_server_sessions_started
+    ON server_sessions(started_at);
+CREATE TABLE IF NOT EXISTS request_log_meta (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
+"""
+
+# Aggregate columns of ``request_totals``, in the order the upsert binds them.
+_TOTALS_COUNTERS = (
+    "requests",
+    "success",
+    "error",
+    "cancelled",
+    "tokens_in",
+    "tokens_out",
+    "cache_read_tokens",
+    "cache_write_tokens",
+    "tool_calls",
+    "served_by_fallback",
+    "diverted",
+)
+
+# Upsert one (day, provider, model) bucket. Unqualified names on the right of
+# ``DO UPDATE SET`` resolve to the stored row, so this adds to the running total
+# rather than replacing it.
+_TOTALS_UPSERT_SQL = (
+    f"INSERT INTO request_totals (day, provider, model, {', '.join(_TOTALS_COUNTERS)})"
+    f" VALUES (?, ?, ?, {', '.join('?' * len(_TOTALS_COUNTERS))})"
+    " ON CONFLICT(day, provider, model) DO UPDATE SET "
+    + ", ".join(f"{name} = {name} + excluded.{name}" for name in _TOTALS_COUNTERS)
+)
+
+_TOTALS_BACKFILL_KEY = "totals_backfilled_at"
+# How often the writer thread refreshes its session row. Small enough that a
+# hard kill leaves at most this much uncertainty about when the server stopped.
+_SESSION_HEARTBEAT_SECONDS = 30.0
+# Bounds ``server_sessions`` growth; one row per server start, so this is years
+# of restarts on any normal machine.
+_SESSION_HISTORY_LIMIT = 1_000
 
 # Columns added after the initial release. ``CREATE TABLE IF NOT EXISTS`` is a
 # no-op on an existing database, so each one needs an explicit ALTER TABLE.
@@ -306,6 +384,7 @@ class RequestLogStore:
                 conn.isolation_level = previous
             with conn:
                 conn.executescript(_SCHEMA)
+                conn.executescript(_TOTALS_SCHEMA)
                 self._ensure_added_columns(conn)
         finally:
             conn.close()
@@ -383,6 +462,90 @@ class RequestLogStore:
         except sqlite3.Error as exc:
             logger.warning("Request log auto_vacuum setup failed: {}", exc)
 
+    @staticmethod
+    def _ensure_totals_backfill(conn: sqlite3.Connection) -> None:
+        """Seed the permanent counters from rows already in the table.
+
+        Runs once, before the writer accepts its first flush, so no request can
+        be folded in twice -- by the rollup and again by this aggregate. On an
+        upgrade this recovers whatever history retention has not yet eaten;
+        anything already pruned is gone and cannot be recovered.
+        """
+        marker = conn.execute(
+            "SELECT value FROM request_log_meta WHERE key = ?",
+            (_TOTALS_BACKFILL_KEY,),
+        ).fetchone()
+        if marker is not None:
+            return
+        started = time.monotonic()
+        try:
+            with conn:
+                conn.execute(
+                    "INSERT INTO request_totals"
+                    f" (day, provider, model, {', '.join(_TOTALS_COUNTERS)})"
+                    " SELECT strftime('%Y-%m-%d', ts_epoch, 'unixepoch'),"
+                    " COALESCE(provider, ''), COALESCE(resolved_model, ''),"
+                    " COUNT(*),"
+                    " SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END),"
+                    " SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END),"
+                    " SUM(CASE WHEN status = 'cancelled' THEN 1 ELSE 0 END),"
+                    " COALESCE(SUM(tokens_in), 0), COALESCE(SUM(tokens_out), 0),"
+                    " COALESCE(SUM(cache_read_tokens), 0),"
+                    " COALESCE(SUM(cache_write_tokens), 0),"
+                    " COALESCE(SUM(tool_call_count), 0),"
+                    " SUM(CASE WHEN route_attempt > 0 THEN 1 ELSE 0 END),"
+                    " SUM(CASE WHEN route_diversion IS NOT NULL THEN 1 ELSE 0 END)"
+                    " FROM requests GROUP BY 1, 2, 3"
+                )
+                conn.execute(
+                    "INSERT OR REPLACE INTO request_log_meta (key, value)"
+                    " VALUES (?, ?)",
+                    (_TOTALS_BACKFILL_KEY, str(time.time())),
+                )
+        except sqlite3.Error as exc:
+            # A concurrent store on the same file may have won the race and
+            # already written these buckets; the transaction rolled back whole,
+            # so the next start simply finds the marker and skips.
+            logger.warning("Request log totals backfill skipped: {}", exc)
+            return
+        logger.info(
+            "Request log lifetime totals seeded from existing rows in {:.1f}s",
+            time.monotonic() - started,
+        )
+
+    def _open_session(self, conn: sqlite3.Connection) -> int | None:
+        """Record that a server is running, so quiet periods stay explainable."""
+        now = time.time()
+        try:
+            with conn:
+                cursor = conn.execute(
+                    "INSERT INTO server_sessions (started_at, last_seen_at, pid)"
+                    " VALUES (?, ?, ?)",
+                    (now, now, os.getpid()),
+                )
+                conn.execute(
+                    "DELETE FROM server_sessions WHERE id NOT IN ("
+                    " SELECT id FROM server_sessions"
+                    " ORDER BY started_at DESC LIMIT ?)",
+                    (_SESSION_HISTORY_LIMIT,),
+                )
+            return int(cursor.lastrowid) if cursor.lastrowid else None
+        except sqlite3.Error as exc:
+            logger.warning("Request log session open failed: {}", exc)
+            return None
+
+    @staticmethod
+    def _touch_session(
+        conn: sqlite3.Connection, session_id: int | None, now: float
+    ) -> None:
+        if session_id is None:
+            return
+        with contextlib.suppress(sqlite3.Error), conn:
+            conn.execute(
+                "UPDATE server_sessions SET last_seen_at = ? WHERE id = ?",
+                (now, session_id),
+            )
+
     # ------------------------------------------------------------------ writes
 
     def enqueue(self, record: RequestRecord) -> None:
@@ -411,8 +574,17 @@ class RequestLogStore:
             # large existing database, so they belong here and never on a
             # request path.
             self._ensure_stats_index(conn)
+            # Must precede the first flush: the rollup and this aggregate would
+            # otherwise both count any request written in between.
+            self._ensure_totals_backfill(conn)
             self._ensure_auto_vacuum(conn)
+            session_id = self._open_session(conn)
+            last_heartbeat = time.monotonic()
             while not stopping:
+                now = time.monotonic()
+                if now - last_heartbeat >= _SESSION_HEARTBEAT_SECONDS:
+                    last_heartbeat = now
+                    self._touch_session(conn, session_id, time.time())
                 try:
                     item = self._queue.get(timeout=_WRITER_POLL_SECONDS)
                 except queue.Empty:
@@ -439,13 +611,69 @@ class RequestLogStore:
                     pending.append(item)
             if pending:
                 self._flush(pending, conn)
+            # Stamp the clean shutdown so the recorded session ends where the
+            # server actually stopped rather than up to one heartbeat earlier.
+            self._touch_session(conn, session_id, time.time())
         finally:
             conn.close()
+
+    @staticmethod
+    def _existing_ids(conn: sqlite3.Connection, ids: list[str]) -> set[str]:
+        """Return which of ``ids`` are already stored.
+
+        The insert below is ``INSERT OR REPLACE``, so re-flushing a record that
+        is already persisted rewrites the row rather than adding one. The
+        permanent counters must not move in that case, and a row already
+        counted is the only way to tell.
+        """
+        if not ids:
+            return set()
+        placeholders = ", ".join("?" * len(ids))
+        return {
+            str(row[0])
+            for row in conn.execute(
+                f"SELECT id FROM requests WHERE id IN ({placeholders})", ids
+            )
+        }
+
+    @staticmethod
+    def _accumulate_totals(
+        conn: sqlite3.Connection, records: list[RequestRecord]
+    ) -> None:
+        """Fold newly stored records into the permanent per-day counters."""
+        if not records:
+            return
+        buckets: dict[tuple[str, str, str], list[int]] = {}
+        for record in records:
+            day = datetime.fromtimestamp(record.ts_epoch, tz=UTC).strftime("%Y-%m-%d")
+            key = (day, record.provider or "", record.resolved_model or "")
+            counters = buckets.get(key)
+            if counters is None:
+                counters = [0] * len(_TOTALS_COUNTERS)
+                buckets[key] = counters
+            counters[0] += 1
+            counters[1] += record.status == "success"
+            counters[2] += record.status == "error"
+            counters[3] += record.status == "cancelled"
+            counters[4] += record.tokens_in or 0
+            counters[5] += record.tokens_out or 0
+            counters[6] += record.cache_read_tokens or 0
+            counters[7] += record.cache_write_tokens or 0
+            counters[8] += record.tool_call_count or 0
+            counters[9] += bool(record.route_attempt)
+            counters[10] += record.route_diversion is not None
+        conn.executemany(
+            _TOTALS_UPSERT_SQL,
+            [(*key, *counters) for key, counters in buckets.items()],
+        )
 
     def _flush(self, batch: list[RequestRecord], conn: sqlite3.Connection) -> None:
         rows = [self._record_to_row(record) for record in batch]
         try:
             with conn:
+                already_stored = self._existing_ids(
+                    conn, [record.id for record in batch]
+                )
                 conn.executemany(
                     """
                     INSERT OR REPLACE INTO requests (
@@ -462,6 +690,10 @@ class RequestLogStore:
                     ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                     """,
                     rows,
+                )
+                self._accumulate_totals(
+                    conn,
+                    [record for record in batch if record.id not in already_stored],
                 )
         except sqlite3.Error as exc:
             logger.warning("Request log write failed: {}", exc)
@@ -1004,7 +1236,12 @@ class RequestLogStore:
     # -------------------------------------------------------------- maintenance
 
     def prune(self) -> int:
-        """Delete oldest rows beyond the configured retention cap."""
+        """Delete oldest rows beyond the configured retention cap.
+
+        Only ``requests`` is capped. ``request_totals`` and ``server_sessions``
+        are deliberately left alone -- they exist precisely to outlive the rows
+        this deletes.
+        """
         if self._max_rows <= 0:
             return 0
         conn = self._connect()
@@ -1031,11 +1268,123 @@ class RequestLogStore:
             conn.close()
 
     def clear(self) -> int:
+        """Erase the stored history, including the permanent counters.
+
+        "Clear log" is an explicit erase, so the all-time figures go with it.
+        Leaving them behind would report millions of requests over an empty
+        table, which reads as a bug rather than as retained history.
+        """
         with self._stats_lock:
             self._stats_cache.clear()
         with self._connection() as conn:
             cursor = conn.execute("DELETE FROM requests")
+            conn.execute("DELETE FROM request_totals")
             return cursor.rowcount
+
+    def lifetime(self) -> dict[str, Any]:
+        """Return all-time counters, unaffected by retention.
+
+        Every figure in ``stats`` is a sum over ``requests``, which ``prune``
+        caps: once the cap is reached those sums stop growing because a row
+        leaves for each one that arrives. These come from ``request_totals``,
+        which is only ever added to.
+        """
+        with self._connection() as conn:
+            totals = conn.execute(
+                f"SELECT {', '.join(f'COALESCE(SUM({name}), 0)' for name in _TOTALS_COUNTERS)},"
+                " MIN(day), MAX(day) FROM request_totals"
+            ).fetchone()
+            by_provider = self._lifetime_breakdown(conn, "provider")
+            by_model = self._lifetime_breakdown(conn, "model")
+        counters = {
+            name: int(totals[index]) for index, name in enumerate(_TOTALS_COUNTERS)
+        }
+        return {
+            **counters,
+            "first_day": totals[len(_TOTALS_COUNTERS)],
+            "last_day": totals[len(_TOTALS_COUNTERS) + 1],
+            "by_provider": by_provider,
+            "by_model": by_model,
+        }
+
+    @staticmethod
+    def _lifetime_breakdown(
+        conn: sqlite3.Connection, column: str
+    ) -> list[dict[str, Any]]:
+        rows = conn.execute(
+            f"SELECT {column}, SUM(requests), SUM(tokens_in), SUM(tokens_out),"
+            " SUM(error) FROM request_totals"
+            f" GROUP BY {column} ORDER BY SUM(requests) DESC LIMIT ?",
+            (_BREAKDOWN_LIMIT,),
+        ).fetchall()
+        return [
+            {
+                "name": row[0] or None,
+                "requests": int(row[1] or 0),
+                "tokens_in": int(row[2] or 0),
+                "tokens_out": int(row[3] or 0),
+                "error": int(row[4] or 0),
+            }
+            for row in rows
+        ]
+
+    def coverage(
+        self, *, since: float | None = None, until: float | None = None
+    ) -> dict[str, Any]:
+        """Report when a server was actually running over a window.
+
+        Without this a flat stretch in the request series is ambiguous: no
+        traffic and no server look identical. ``tracking_since`` marks the point
+        before which nothing was recorded, so the caller can say "not recorded"
+        rather than wrongly claiming downtime.
+        """
+        with self._connection() as conn:
+            first = conn.execute(
+                "SELECT MIN(started_at) FROM server_sessions"
+            ).fetchone()[0]
+            args: list[Any] = []
+            where = ""
+            if since is not None:
+                where += " AND last_seen_at >= ?"
+                args.append(since)
+            if until is not None:
+                where += " AND started_at <= ?"
+                args.append(until)
+            rows = conn.execute(
+                "SELECT started_at, last_seen_at FROM server_sessions"
+                f" WHERE 1{where} ORDER BY started_at",
+                args,
+            ).fetchall()
+        sessions = [
+            {"started_at": float(row[0]), "last_seen_at": float(row[1])} for row in rows
+        ]
+        # Clip to the window, then merge: two servers sharing a database would
+        # otherwise have their overlapping uptime counted twice.
+        clipped: list[tuple[float, float]] = []
+        for session in sessions:
+            start = session["started_at"]
+            end = session["last_seen_at"]
+            if since is not None:
+                start = max(start, since)
+            if until is not None:
+                end = min(end, until)
+            if end > start:
+                clipped.append((start, end))
+        covered = 0.0
+        merged_end = None
+        for start, end in sorted(clipped):
+            if merged_end is None or start > merged_end:
+                covered += end - start
+                merged_end = end
+            elif end > merged_end:
+                covered += end - merged_end
+                merged_end = end
+        return {
+            "tracking_since": float(first) if first is not None else None,
+            "sessions": sessions,
+            "covered_seconds": covered,
+            "heartbeat_seconds": _SESSION_HEARTBEAT_SECONDS,
+        }
 
 
 def _rounded(value: float | None) -> float | None:

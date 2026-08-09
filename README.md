@@ -684,6 +684,18 @@ REQUEST_LOG_MAX_ROWS=50000        # retention cap; oldest rows pruned periodical
 REQUEST_LOG_CAPTURE_BODIES=true   # false stores only body lengths + SHA-256 hashes
 ```
 
+<a id="retention-and-all-time"></a>
+
+#### Retention, and what "all time" means
+
+`REQUEST_LOG_MAX_ROWS` is a hard cap on **stored rows**, and it has a consequence worth stating plainly: once the table is full, one row is deleted for every row that arrives. Every figure computed from those rows — total requests, token sums, the per-model breakdown — is therefore a **rolling window**, and at the cap it stops rising no matter how much traffic runs. Analytics says so explicitly when the cap is reached rather than leaving the plateau to look like a broken counter.
+
+Sizing it is really a disk decision, because captured bodies dominate: at roughly 30 KB of request and response text per row, 50,000 rows is about 1.7 GB. Raising the cap raises the disk cost about linearly. Setting `REQUEST_LOG_CAPTURE_BODIES=false` buys far more history per gigabyte, at the cost of the request/response drill-down.
+
+**All time** is a separate, permanent rollup — one small row per day, provider and model, incremented as requests complete and never pruned. It keeps counting after stored rows begin rolling over, so per-model request counts and token usage remain true however far the window has slid. It costs a few hundred KB and ignores the filter row and time range by design. Upgrading seeds it from whatever history retention has not yet eaten; rows already pruned are gone and cannot be recovered. **Clear log** erases it along with everything else.
+
+**Uptime.** A flat stretch in the request chart is ambiguous on its own — no traffic and no server look identical. The server records when it was actually running, so Analytics can tell you which one you are looking at instead of leaving you to guess.
+
 **Privacy note:** request bodies are stored locally on disk by default. They never leave your machine, but set `REQUEST_LOG_CAPTURE_BODIES=false` (or disable the log entirely) if you'd rather not persist conversation text.
 
 <div align="center">

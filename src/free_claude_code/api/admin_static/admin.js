@@ -4424,6 +4424,10 @@ const reqState = {
   lastPulseFilters: null,
 };
 
+function reqWindowSeconds() {
+  return Number(byId("reqFilterWindow").value) || 0;
+}
+
 function reqFilters() {
   const params = new URLSearchParams();
   const provider = byId("reqFilterProvider").value.trim();
@@ -4450,12 +4454,14 @@ async function loadRequestsView() {
   const params = reqFilters();
   let stats;
   let list;
+  let lifetime;
   try {
-    [stats, list] = await Promise.all([
+    [stats, list, lifetime] = await Promise.all([
       api(`/admin/api/requests/stats?${params}`),
       api(
         `/admin/api/requests?limit=${reqState.limit}&offset=${reqState.offset}&${params}`,
       ),
+      api("/admin/api/requests/lifetime"),
     ]);
   } catch (error) {
     if (loadId !== reqState.loadId) return;
@@ -4470,6 +4476,9 @@ async function loadRequestsView() {
     byId("reqTopErrors").innerHTML = "";
     byId("reqFallbackRoutes").innerHTML = "";
     byId("reqDivertedRoutes").innerHTML = "";
+    byId("reqRetentionNote").hidden = true;
+    byId("reqCoverageNote").hidden = true;
+    renderRequestLifetime(null);
     clearChart(byId("reqSeriesChart"));
     clearChart(byId("reqModelChart"));
     reqState.total = 0;
@@ -4483,6 +4492,9 @@ async function loadRequestsView() {
     ? "Bodies: captured"
     : "Bodies: hashes only (REQUEST_LOG_CAPTURE_BODIES=false)";
   renderRequestStatsCards(stats);
+  renderRequestRetentionNote(stats);
+  renderRequestLifetime(lifetime);
+  renderRequestCoverage(stats);
   renderReqSeriesChart(stats.series || []);
   renderReqModelChart(stats.by_model || []);
   populateRequestFilterOptions(stats);
@@ -4739,7 +4751,120 @@ function renderRequestStatsCards(stats) {
     ["p95 duration", stats.p95_duration_ms != null ? `${stats.p95_duration_ms} ms` : "—"],
     ["Avg TTFT", stats.avg_ttft_ms != null ? `${stats.avg_ttft_ms} ms` : "—"],
   ];
-  const container = byId("reqStatsCards");
+  renderStatCards(byId("reqStatsCards"), cards);
+}
+
+function renderRequestRetentionNote(stats) {
+  const note = byId("reqRetentionNote");
+  const cap = Number(stats.retained_rows_max || 0);
+  const total = Number(stats.total || 0);
+  // Prune leaves the count just above the cap between runs, so an exact
+  // comparison would almost never fire.
+  const rolling = cap > 0 && total >= cap;
+  note.hidden = !rolling;
+  if (rolling) {
+    note.textContent =
+      `Storage is full at ${formatAnalyticsNumber(cap)} requests, so the figures above ` +
+      `cover only the most recent ${formatAnalyticsNumber(cap)} and stop rising. ` +
+      `Older rows have been deleted. Raise REQUEST_LOG_MAX_ROWS to keep more, ` +
+      `or read All time below.`;
+  }
+}
+
+function renderRequestLifetime(lifetime) {
+  const cards = byId("reqLifetimeCards");
+  const span = byId("reqLifetimeSpan");
+  if (!lifetime || lifetime.enabled === false) {
+    cards.innerHTML = "";
+    span.textContent = "";
+    byId("reqLifetimeModels").innerHTML = "";
+    return;
+  }
+  const requests = Number(lifetime.requests || 0);
+  span.textContent =
+    lifetime.first_day && lifetime.last_day
+      ? `${lifetime.first_day} to ${lifetime.last_day}`
+      : "nothing recorded yet";
+  const successRate = requests
+    ? ((Number(lifetime.success || 0) / requests) * 100).toFixed(1)
+    : "0.0";
+  renderStatCards(cards, [
+    ["Requests", formatAnalyticsNumber(requests)],
+    ["Success rate", `${successRate}%`],
+    ["Errors", formatAnalyticsNumber(Number(lifetime.error || 0))],
+    ["Total input", formatAnalyticsNumber(totalInputTokens(lifetime))],
+    ["Cached input", formatAnalyticsNumber(Number(lifetime.cache_read_tokens || 0))],
+    ["Tokens out", formatAnalyticsNumber(Number(lifetime.tokens_out || 0))],
+    ["Tool calls", formatAnalyticsNumber(Number(lifetime.tool_calls || 0))],
+    ["Served by fallback", formatAnalyticsNumber(Number(lifetime.served_by_fallback || 0))],
+    ["Diverted for vision", formatAnalyticsNumber(Number(lifetime.diverted || 0))],
+  ]);
+  const models = byId("reqLifetimeModels");
+  models.innerHTML = "";
+  models.appendChild(
+    analyticsTable(
+      ["Model", "Requests", "Input", "Output", "Errors"],
+      (lifetime.by_model || []).map((row) => [
+        row.name || "unknown",
+        formatAnalyticsNumber(Number(row.requests || 0)),
+        formatAnalyticsNumber(Number(row.tokens_in || 0)),
+        formatAnalyticsNumber(Number(row.tokens_out || 0)),
+        formatAnalyticsNumber(Number(row.error || 0)),
+      ]),
+      "No requests recorded yet.",
+    ),
+  );
+}
+
+function renderRequestCoverage(stats) {
+  const note = byId("reqCoverageNote");
+  const coverage = stats.coverage;
+  const windowSeconds = reqWindowSeconds();
+  if (!coverage || !windowSeconds || coverage.tracking_since == null) {
+    note.hidden = true;
+    return;
+  }
+  const windowStart = Date.now() / 1000 - windowSeconds;
+  // Before the first recorded session there is no uptime data, so a gap means
+  // "not recorded", not "the server was down".
+  const measurable = Math.min(
+    windowSeconds,
+    Math.max(0, Date.now() / 1000 - coverage.tracking_since),
+  );
+  if (measurable <= 0) {
+    note.hidden = true;
+    return;
+  }
+  const missing = measurable - Number(coverage.covered_seconds || 0);
+  // A restart leaves a gap of seconds. Reporting that on a 24h range would cry
+  // wolf, so scale with the range and keep a floor of two missed heartbeats.
+  const threshold = Math.max(
+    Number(coverage.heartbeat_seconds || 30) * 2,
+    windowSeconds * 0.01,
+  );
+  note.hidden = false;
+  if (missing <= threshold) {
+    note.textContent =
+      coverage.tracking_since > windowStart
+        ? "A server has been running for all of this range since uptime tracking began."
+        : "A server was running throughout this range, so quiet periods above are idle time, not downtime.";
+    return;
+  }
+  note.textContent =
+    `No server was running for ${formatDurationShort(missing)} of this range, ` +
+    "so nothing could be recorded then.";
+}
+
+function formatDurationShort(seconds) {
+  const total = Math.max(0, Math.round(seconds));
+  if (total < 90) return `${total}s`;
+  const minutes = Math.round(total / 60);
+  if (minutes < 90) return `${minutes}m`;
+  const hours = total / 3600;
+  return hours < 48 ? `${hours.toFixed(1)}h` : `${(hours / 24).toFixed(1)}d`;
+}
+
+function renderStatCards(container, cards) {
   container.innerHTML = "";
   cards.forEach(([label, value]) => {
     const card = document.createElement("div");

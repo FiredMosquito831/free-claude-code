@@ -559,10 +559,34 @@ Requests logged before v4.42.0 have no chain recorded, so the panel is hidden fo
 
 Every row's dialog also shows the full request and response, the resolved configuration, and timing. It's usually the fastest way to see what actually happened.
 
+#### Why the totals stop rising
+
+`REQUEST_LOG_MAX_ROWS` caps **stored rows**. Once the table is full, one row is deleted for every row that arrives, so everything computed from those rows is a rolling window:
+
+| Section | Covers | Affected by retention |
+| --- | --- | --- |
+| Summary cards, charts, tables | the filter row and time range | **yes** — frozen once the cap is reached |
+| **All time** | every request ever completed | no — never pruned |
+
+At the cap, Analytics says so above the cards rather than letting a frozen counter look like a bug. **All time** is a small permanent rollup kept per day, provider and model, so per-model request counts and token usage keep climbing after stored rows roll over. It ignores the filters and the time range on purpose.
+
+Two things worth knowing about it:
+
+- Upgrading seeds it from whatever history is still retained. Rows pruned before the upgrade are gone and cannot be recovered, so the two figures start out equal and diverge from then on.
+- **Clear log** erases it too. It is an explicit "erase my history" action, and reporting millions of all-time requests over an empty table would read as a bug.
+
+Sizing the cap is a disk decision, because captured bodies dominate — around 30 KB per row, so 50,000 rows is roughly 1.7 GB. `REQUEST_LOG_CAPTURE_BODIES=false` buys far more history per gigabyte, at the cost of the drill-down.
+
 ```bash
 REQUEST_LOG_ENABLED=true
 REQUEST_LOG_MAX_ROWS=50000        # oldest rows pruned beyond this
 ```
+
+#### No traffic, or no server?
+
+A flat stretch in **Requests over time** means one of two very different things, and the chart alone cannot tell you which. The server records when it was actually running, so a line under the chart says whether a server covered the range or how much of it had none. Pick a time range to see it — over "all time" there is no bounded window to measure against.
+
+Uptime is only recorded from v4.44.0 onwards, so earlier periods report nothing rather than claiming downtime that was never measured. Brief gaps from a restart are ignored; the threshold scales with the range you are looking at.
 
 ### Web search analytics
 

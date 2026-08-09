@@ -1,6 +1,7 @@
 """Admin API tests for the request log endpoints."""
 
 import re
+import sqlite3
 import time
 from pathlib import Path
 
@@ -295,3 +296,55 @@ def test_admin_serves_only_bundled_guide_images(tmp_path) -> None:
     # Traversal attempts are rejected because they are not in the name set.
     for hostile in ("../admin.js", "..\admin.js", "/etc/passwd", "nope.png"):
         assert hostile not in names
+
+
+def test_lifetime_endpoint_reports_all_time_totals(client, seeded_store) -> None:
+    payload = client.get("/admin/api/requests/lifetime").json()
+    assert payload["enabled"] is True
+    assert payload["requests"] == 5
+    assert payload["error"] == 1
+    assert payload["tokens_in"] == 100
+    assert payload["retained_rows_max"] > 0
+    assert {row["name"] for row in payload["by_provider"]} == {"p1", "p2"}
+
+
+def test_lifetime_outlives_the_retention_cap(client, seeded_store) -> None:
+    """The dashboard must keep counting after stored rows roll over."""
+    # Exactly what prune does at the cap: the oldest rows leave the table.
+    with sqlite3.connect(seeded_store.db_path) as conn:
+        conn.execute("DELETE FROM requests WHERE id IN ('r0', 'r1', 'r2')")
+
+    windowed = client.get("/admin/api/requests/stats").json()
+    lifetime = client.get("/admin/api/requests/lifetime").json()
+
+    assert windowed["total"] == 2
+    assert lifetime["requests"] == 5
+
+
+def test_stats_endpoint_exposes_the_retention_cap_and_coverage(
+    client, seeded_store
+) -> None:
+    payload = client.get("/admin/api/requests/stats").json()
+    assert payload["retained_rows_max"] > 0
+    assert "coverage" in payload
+    assert payload["coverage"]["tracking_since"] is not None
+
+
+def test_clearing_the_log_also_clears_all_time(client, seeded_store) -> None:
+    assert client.get("/admin/api/requests/lifetime").json()["requests"] == 5
+    client.request("DELETE", "/admin/api/requests")
+    assert client.get("/admin/api/requests/lifetime").json()["requests"] == 0
+
+
+def test_lifetime_endpoint_disabled_store_shape(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("REQUEST_LOG_ENABLED", "false")
+    from free_claude_code.config.settings import Settings
+    from tests.api.support import create_test_app as make_app
+
+    disabled = TestClient(make_app(Settings()), client=("127.0.0.1", 50000))
+    assert disabled.get("/admin/api/requests/lifetime").json() == {"enabled": False}
+
+
+def test_lifetime_endpoint_rejects_remote_callers(seeded_store) -> None:
+    remote = TestClient(create_test_app(), client=("203.0.113.10", 50000))
+    assert remote.get("/admin/api/requests/lifetime").status_code == 403
