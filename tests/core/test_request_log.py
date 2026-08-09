@@ -1480,3 +1480,53 @@ def test_close_drains_a_deep_queue_instead_of_abandoning_it(tmp_path) -> None:
         assert (
             conn.execute("SELECT COUNT(*) FROM request_bodies").fetchone()[0] == 1_500
         )
+
+
+def test_search_still_matches_needles_that_json_escapes(store: RequestLogStore) -> None:
+    """The byte-level prefilter is skipped for these, not silently wrong.
+
+    Quotes, backslashes and newlines are rewritten by JSON encoding, so a
+    needle containing one does not survive into the stored blob byte for byte.
+    Such needles must fall back to decoding rather than report no match.
+    """
+    store.enqueue(_record("quoted", input_text='he said "deploy now" firmly'))
+    store.enqueue(_record("slashed", input_text=r"path is C:\Users\fgghk"))
+    store.enqueue(_record("newline", input_text="first line\nsecond line"))
+    store.close()
+
+    assert store.list_requests(q='"deploy now"')[1] == 1
+    assert store.list_requests(q=r"C:\Users")[1] == 1
+    assert store.list_requests(q="line\nsecond")[1] == 1
+
+
+def test_search_does_not_match_the_payload_structure(store: RequestLogStore) -> None:
+    """A hit on the encoding must be verified against the real text."""
+    store.enqueue(_record("r1", input_text="hello", output_text="world"))
+    store.close()
+
+    # These appear in the stored JSON but in no body.
+    for structural in ('","', '{"i":', '"o"'):
+        assert store.list_requests(q=structural)[1] == 0, structural
+
+
+def test_search_matches_the_same_rows_with_and_without_compression(tmp_path) -> None:
+    """Compression must not change which requests a search finds."""
+    texts = [
+        "deploy the kubernetes cluster",
+        "KUBERNETES in shouty caps",
+        "nothing relevant here",
+        'a "quoted" phrase',
+    ]
+    results = {}
+    for label, compress in (("inline", False), ("compressed", True)):
+        store = RequestLogStore(
+            tmp_path / f"{label}.db", max_rows=1000, compress_bodies=compress
+        )
+        for index, text in enumerate(texts):
+            store.enqueue(_record(f"r{index}", input_text=text, output_text=""))
+        store.close()
+        results[label] = {
+            term: {row["id"] for row in store.list_requests(q=term)[0]}
+            for term in ("kubernetes", "KUBERNETES", '"quoted"', "relevant", "zzz")
+        }
+    assert results["inline"] == results["compressed"]
