@@ -297,6 +297,15 @@ def pack_bodies(values: dict[str, Any]) -> bytes:
     return json.dumps(packed, separators=(",", ":")).encode("utf-8")
 
 
+def _is_json_transparent(needle: str) -> bool:
+    """True when JSON encoding leaves ``needle`` byte-identical.
+
+    ``json.dumps`` rewrites only ``"``, ``\\`` and control characters, so any
+    other string appears verbatim inside the encoded payload.
+    """
+    return not any(char in '"\\' or char < " " for char in needle)
+
+
 def unpack_bodies(raw: bytes) -> dict[str, Any]:
     """Inverse of :func:`pack_bodies`, tolerant of a corrupt or truncated blob."""
     try:
@@ -480,14 +489,33 @@ class RequestLogStore:
         return unpack_bodies(raw)
 
     def _body_matches(self, payload: Any, dict_id: Any, needle: Any) -> int:
-        """SQL predicate: does this request's stored text contain ``needle``?"""
+        """SQL predicate: does this request's stored text contain ``needle``?
+
+        Called once per candidate row, so the cost of the slow path is the cost
+        of search. Most rows do not match, and for those the JSON parse and the
+        UTF-8 decode are pure waste -- hence the byte-level rejection first.
+        """
         if payload is None or not needle:
             return 0
-        bodies = self._decode_bodies(payload, dict_id)
-        lowered = str(needle).lower()
+        raw = self._raw_payload(payload, dict_id)
+        if raw is None:
+            return 0
+        text = str(needle)
+        # Escaping only ever rewrites quotes, backslashes and control
+        # characters. A needle containing none of them therefore survives JSON
+        # encoding byte for byte, so "absent from the encoded blob" proves
+        # "absent from the decoded text". The converse does not hold -- it can
+        # match a key name -- so a hit still gets verified below.
+        if (
+            _is_json_transparent(text)
+            and text.encode("utf-8", "surrogatepass").lower() not in raw.lower()
+        ):
+            return 0
+        bodies = unpack_bodies(raw)
+        lowered = text.lower()
         for key in ("input_text", "output_text"):
-            text = bodies.get(key)
-            if isinstance(text, str) and lowered in text.lower():
+            value = bodies.get(key)
+            if isinstance(value, str) and lowered in value.lower():
                 return 1
         return 0
 
