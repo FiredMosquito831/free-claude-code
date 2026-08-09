@@ -86,6 +86,13 @@ SECTIONS: tuple[ConfigSectionSpec, ...] = (
         "Web search provider selection, API keys, and key rotation.",
     ),
     ConfigSectionSpec(
+        "limits",
+        "Limits",
+        "What FCC waits for, keeps, and records. Every value here is a "
+        "trade-off between how long a failing model may hold a request and "
+        "how much history survives on disk.",
+    ),
+    ConfigSectionSpec(
         "diagnostics",
         "Diagnostics",
         "Logging and debugging flags.",
@@ -801,6 +808,247 @@ _NON_PROVIDER_FIELDS: tuple[ConfigFieldSpec, ...] = (
         "Smoke OpenRouter Free Extra Models",
         "smoke",
         advanced=True,
+    ),
+    # ---- Limits: when to stop waiting ------------------------------------
+    ConfigFieldSpec(
+        "FALLBACK_FIRST_TOKEN_TIMEOUT",
+        "First-token deadline",
+        "limits",
+        "number",
+        settings_attr="fallback_first_token_timeout",
+        default="120",
+        description=(
+            "Seconds a model may stay silent before the next model on the "
+            "chain takes over. Nothing has reached the client yet, so the "
+            "handover is invisible. 0 waits indefinitely."
+        ),
+    ),
+    ConfigFieldSpec(
+        "FALLBACK_TOTAL_TIMEOUT",
+        "Total request budget",
+        "limits",
+        "number",
+        settings_attr="fallback_total_timeout",
+        default="600",
+        description=(
+            "Seconds one request may run across every attempt, retry and "
+            "recovery. Once output has started no fallback can replace it, "
+            "but it can still stop. 0 disables the budget."
+        ),
+    ),
+    ConfigFieldSpec(
+        "FALLBACK_EJECT_AFTER_FAILURES",
+        "Bench a model after",
+        "limits",
+        "number",
+        settings_attr="fallback_eject_after_failures",
+        default="3",
+        description=(
+            "Consecutive failures before routing skips a model, so a request "
+            "stops re-paying a dead model's timeout on its way to a healthy "
+            "one. A chain is never emptied: if every model is benched they "
+            "are tried in order anyway. 0 disables benching."
+        ),
+    ),
+    ConfigFieldSpec(
+        "FALLBACK_EJECT_SECONDS",
+        "Keep it benched for",
+        "limits",
+        "number",
+        settings_attr="fallback_eject_seconds",
+        default="30",
+        description="Seconds a benched model stays out of routing.",
+    ),
+    ConfigFieldSpec(
+        "PROVIDER_RETRY_ATTEMPTS",
+        "Retries before the chain",
+        "limits",
+        "number",
+        settings_attr="provider_retry_attempts",
+        default="5",
+        restart_required=True,
+        description=(
+            "How many times one model is retried on a 429 or 5xx before the "
+            "next model is tried. Each retry waits longer than the last, so "
+            "5 attempts spend about 30s before a healthy fallback is used."
+        ),
+    ),
+    ConfigFieldSpec(
+        "STREAM_EARLY_RETRY_ATTEMPTS",
+        "Retries inside one model",
+        "limits",
+        "number",
+        settings_attr="stream_early_retry_attempts",
+        default="5",
+        restart_required=True,
+        advanced=True,
+        description=(
+            "Attempts a provider makes on its own, before the failure reaches "
+            "routing at all."
+        ),
+    ),
+    ConfigFieldSpec(
+        "STREAM_MIDSTREAM_RECOVERY_ATTEMPTS",
+        "Mid-stream recovery attempts",
+        "limits",
+        "number",
+        settings_attr="stream_midstream_recovery_attempts",
+        default="5",
+        restart_required=True,
+        description=(
+            "After output has started and the connection drops, how many "
+            "times the same model is asked to finish. No chain can help here, "
+            "so this bounds how long a dying stream may hold a request."
+        ),
+    ),
+    ConfigFieldSpec(
+        "STREAM_COMMIT_HOLDBACK_SECONDS",
+        "Commit holdback",
+        "limits",
+        "number",
+        settings_attr="stream_commit_holdback_seconds",
+        default="0.75",
+        restart_required=True,
+        description=(
+            "Seconds the first output is held before it goes to the client. "
+            "While it is held a failure can still fall back silently, so this "
+            "is the width of the invisible-recovery window. 0 commits at once "
+            "and disables invisible recovery."
+        ),
+    ),
+    ConfigFieldSpec(
+        "RATE_LIMIT_COOLDOWN_SECONDS",
+        "Rate-limit cooldown",
+        "limits",
+        "number",
+        settings_attr="rate_limit_cooldown_seconds",
+        default="60",
+        restart_required=True,
+        advanced=True,
+        description=(
+            "How long a rate-limited provider is paused when it sends no "
+            "Retry-After header of its own to obey."
+        ),
+    ),
+    ConfigFieldSpec(
+        "CREDENTIAL_CIRCUIT_THRESHOLD",
+        "Bench a key after",
+        "limits",
+        "number",
+        settings_attr="credential_circuit_threshold",
+        default="3",
+        restart_required=True,
+        advanced=True,
+        description="Consecutive failures before one API key is benched by rotation.",
+    ),
+    # ---- Limits: what to keep --------------------------------------------
+    ConfigFieldSpec(
+        "REQUEST_LOG_ENABLED",
+        "Record requests",
+        "limits",
+        "boolean",
+        settings_attr="request_log_enabled",
+        default="true",
+        restart_required=True,
+        description="Turn the request log and the Analytics tab on or off.",
+    ),
+    ConfigFieldSpec(
+        "REQUEST_LOG_MAX_ROWS",
+        "Requests to keep",
+        "limits",
+        "number",
+        settings_attr="request_log_max_rows",
+        default="50000",
+        restart_required=True,
+        description=(
+            "The newest N requests are kept and older ones are deleted as new "
+            "ones arrive. All-time counters keep counting either way; only "
+            "the rows themselves are pruned."
+        ),
+    ),
+    ConfigFieldSpec(
+        "REQUEST_LOG_CAPTURE_BODIES",
+        "Store prompts and replies",
+        "limits",
+        "boolean",
+        settings_attr="request_log_capture_bodies",
+        default="true",
+        restart_required=True,
+        description=(
+            "Keeps the full text of each request so content search can find "
+            "it. Bodies are about 99% of the stored bytes."
+        ),
+    ),
+    ConfigFieldSpec(
+        "REQUEST_LOG_COMPRESS_BODIES",
+        "Compress stored text",
+        "limits",
+        "boolean",
+        settings_attr="request_log_compress_bodies",
+        default="true",
+        restart_required=True,
+        description=(
+            "Compresses bodies against a dictionary trained on your own "
+            "traffic and stores a repeated prompt once. Applies to new rows; "
+            "run fcc-compact-log to convert existing history."
+        ),
+    ),
+    ConfigFieldSpec(
+        "REQUEST_LOG_TEXT_MAX_CHARS",
+        "Longest text stored",
+        "limits",
+        "number",
+        settings_attr="request_log_text_max_chars",
+        default="50000",
+        restart_required=True,
+        description=(
+            "Text longer than this is truncated before it is stored, which "
+            "also bounds what content search can ever find."
+        ),
+    ),
+    ConfigFieldSpec(
+        "REQUEST_LOG_COMPRESSION_LEVEL",
+        "Compression level",
+        "limits",
+        "number",
+        settings_attr="request_log_compression_level",
+        default="9",
+        restart_required=True,
+        advanced=True,
+        description=(
+            "zstd level for stored bodies. Measured on a real log, level 19 "
+            "was 4.9% smaller than 9 at a ninth of the speed."
+        ),
+    ),
+    ConfigFieldSpec(
+        "REQUEST_LOG_QUEUE_MAX_SIZE",
+        "Pending writes held",
+        "limits",
+        "number",
+        settings_attr="request_log_queue_max_size",
+        default="10000",
+        restart_required=True,
+        advanced=True,
+        description=(
+            "Records waiting to be written. When this fills under a burst, "
+            "further records are dropped rather than slowing the request."
+        ),
+    ),
+    # ---- Limits: what to record ------------------------------------------
+    ConfigFieldSpec(
+        "LOG_LEVEL",
+        "Log level",
+        "limits",
+        "select",
+        settings_attr="log_level",
+        default="INFO",
+        options=("DEBUG", "INFO", "WARNING", "ERROR"),
+        restart_required=True,
+        description=(
+            "How much the server writes to its log file. DEBUG includes every "
+            "routing decision, which is what to use when a fallback behaves "
+            "unexpectedly."
+        ),
     ),
 )
 

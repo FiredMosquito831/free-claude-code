@@ -44,6 +44,7 @@ class ProviderRateLimiter:
         rate_limit: int = 40,
         rate_window: float = 60.0,
         max_concurrency: int = 5,
+        max_retries: int = DEFAULT_UPSTREAM_MAX_RETRIES,
     ):
         if rate_limit <= 0:
             raise ValueError("rate_limit must be > 0")
@@ -58,6 +59,7 @@ class ProviderRateLimiter:
         self._proactive_limiter = StrictSlidingWindowLimiter(
             self._rate_limit, self._rate_window
         )
+        self._max_retries = max(0, max_retries)
         self._blocked_until: float = 0
         self._concurrency_sem = asyncio.Semaphore(max_concurrency)
         logger.info(
@@ -135,7 +137,7 @@ class ProviderRateLimiter:
         fn: Callable[..., Any],
         *args: Any,
         provider_failure_override: ProviderFailureOverride | None = None,
-        max_retries: int = DEFAULT_UPSTREAM_MAX_RETRIES,
+        max_retries: int | None = None,
         base_delay: float = 2.0,
         max_delay: float = 60.0,
         jitter: float = 1.0,
@@ -165,6 +167,8 @@ class ProviderRateLimiter:
             The last exception if all retries are exhausted.
         """
         last_exc: Exception | None = None
+        if max_retries is None:
+            max_retries = self._max_retries
         total_attempts = 1 + max_retries
 
         for attempt in range(total_attempts):

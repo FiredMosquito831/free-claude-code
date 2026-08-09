@@ -43,6 +43,14 @@ from free_claude_code.providers.runtime import (
 
 def _make_settings(**overrides):
     mock = MagicMock()
+    # Numeric knobs are arithmetic in the factory, so a bare MagicMock cannot
+    # stand in for them.
+    mock.provider_retry_attempts = 5
+    mock.stream_early_retry_attempts = 5
+    mock.stream_midstream_recovery_attempts = 5
+    mock.stream_commit_holdback_seconds = 0.75
+    mock.rate_limit_cooldown_seconds = 60.0
+    mock.credential_circuit_threshold = 3
     mock.model = "nvidia_nim/meta/llama3"
     mock.model_fable = None
     mock.model_opus = None
@@ -446,6 +454,8 @@ def test_create_provider_instantiates_each_builtin():
                 rate_limit=7,
                 rate_window=11,
                 max_concurrency=3,
+                # Attempts include the first try; the limiter counts retries.
+                max_retries=4,
             )
             limiter_factory.reset_mock()
 

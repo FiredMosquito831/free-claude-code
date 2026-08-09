@@ -114,6 +114,12 @@ def build_provider_config(
         log_api_error_tracebacks=settings.log_api_error_tracebacks,
         api_keys=api_keys,
         credential_rotation=rotation,
+        retry_attempts=settings.provider_retry_attempts,
+        early_retry_attempts=settings.stream_early_retry_attempts,
+        midstream_recovery_attempts=settings.stream_midstream_recovery_attempts,
+        commit_holdback_seconds=settings.stream_commit_holdback_seconds,
+        rate_limit_cooldown_seconds=settings.rate_limit_cooldown_seconds,
+        circuit_open_threshold=settings.credential_circuit_threshold,
     )
 
 
@@ -143,5 +149,11 @@ def _build_dynamic_provider_config(
         log_raw_sse_events=settings.log_raw_sse_events,
         log_api_error_tracebacks=settings.log_api_error_tracebacks,
         api_keys=entry.api_keys,
+        retry_attempts=settings.provider_retry_attempts,
+        early_retry_attempts=settings.stream_early_retry_attempts,
+        midstream_recovery_attempts=settings.stream_midstream_recovery_attempts,
+        commit_holdback_seconds=settings.stream_commit_holdback_seconds,
+        rate_limit_cooldown_seconds=settings.rate_limit_cooldown_seconds,
+        circuit_open_threshold=settings.credential_circuit_threshold,
         credential_rotation=rotation,
     )

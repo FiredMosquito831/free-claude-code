@@ -49,6 +49,7 @@ def classify_provider_failure(
     request_id: str | None,
     mark_rate_limited: MarkRateLimited,
     provider_failure_override: ProviderFailureOverride | None = None,
+    cooldown_seconds: float = DEFAULT_RATE_LIMIT_COOLDOWN_SECONDS,
 ) -> ExecutionFailure:
     """Return one detailed canonical failure after provider retries are exhausted."""
     if isinstance(exc, ExecutionFailure):
@@ -69,6 +70,7 @@ def classify_provider_failure(
             exc,
             read_timeout_s=read_timeout_s,
             mark_rate_limited=mark_rate_limited,
+            cooldown_seconds=cooldown_seconds,
         )
     message = format_execution_failure_message(
         failure,
@@ -214,7 +216,9 @@ def provider_error_message(
     return safe_exception_message(exc)
 
 
-def rate_limit_cooldown_seconds(exc: BaseException) -> float:
+def rate_limit_cooldown_seconds(
+    exc: BaseException, default_seconds: float = DEFAULT_RATE_LIMIT_COOLDOWN_SECONDS
+) -> float:
     """How long the upstream says to wait, or a conservative default.
 
     Guessing a fixed minute either wastes a credential that resets in one
@@ -224,7 +228,7 @@ def rate_limit_cooldown_seconds(exc: BaseException) -> float:
     response = getattr(exc, "response", None)
     seconds = retry_after_seconds(getattr(response, "headers", None))
     if seconds is None:
-        return DEFAULT_RATE_LIMIT_COOLDOWN_SECONDS
+        return default_seconds
     return min(seconds, MAX_RATE_LIMIT_COOLDOWN_SECONDS)
 
 
@@ -233,16 +237,17 @@ def _classify_provider_failure(
     *,
     read_timeout_s: float | None,
     mark_rate_limited: MarkRateLimited,
+    cooldown_seconds: float = DEFAULT_RATE_LIMIT_COOLDOWN_SECONDS,
 ) -> ExecutionFailure:
     if isinstance(exc, ExecutionFailure):
         if exc.kind == FailureKind.RATE_LIMIT:
-            mark_rate_limited(rate_limit_cooldown_seconds(exc))
+            mark_rate_limited(rate_limit_cooldown_seconds(exc, cooldown_seconds))
         return exc
 
     if isinstance(exc, openai.AuthenticationError):
         return _failure(FailureKind.AUTHENTICATION, 401, _AUTHENTICATION_MESSAGE, False)
     if isinstance(exc, openai.RateLimitError):
-        mark_rate_limited(rate_limit_cooldown_seconds(exc))
+        mark_rate_limited(rate_limit_cooldown_seconds(exc, cooldown_seconds))
         return _failure(FailureKind.RATE_LIMIT, 429, _RATE_LIMIT_MESSAGE, True)
     if isinstance(exc, openai.BadRequestError):
         return _failure(
@@ -267,7 +272,7 @@ def _classify_provider_failure(
     if isinstance(exc, openai.APIError):
         status = retryable_transient_status(exc)
         if status == 429:
-            mark_rate_limited(rate_limit_cooldown_seconds(exc))
+            mark_rate_limited(rate_limit_cooldown_seconds(exc, cooldown_seconds))
             return _failure(FailureKind.RATE_LIMIT, 429, _RATE_LIMIT_MESSAGE, True)
         if is_transient_overload_error(exc):
             return overloaded_provider_failure()
@@ -288,7 +293,7 @@ def _classify_provider_failure(
                 FailureKind.AUTHENTICATION, 401, _AUTHENTICATION_MESSAGE, False
             )
         if status == 429:
-            mark_rate_limited(rate_limit_cooldown_seconds(exc))
+            mark_rate_limited(rate_limit_cooldown_seconds(exc, cooldown_seconds))
             return _failure(FailureKind.RATE_LIMIT, 429, _RATE_LIMIT_MESSAGE, True)
         if status == 400:
             return _failure(

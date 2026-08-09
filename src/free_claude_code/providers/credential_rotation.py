@@ -121,7 +121,13 @@ class KeyHealth:
 class CredentialRotationState:
     """Pick which credential serves each request under a rotation policy."""
 
-    def __init__(self, key_count: int, policy: str = "single") -> None:
+    def __init__(
+        self,
+        key_count: int,
+        policy: str = "single",
+        circuit_open_threshold: int = CIRCUIT_OPEN_THRESHOLD,
+    ) -> None:
+        self._circuit_open_threshold = max(1, circuit_open_threshold)
         if key_count <= 0:
             raise ValueError("key_count must be > 0")
         if policy == "on_error":
@@ -289,7 +295,7 @@ class CredentialRotationState:
                 health.cooldown_until = now + COOLDOWN_TIERS_SECONDS[health.tier - 1]
                 health.state = (
                     STATE_CIRCUIT_OPEN
-                    if health.consecutive_failures >= CIRCUIT_OPEN_THRESHOLD
+                    if health.consecutive_failures >= self._circuit_open_threshold
                     else STATE_COOLDOWN
                 )
         return rotate

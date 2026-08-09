@@ -38,7 +38,11 @@ class PreparedAdminUpdate:
         return {
             "valid": self.valid,
             "errors": list(self.errors),
-            "env_preview": render_env_file(self.target_values, mask_secrets=True),
+            "env_preview": render_env_file(
+                self.target_values,
+                mask_secrets=True,
+                preserved=unmanaged_env_values(),
+            ),
         }
 
     def applied_response(self) -> dict[str, Any]:
@@ -54,6 +58,7 @@ class PreparedAdminUpdate:
             "env_preview": render_env_file(
                 self.target_values,
                 mask_secrets=True,
+                preserved=unmanaged_env_values(),
             ),
             "path": str(self.path),
             "pending_fields": list(self.pending_fields),
@@ -176,7 +181,10 @@ def commit_prepared_admin_update(prepared: PreparedAdminUpdate) -> dict[str, Any
     temp_path = path.with_suffix(path.suffix + ".tmp")
     try:
         temp_path.write_text(
-            render_env_file(prepared.target_values),
+            render_env_file(
+                prepared.target_values,
+                preserved=unmanaged_env_values(path),
+            ),
             encoding="utf-8",
         )
         os.replace(temp_path, path)
@@ -198,8 +206,51 @@ def quote_env_value(value: str) -> str:
     return value
 
 
-def render_env_file(values: Mapping[str, str], *, mask_secrets: bool = False) -> str:
-    """Render a complete grouped env file."""
+def settings_env_aliases() -> frozenset[str]:
+    """Env names Settings still reads.
+
+    A key that configures nothing is stale -- a provider option that became
+    fixed, say -- and rewriting it forever would be its own kind of wrong. A key
+    that Settings still reads but no admin field shows is the opposite: live
+    configuration this UI simply does not offer, and deleting it loses a setting
+    the user chose.
+    """
+
+    return frozenset(
+        str(field.validation_alias) if field.validation_alias else name.upper()
+        for name, field in Settings.model_fields.items()
+    )
+
+
+def unmanaged_env_values(path: Path | None = None) -> dict[str, str]:
+    """Return entries in the managed env file that no admin field owns.
+
+    The file is rendered from the manifest, so anything the manifest does not
+    know about used to disappear the next time anyone pressed Save -- silently,
+    and including hand-written operational settings. Reading them back means a
+    save can only change what the UI actually showed.
+    """
+
+    existing = dotenv_values_from_file(path or managed_env_path())
+    managed = {field.key for field in FIELDS}
+    return {
+        key: value
+        for key, value in existing.items()
+        if key not in managed and value is not None and key in settings_env_aliases()
+    }
+
+
+def render_env_file(
+    values: Mapping[str, str],
+    *,
+    mask_secrets: bool = False,
+    preserved: Mapping[str, str] | None = None,
+) -> str:
+    """Render a complete grouped env file.
+
+    ``preserved`` carries entries this UI does not manage. They are written back
+    verbatim so saving a form cannot delete a setting the form never showed.
+    """
 
     lines: list[str] = [
         "# Managed by Free Claude Code /admin.",
@@ -219,5 +270,12 @@ def render_env_file(values: Mapping[str, str], *, mask_secrets: bool = False) ->
             if mask_secrets and field.secret and value:
                 value = MASKED_SECRET
             lines.append(f"{field.key}={quote_env_value(value)}")
+        lines.append("")
+
+    if preserved:
+        lines.append("# Not shown in the admin UI, kept exactly as written.")
+        lines.extend(
+            f"{key}={quote_env_value(preserved[key])}" for key in sorted(preserved)
+        )
         lines.append("")
     return "\n".join(lines).rstrip() + "\n"
