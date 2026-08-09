@@ -124,6 +124,8 @@ def load_config_response() -> dict[str, Any]:
                     for option in field.options
                 ],
                 "description": field.description,
+                "minimum": field.minimum,
+                "maximum": field.maximum,
             }
         )
 

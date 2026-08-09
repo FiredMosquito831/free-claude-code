@@ -5,6 +5,7 @@ from typing import Any
 
 from pydantic import ValidationError
 
+from free_claude_code.config.limits import describe_range, range_for
 from free_claude_code.config.settings import Settings
 
 from .manifest import FIELDS, field_input_key
@@ -29,10 +30,36 @@ def settings_from_values(
             continue
         kwargs[input_key] = values.get(field.key, "")
 
+    out_of_range = range_errors(values)
+    if out_of_range:
+        # Report the range rather than letting Settings clamp: a form that
+        # silently changes what was typed teaches the user nothing.
+        return None, out_of_range
+
     try:
         return Settings(**kwargs), []
     except ValidationError as exc:
         return None, format_validation_errors(exc)
+
+
+def range_errors(values: Mapping[str, str]) -> list[str]:
+    """Return one message per numeric field set outside its usable range."""
+
+    errors: list[str] = []
+    for field in FIELDS:
+        limit = range_for(field.settings_attr)
+        if limit is None:
+            continue
+        raw = str(values.get(field.key, "")).strip()
+        if not raw:
+            continue
+        try:
+            number = float(raw)
+        except ValueError:
+            continue
+        if not limit.contains(number):
+            errors.append(f"{field.key}: accepts {describe_range(limit)}.")
+    return errors
 
 
 def format_validation_errors(exc: ValidationError) -> list[str]:

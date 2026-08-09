@@ -3,6 +3,7 @@
 from functools import lru_cache
 from typing import Any
 
+from loguru import logger
 from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -28,6 +29,7 @@ from .env_files import (
     env_file_override,
     settings_env_files,
 )
+from .limits import LIMIT_RANGES
 from .model_refs import format_model_ref_list, parse_model_ref_list
 from .nim import NimSettings
 from .paths import chatgpt_oauth_auth_path
@@ -773,6 +775,45 @@ class Settings(BaseSettings):
         for model_ref in model_refs:
             _require_provider_prefixed_model_ref(model_ref)
         return format_model_ref_list(model_refs)
+
+    @field_validator(*LIMIT_RANGES, mode="before")
+    @classmethod
+    def blank_limit_falls_back_to_its_default(cls, value: object, info: Any) -> object:
+        """Treat an empty value as "not set" rather than as a broken number.
+
+        The admin UI writes ``KEY=`` for a cleared field and a hand-edited file
+        can hold the same thing. Refusing to parse it stopped the server from
+        starting over a setting the user was trying to stop specifying.
+        """
+        if isinstance(value, str) and not value.strip():
+            return cls.model_fields[info.field_name].default
+        return value
+
+    @model_validator(mode="after")
+    def keep_limits_inside_their_usable_range(self) -> Settings:
+        """Clamp a limit rather than refuse to start.
+
+        A value outside its range is always a mistake, but the two ways to
+        answer a mistake are not equal: the admin UI rejects it up front with
+        the range quoted, while a file edited by hand is only discovered at
+        boot -- and a proxy that will not start is worse than one running with
+        a sane number and a warning saying so.
+        """
+        for attr, limit in LIMIT_RANGES.items():
+            value = getattr(self, attr)
+            clamped = limit.clamp(value)
+            if clamped == value:
+                continue
+            coerced = type(value)(clamped)
+            logger.warning(
+                "{} is outside its usable range ({} to {}); using {}",
+                attr.upper(),
+                limit.minimum,
+                limit.maximum,
+                coerced,
+            )
+            setattr(self, attr, coerced)
+        return self
 
     @model_validator(mode="after")
     def reference_managed_chatgpt_oauth_credentials(self) -> Settings:

@@ -1525,6 +1525,17 @@ function inputForField(field) {
 
   const input = document.createElement("input");
   input.type = field.type === "number" ? "number" : "text";
+  // Bounds come from the server so the browser refuses a value the server
+  // would only clamp afterwards; a form that silently changes what was typed
+  // teaches nobody anything.
+  if (field.type === "number") {
+    if (field.minimum !== null && field.minimum !== undefined) {
+      input.min = String(field.minimum);
+    }
+    if (field.maximum !== null && field.maximum !== undefined) {
+      input.max = String(field.maximum);
+    }
+  }
   if (field.type === "secret") {
     input.type = "password";
     input.placeholder = field.configured
