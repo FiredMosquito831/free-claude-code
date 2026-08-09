@@ -575,12 +575,27 @@ Two things worth knowing about it:
 - Upgrading seeds it from whatever history is still retained. Rows pruned before the upgrade are gone and cannot be recovered, so the two figures start out equal and diverge from then on.
 - **Clear log** erases it too. It is an explicit "erase my history" action, and reporting millions of all-time requests over an empty table would read as a bug.
 
-Sizing the cap is a disk decision, because captured bodies dominate — around 30 KB per row, so 50,000 rows is roughly 1.7 GB. `REQUEST_LOG_CAPTURE_BODIES=false` buys far more history per gigabyte, at the cost of the drill-down.
+#### Sizing the cap
+
+Bodies are **99% of the stored bytes** — about 30 KB of text per row against 332 bytes of metadata — so retention is really a disk decision.
+
+They are therefore stored zstd-compressed in a side table, against a dictionary trained on your own traffic. That dictionary is what does the work: consecutive requests repeat a near-identical system prompt and conversation history, and per-row compression cannot see across rows. Replaying 4,000 real requests through both paths:
+
+| | database | per row |
+| --- | --- | --- |
+| Inline text | 168.5 MB | 41.1 KB |
+| Compressed | **28.2 MB** | **6.9 KB** |
+
+Roughly **6× more retention for the same disk**. A body costs ~24 µs to read back, and search still matches inside compressed text.
 
 ```bash
 REQUEST_LOG_ENABLED=true
-REQUEST_LOG_MAX_ROWS=50000        # oldest rows pruned beyond this
+REQUEST_LOG_MAX_ROWS=50000         # oldest rows pruned beyond this
+REQUEST_LOG_COMPRESS_BODIES=true   # false stores text inline, as before
+REQUEST_LOG_CAPTURE_BODIES=true    # false drops text entirely, ~77x more rows/GB
 ```
+
+Two things not to worry about: the dictionary trains itself once the log has seen a few hundred requests, and each blob records which dictionary compressed it, so retraining never orphans an older row. Nothing migrates either — rows written before the upgrade keep their inline text and are read from there until retention drains them.
 
 #### No traffic, or no server?
 

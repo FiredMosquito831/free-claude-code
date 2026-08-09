@@ -690,7 +690,24 @@ REQUEST_LOG_CAPTURE_BODIES=true   # false stores only body lengths + SHA-256 has
 
 `REQUEST_LOG_MAX_ROWS` is a hard cap on **stored rows**, and it has a consequence worth stating plainly: once the table is full, one row is deleted for every row that arrives. Every figure computed from those rows — total requests, token sums, the per-model breakdown — is therefore a **rolling window**, and at the cap it stops rising no matter how much traffic runs. Analytics says so explicitly when the cap is reached rather than leaving the plateau to look like a broken counter.
 
-Sizing it is really a disk decision, because captured bodies dominate: at roughly 30 KB of request and response text per row, 50,000 rows is about 1.7 GB. Raising the cap raises the disk cost about linearly. Setting `REQUEST_LOG_CAPTURE_BODIES=false` buys far more history per gigabyte, at the cost of the request/response drill-down.
+Sizing it is really a disk decision, because captured bodies dominate: they are **99% of the stored bytes**, at roughly 30 KB of request and response text against 332 bytes of metadata per row.
+
+So FCC compresses them. Request and response text is stored zstd-compressed in a side table rather than inline, against a dictionary trained on your own traffic — which matters because consecutive requests repeat a near-identical system prompt and conversation history, redundancy that per-row compression cannot see. Measured by replaying 4,000 real requests through both paths:
+
+| | database size | per row |
+| --- | --- | --- |
+| Inline text | 168.5 MB | 41.1 KB |
+| Compressed | **28.2 MB** | **6.9 KB** |
+
+**6× smaller for identical content** — about 8× on the text itself, the rest being metadata, indexes and page overhead. So the same disk buys roughly six times the retention. Reading a body back costs ~24 microseconds, and search still reaches inside compressed text.
+
+```bash
+REQUEST_LOG_COMPRESS_BODIES=true   # false stores text inline, as before
+```
+
+The dictionary is trained automatically once the log has seen a few hundred requests, and every blob records which dictionary compressed it, so retraining can never make an older row unreadable. Nothing migrates: rows written before you upgraded keep their inline text and are read from there until retention drains them.
+
+Setting `REQUEST_LOG_CAPTURE_BODIES=false` remains the extreme option — metadata only, roughly 77× more rows per gigabyte, at the cost of the request/response drill-down.
 
 **All time** is a separate, permanent rollup — one small row per day, provider and model, incremented as requests complete and never pruned. It keeps counting after stored rows begin rolling over, so per-model request counts and token usage remain true however far the window has slid. It costs a few hundred KB and ignores the filter row and time range by design. Upgrading seeds it from whatever history retention has not yet eaten; rows already pruned are gone and cannot be recovered. **Clear log** erases it along with everything else.
 

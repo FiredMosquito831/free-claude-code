@@ -9,6 +9,7 @@ import threading
 import time
 from collections import OrderedDict
 from collections.abc import Iterator
+from compression import zstd
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -30,6 +31,10 @@ _WRITER_BATCH_SIZE = 50
 _WRITER_POLL_SECONDS = 0.25
 _QUEUE_MAX_SIZE = 10_000
 _STOP = object()
+# Shutdown budget for draining the queue. Compressing a full batch is real CPU
+# work, so this is a floor that grows with whatever is still queued.
+_CLOSE_TIMEOUT_SECONDS = 10.0
+_CLOSE_SECONDS_PER_RECORD = 0.01
 _STATS_CACHE_TTL_SECONDS = 5.0
 # Bounds the stats cache to the most recently used filter combinations. Without
 # this, every distinct filter tuple a user tries leaks an entry holding a full
@@ -170,6 +175,51 @@ CREATE TABLE IF NOT EXISTS request_log_meta (
 );
 """
 
+# Request and response text, moved out of ``requests`` and compressed.
+#
+# Bodies are 99% of the bytes on a real database: 30.7 KB a row against 332
+# bytes of metadata. Two things follow. They belong in their own table, because
+# a row larger than a page spills into a chain of overflow pages that every
+# table scan then has to walk. And they compress extremely well, because
+# consecutive requests repeat a near-identical system prompt and conversation
+# history -- 2.7x compressed individually, 9x against a dictionary trained on
+# the traffic itself.
+#
+# Nothing migrates. Rows written by an older version keep their text in the
+# ``requests`` columns and are read from there; retention drains them within a
+# few days of ordinary traffic.
+_BODIES_SCHEMA = """
+CREATE TABLE IF NOT EXISTS request_bodies (
+    request_id TEXT PRIMARY KEY,
+    dict_id INTEGER,
+    payload BLOB NOT NULL
+);
+CREATE TABLE IF NOT EXISTS body_dictionaries (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at REAL NOT NULL,
+    content BLOB NOT NULL
+);
+"""
+
+# Keys inside the packed payload. Short because they repeat in every blob.
+_BODY_FIELDS = (
+    ("i", "input_text"),
+    ("o", "output_text"),
+    ("t", "thinking_text"),
+    ("c", "tool_calls"),
+)
+
+# Level 9 is the knee: 19 buys about 5% more ratio for 11x the CPU (1.8 MB/s
+# against 20 MB/s measured on real bodies).
+_BODY_COMPRESSION_LEVEL = 9
+# 110 KB is where the dictionary stops paying: 16 KB gives 4.3x, 110 KB gives
+# 9.9x, 512 KB gives 10.0x.
+_BODY_DICT_SIZE = 110 * 1024
+# Below this there is not enough traffic to train anything useful, so bodies are
+# compressed without a dictionary until the log has seen enough.
+_BODY_DICT_MIN_SAMPLES = 256
+_BODY_DICT_TRAINING_SAMPLES = 1_024
+
 # Aggregate columns of ``request_totals``, in the order the upsert binds them.
 _TOTALS_COUNTERS = (
     "requests",
@@ -235,6 +285,27 @@ _ADDED_COLUMNS = (
 # TABLE migration, so indexing ``key_label`` there would fail outright on a
 # database created by an earlier version.
 _ADDED_INDEXES = ("CREATE INDEX IF NOT EXISTS idx_requests_key ON requests(key_label)",)
+
+
+def pack_bodies(values: dict[str, Any]) -> bytes:
+    """Serialise the body fields of one request into a single blob."""
+    packed = {
+        short: values[name]
+        for short, name in _BODY_FIELDS
+        if values.get(name) is not None
+    }
+    return json.dumps(packed, separators=(",", ":")).encode("utf-8")
+
+
+def unpack_bodies(raw: bytes) -> dict[str, Any]:
+    """Inverse of :func:`pack_bodies`, tolerant of a corrupt or truncated blob."""
+    try:
+        packed = json.loads(raw.decode("utf-8"))
+    except UnicodeDecodeError, json.JSONDecodeError:
+        return {}
+    if not isinstance(packed, dict):
+        return {}
+    return {name: packed.get(short) for short, name in _BODY_FIELDS}
 
 
 def default_request_log_path() -> Path:
@@ -320,9 +391,21 @@ class RequestRecord:
 class RequestLogStore:
     """Durable per-request log drained by a single background writer thread."""
 
-    def __init__(self, db_path: Path | str, *, max_rows: int = 50_000) -> None:
+    def __init__(
+        self,
+        db_path: Path | str,
+        *,
+        max_rows: int = 50_000,
+        compress_bodies: bool = True,
+    ) -> None:
         self._db_path = Path(db_path)
         self._max_rows = max(0, max_rows)
+        self._compress_bodies = compress_bodies
+        # Dictionaries are immutable once written, so caching them by id is
+        # safe for the lifetime of the process.
+        self._dict_cache: dict[int, Any] = {}
+        self._dict_lock = threading.Lock()
+        self._active_dict_id: int | None = None
         self._queue: queue.Queue[Any] = queue.Queue(maxsize=_QUEUE_MAX_SIZE)
         self._inserts_since_prune = 0
         self._closed = threading.Event()
@@ -350,7 +433,63 @@ class RequestLogStore:
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA synchronous=NORMAL")
+        # Text search has to reach inside compressed bodies. Doing it in SQL
+        # keeps the scan in SQLite instead of pulling every blob into Python
+        # just to discard it, and costs no extra storage -- unlike an FTS index,
+        # which would give back much of what the compression saves.
+        conn.create_function(
+            "fcc_body_matches", 3, self._body_matches, deterministic=True
+        )
         return conn
+
+    # --------------------------------------------------------- body storage ---
+
+    def _dictionary(self, dict_id: int | None) -> Any:
+        """Return the cached ``ZstdDict`` for ``dict_id``, loading it if needed.
+
+        Blobs record which dictionary compressed them, so retraining later can
+        never make an existing row unreadable.
+        """
+        if dict_id is None:
+            return None
+        cached = self._dict_cache.get(dict_id)
+        if cached is not None:
+            return cached
+        with self._dict_lock:
+            cached = self._dict_cache.get(dict_id)
+            if cached is not None:
+                return cached
+            with self._connection() as conn:
+                row = conn.execute(
+                    "SELECT content FROM body_dictionaries WHERE id = ?", (dict_id,)
+                ).fetchone()
+            if row is None:
+                return None
+            loaded = zstd.ZstdDict(bytes(row[0]))
+            self._dict_cache[dict_id] = loaded
+            return loaded
+
+    def _decode_bodies(self, payload: Any, dict_id: Any) -> dict[str, Any]:
+        if payload is None:
+            return {}
+        try:
+            raw = zstd.decompress(bytes(payload), zstd_dict=self._dictionary(dict_id))
+        except (zstd.ZstdError, ValueError) as exc:
+            logger.warning("Request log body decompression failed: {}", exc)
+            return {}
+        return unpack_bodies(raw)
+
+    def _body_matches(self, payload: Any, dict_id: Any, needle: Any) -> int:
+        """SQL predicate: does this request's stored text contain ``needle``?"""
+        if payload is None or not needle:
+            return 0
+        bodies = self._decode_bodies(payload, dict_id)
+        lowered = str(needle).lower()
+        for key in ("input_text", "output_text"):
+            text = bodies.get(key)
+            if isinstance(text, str) and lowered in text.lower():
+                return 1
+        return 0
 
     @contextlib.contextmanager
     def _connection(self) -> Iterator[sqlite3.Connection]:
@@ -385,6 +524,7 @@ class RequestLogStore:
             with conn:
                 conn.executescript(_SCHEMA)
                 conn.executescript(_TOTALS_SCHEMA)
+                conn.executescript(_BODIES_SCHEMA)
                 self._ensure_added_columns(conn)
         finally:
             conn.close()
@@ -513,6 +653,67 @@ class RequestLogStore:
             time.monotonic() - started,
         )
 
+    def _load_active_dictionary(self, conn: sqlite3.Connection) -> None:
+        row = conn.execute(
+            "SELECT id FROM body_dictionaries ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+        self._active_dict_id = int(row[0]) if row is not None else None
+
+    def _maybe_train_dictionary(self, conn: sqlite3.Connection) -> None:
+        """Train a compression dictionary once there is enough traffic to learn from.
+
+        A dictionary is what turns 2.7x into 9x, because it can exploit the
+        system prompt and conversation history that repeat almost verbatim
+        between requests -- redundancy that per-row compression cannot see.
+        Until one exists, bodies are still compressed, just less well.
+        """
+        if not self._compress_bodies or self._active_dict_id is not None:
+            return
+        try:
+            rows = conn.execute(
+                "SELECT dict_id, payload FROM request_bodies"
+                " ORDER BY rowid DESC LIMIT ?",
+                (_BODY_DICT_TRAINING_SAMPLES,),
+            ).fetchall()
+            if len(rows) < _BODY_DICT_MIN_SAMPLES:
+                return
+            samples = [
+                packed
+                for packed in (
+                    self._raw_payload(row["payload"], row["dict_id"]) for row in rows
+                )
+                if packed
+            ]
+            if len(samples) < _BODY_DICT_MIN_SAMPLES:
+                return
+            started = time.monotonic()
+            trained = zstd.train_dict(samples, _BODY_DICT_SIZE)
+            with conn:
+                cursor = conn.execute(
+                    "INSERT INTO body_dictionaries (created_at, content) VALUES (?, ?)",
+                    (time.time(), trained.dict_content),
+                )
+            dict_id = int(cursor.lastrowid or 0)
+            if not dict_id:
+                return
+            self._dict_cache[dict_id] = trained
+            self._active_dict_id = dict_id
+            logger.info(
+                "Request log body dictionary trained from {} samples in {:.1f}s",
+                len(samples),
+                time.monotonic() - started,
+            )
+        except (sqlite3.Error, zstd.ZstdError) as exc:
+            logger.warning("Request log dictionary training skipped: {}", exc)
+
+    def _raw_payload(self, payload: Any, dict_id: Any) -> bytes | None:
+        if payload is None:
+            return None
+        try:
+            return zstd.decompress(bytes(payload), zstd_dict=self._dictionary(dict_id))
+        except zstd.ZstdError, ValueError:
+            return None
+
     def _open_session(self, conn: sqlite3.Connection) -> int | None:
         """Record that a server is running, so quiet periods stay explainable."""
         now = time.time()
@@ -578,6 +779,8 @@ class RequestLogStore:
             # otherwise both count any request written in between.
             self._ensure_totals_backfill(conn)
             self._ensure_auto_vacuum(conn)
+            self._load_active_dictionary(conn)
+            self._maybe_train_dictionary(conn)
             session_id = self._open_session(conn)
             last_heartbeat = time.monotonic()
             while not stopping:
@@ -667,8 +870,33 @@ class RequestLogStore:
             [(*key, *counters) for key, counters in buckets.items()],
         )
 
+    def _encode_bodies(self, record: RequestRecord) -> tuple[int | None, bytes] | None:
+        """Compress one record's text, or ``None`` when it has none."""
+        packed = pack_bodies(
+            {
+                "input_text": cap_text(record.input_text),
+                "output_text": cap_text(record.output_text),
+                "thinking_text": cap_text(record.thinking_text),
+                "tool_calls": record.tool_calls,
+            }
+        )
+        if packed == b"{}":
+            return None
+        dict_id = self._active_dict_id
+        return dict_id, zstd.compress(
+            packed,
+            level=_BODY_COMPRESSION_LEVEL,
+            zstd_dict=self._dictionary(dict_id),
+        )
+
     def _flush(self, batch: list[RequestRecord], conn: sqlite3.Connection) -> None:
         rows = [self._record_to_row(record) for record in batch]
+        bodies: list[tuple[str, int | None, bytes]] = []
+        if self._compress_bodies:
+            for record in batch:
+                encoded = self._encode_bodies(record)
+                if encoded is not None:
+                    bodies.append((record.id, encoded[0], encoded[1]))
         try:
             with conn:
                 already_stored = self._existing_ids(
@@ -691,6 +919,12 @@ class RequestLogStore:
                     """,
                     rows,
                 )
+                if bodies:
+                    conn.executemany(
+                        "INSERT OR REPLACE INTO request_bodies"
+                        " (request_id, dict_id, payload) VALUES (?, ?, ?)",
+                        bodies,
+                    )
                 self._accumulate_totals(
                     conn,
                     [record for record in batch if record.id not in already_stored],
@@ -702,9 +936,19 @@ class RequestLogStore:
         if self._inserts_since_prune >= _PRUNE_EVERY_INSERTS:
             self._inserts_since_prune = 0
             self.prune()
+            # Cheap no-op once a dictionary exists; this lets a fresh install
+            # start compressing properly without waiting for a restart.
+            self._maybe_train_dictionary(conn)
 
-    @staticmethod
-    def _record_to_row(record: RequestRecord) -> tuple[Any, ...]:
+    def _record_to_row(self, record: RequestRecord) -> tuple[Any, ...]:
+        # With compression on, the text lives in ``request_bodies`` and these
+        # columns stay NULL. Reads fall back to them so rows written by an
+        # older version keep working until retention drains them.
+        inline = not self._compress_bodies
+
+        def body(text: str | None) -> str | None:
+            return cap_text(text) if inline else None
+
         return (
             record.id,
             record.ts_epoch,
@@ -715,8 +959,8 @@ class RequestLogStore:
             record.provider,
             record.resolved_model,
             int(record.stream),
-            cap_text(record.input_text),
-            cap_text(record.output_text),
+            body(record.input_text),
+            body(record.output_text),
             record.input_sha256,
             record.output_sha256,
             record.input_chars,
@@ -735,9 +979,9 @@ class RequestLogStore:
             json.dumps(record.headers) if record.headers else None,
             record.key_index,
             record.key_label,
-            cap_text(record.thinking_text),
+            body(record.thinking_text),
             record.thinking_chars,
-            json.dumps(record.tool_calls) if record.tool_calls else None,
+            json.dumps(record.tool_calls) if inline and record.tool_calls else None,
             record.tool_call_count,
             record.route_attempt,
             record.route_primary_model,
@@ -746,8 +990,16 @@ class RequestLogStore:
             record.route_diversion,
         )
 
-    def close(self, *, timeout: float = 5.0) -> None:
-        """Stop the writer thread after flushing queued records."""
+    def close(self, *, timeout: float = _CLOSE_TIMEOUT_SECONDS) -> None:
+        """Stop the writer thread after flushing queued records.
+
+        The wait scales with the backlog. A fixed deadline silently discarded
+        whatever was still queued, and compressing bodies made that far easier
+        to hit: a full batch is real CPU work, so a deep queue can need tens of
+        seconds to drain and the writer is a daemon thread that dies with the
+        interpreter. Anything genuinely abandoned is reported rather than lost
+        quietly.
+        """
         if self._closed.is_set():
             return
         self._closed.set()
@@ -756,7 +1008,17 @@ class RequestLogStore:
         except queue.Full:
             with contextlib.suppress(queue.Full):
                 self._queue.put(_STOP, timeout=timeout)
-        self._writer.join(timeout=timeout)
+        deadline = time.monotonic() + max(
+            timeout, self._queue.qsize() * _CLOSE_SECONDS_PER_RECORD
+        )
+        while self._writer.is_alive() and time.monotonic() < deadline:
+            self._writer.join(timeout=0.5)
+        remaining = self._queue.qsize()
+        if self._writer.is_alive() and remaining:
+            logger.warning(
+                "Request log writer still draining at shutdown; {} records unwritten",
+                remaining,
+            )
 
     # ------------------------------------------------------------------ reads
 
@@ -796,9 +1058,16 @@ class RequestLogStore:
             clauses.append("ts_epoch <= ?")
             args.append(until)
         if q:
-            clauses.append("(input_text LIKE ? OR output_text LIKE ?)")
+            # Legacy inline text and compressed bodies coexist, so search has to
+            # cover both. The correlated subquery keeps this self-contained: no
+            # caller of ``_where`` needs to know about the second table.
+            clauses.append(
+                "(input_text LIKE ? OR output_text LIKE ? OR EXISTS ("
+                " SELECT 1 FROM request_bodies b WHERE b.request_id = requests.id"
+                " AND fcc_body_matches(b.payload, b.dict_id, ?)))"
+            )
             pattern = f"%{q}%"
-            args.extend([pattern, pattern])
+            args.extend([pattern, pattern, q])
         where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
         return where, args
 
@@ -852,9 +1121,15 @@ class RequestLogStore:
                 " ORDER BY ts_epoch DESC LIMIT ? OFFSET ?",
                 [*body_args, *args, limit, offset],
             )
+            raw_rows = cursor.fetchall()
+            bodies = self._fetch_bodies(conn, [str(row["id"]) for row in raw_rows])
             rows = [
-                self._row_to_dict(row, body_preview_chars=body_preview_chars)
-                for row in cursor.fetchall()
+                self._row_to_dict(
+                    row,
+                    body_preview_chars=body_preview_chars,
+                    bodies=bodies.get(str(row["id"])),
+                )
+                for row in raw_rows
             ]
         return rows, total
 
@@ -862,16 +1137,59 @@ class RequestLogStore:
         with self._connection() as conn:
             cursor = conn.execute("SELECT * FROM requests WHERE id = ?", (request_id,))
             row = cursor.fetchone()
-        if row is None:
-            return None
-        return self._row_to_dict(row, body_preview_chars=None)
+            if row is None:
+                return None
+            bodies = self._fetch_bodies(conn, [request_id])
+        return self._row_to_dict(
+            row, body_preview_chars=None, bodies=bodies.get(request_id)
+        )
+
+    def _fetch_bodies(
+        self, conn: sqlite3.Connection, ids: list[str]
+    ) -> dict[str, dict[str, Any]]:
+        """Decompress the stored text for one page of rows.
+
+        Looked up by id rather than joined: the page is at most a few hundred
+        rows, and a join would let SQLite decide to decompress far more of the
+        table than the page actually needs.
+        """
+        if not ids or not self._compress_bodies:
+            return {}
+        placeholders = ", ".join("?" * len(ids))
+        found = conn.execute(
+            "SELECT request_id, dict_id, payload FROM request_bodies"
+            f" WHERE request_id IN ({placeholders})",
+            ids,
+        ).fetchall()
+        return {
+            str(row["request_id"]): self._decode_bodies(row["payload"], row["dict_id"])
+            for row in found
+        }
 
     @staticmethod
     def _row_to_dict(
-        row: sqlite3.Row, *, body_preview_chars: int | None
+        row: sqlite3.Row,
+        *,
+        body_preview_chars: int | None,
+        bodies: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         data = dict(row)
         data["stream"] = bool(data["stream"])
+        if bodies:
+            # Only fill columns this query actually projected: list views carry
+            # ``thinking_chars`` instead of ``thinking_text`` and must keep
+            # their shape.
+            for key in ("input_text", "output_text", "thinking_text"):
+                if key not in data:
+                    continue
+                value = bodies.get(key)
+                if value is not None:
+                    data[key] = value
+                    # The SQL-side length belongs to the (now empty) column;
+                    # truncation is recomputed from the real text below.
+                    data.pop(f"{key}_length", None)
+            if "tool_calls" in data and bodies.get("tool_calls") is not None:
+                data["tool_calls"] = bodies["tool_calls"]
         # ``thinking_text`` is only projected by the detail query; list views
         # carry ``thinking_chars`` instead, so skip whatever is absent.
         body_keys = [
@@ -1255,6 +1573,14 @@ class RequestLogStore:
                     (self._max_rows,),
                 )
                 removed = cursor.rowcount
+                # Bodies are keyed by request id with no cascade configured, so
+                # they would otherwise outlive the rows that reference them and
+                # keep the file growing forever.
+                conn.execute(
+                    "DELETE FROM request_bodies WHERE NOT EXISTS ("
+                    " SELECT 1 FROM requests WHERE requests.id ="
+                    " request_bodies.request_id)"
+                )
             if removed:
                 # Return the freed pages to the filesystem instead of leaving
                 # them on the freelist, where they would grow the file forever.
@@ -1279,6 +1605,7 @@ class RequestLogStore:
         with self._connection() as conn:
             cursor = conn.execute("DELETE FROM requests")
             conn.execute("DELETE FROM request_totals")
+            conn.execute("DELETE FROM request_bodies")
             return cursor.rowcount
 
     def lifetime(self) -> dict[str, Any]:
@@ -1402,6 +1729,7 @@ def get_request_log_store(
     *,
     max_rows: int = 50_000,
     enabled: bool = True,
+    compress_bodies: bool = True,
 ) -> RequestLogStore | None:
     """Return the shared store for a database path, creating it on first use."""
     if not enabled:
@@ -1410,7 +1738,9 @@ def get_request_log_store(
     with _store_lock:
         store = _stores.get(path)
         if store is None or store._closed.is_set():
-            store = RequestLogStore(path, max_rows=max_rows)
+            store = RequestLogStore(
+                path, max_rows=max_rows, compress_bodies=compress_bodies
+            )
             _stores[path] = store
         return store
 
@@ -1430,4 +1760,5 @@ def store_from_settings(settings: Any) -> RequestLogStore | None:
         return None
     return get_request_log_store(
         max_rows=int(getattr(settings, "request_log_max_rows", 50_000) or 50_000),
+        compress_bodies=bool(getattr(settings, "request_log_compress_bodies", True)),
     )
