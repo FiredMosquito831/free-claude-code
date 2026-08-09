@@ -190,12 +190,10 @@ CREATE TABLE IF NOT EXISTS request_log_meta (
 # and are read from there. ``compact_request_log`` converts them in place; until
 # it runs, or retention drains them, both forms coexist.
 #
-# Bodies are content-addressed, which is not an optimisation detail but the
-# single largest saving available: 62.7% of request inputs on a real log are
-# byte-identical repeats of something already stored, because a retry or a
-# parallel subagent re-sends the same context. Storing each distinct body once
-# removes that duplication before compression even runs -- and lets a repeat
-# skip compression entirely, which is why writes got faster rather than slower.
+# Bodies are content-addressed: identical content is stored once and shared, and
+# a repeat skips compression entirely. Keyed on the whole body that is nearly
+# worthless -- 1.4% on a real log, because two requests sharing a prompt still
+# differ in their reply -- which is why the prompt is stored separately below.
 _BODIES_SCHEMA = """
 CREATE TABLE IF NOT EXISTS body_blobs (
     sha TEXT PRIMARY KEY,
@@ -204,7 +202,8 @@ CREATE TABLE IF NOT EXISTS body_blobs (
 );
 CREATE TABLE IF NOT EXISTS request_bodies (
     request_id TEXT PRIMARY KEY,
-    sha TEXT NOT NULL
+    sha TEXT,
+    input_sha TEXT
 );
 CREATE TABLE IF NOT EXISTS body_dictionaries (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -214,12 +213,19 @@ CREATE TABLE IF NOT EXISTS body_dictionaries (
 """
 
 # Keys inside the packed payload. Short because they repeat in every blob.
-_BODY_FIELDS = (
-    ("i", "input_text"),
+#
+# The prompt is stored in its own blob, apart from the reply, the reasoning and
+# the tool calls. It is 98% of the bytes and 35.3% of those bytes are exact
+# repeats -- a retry or a parallel subagent re-sends the same context, while the
+# reply that came back differs every time. Keeping them together meant a body
+# only deduplicated when *everything* matched, which measured 1.4%.
+_INPUT_FIELDS = (("i", "input_text"),)
+_REST_FIELDS = (
     ("o", "output_text"),
     ("t", "thinking_text"),
     ("c", "tool_calls"),
 )
+_BODY_FIELDS = _INPUT_FIELDS + _REST_FIELDS
 
 # Level 9 is the knee: 19 buys about 5% more ratio for 11x the CPU (1.8 MB/s
 # against 20 MB/s measured on real bodies).
@@ -305,14 +311,17 @@ _ADDED_COLUMNS = (
 _ADDED_INDEXES = ("CREATE INDEX IF NOT EXISTS idx_requests_key ON requests(key_label)",)
 
 
-def pack_bodies(values: dict[str, Any]) -> bytes:
-    """Serialise the body fields of one request into a single blob."""
+def pack_fields(values: dict[str, Any], fields: tuple[tuple[str, str], ...]) -> bytes:
+    """Serialise the named body fields of one request into a blob."""
     packed = {
-        short: values[name]
-        for short, name in _BODY_FIELDS
-        if values.get(name) is not None
+        short: values[name] for short, name in fields if values.get(name) is not None
     }
     return json.dumps(packed, separators=(",", ":")).encode("utf-8")
+
+
+def pack_bodies(values: dict[str, Any]) -> bytes:
+    """Serialise every body field together, as a single combined blob."""
+    return pack_fields(values, _BODY_FIELDS)
 
 
 def _strings_in(value: Any) -> Iterator[str]:
@@ -343,6 +352,10 @@ def searchable_text(bodies: dict[str, Any]) -> str:
     return "\n".join(parts)
 
 
+def _packed_or_none(packed: bytes) -> bytes | None:
+    return None if packed == b"{}" else packed
+
+
 def _is_json_transparent(needle: str) -> bool:
     """True when JSON encoding leaves ``needle`` byte-identical.
 
@@ -360,7 +373,10 @@ def unpack_bodies(raw: bytes) -> dict[str, Any]:
         return {}
     if not isinstance(packed, dict):
         return {}
-    return {name: packed.get(short) for short, name in _BODY_FIELDS}
+    # Only the keys actually present: absence is what distinguishes a blob
+    # holding just the reply from an older one that also carried the prompt,
+    # which is how both layouts can be read without a version flag.
+    return {name: packed[short] for short, name in _BODY_FIELDS if short in packed}
 
 
 def default_request_log_path() -> Path:
@@ -495,6 +511,9 @@ class RequestLogStore:
         conn.create_function(
             "fcc_body_matches", 3, self._body_matches, deterministic=True
         )
+        conn.create_function(
+            "fcc_bodies_match", 5, self._bodies_match, deterministic=True
+        )
         return conn
 
     # --------------------------------------------------------- body storage ---
@@ -533,6 +552,49 @@ class RequestLogStore:
             logger.warning("Request log body decompression failed: {}", exc)
             return {}
         return unpack_bodies(raw)
+
+    def _bodies_match(
+        self,
+        rest_payload: Any,
+        rest_dict: Any,
+        input_payload: Any,
+        input_dict: Any,
+        needle: Any,
+    ) -> int:
+        """SQL predicate over a request's two blobs, considered together.
+
+        They must be considered together: a search for "proxy 8082" can have
+        one word in the prompt and the other in the reasoning, and requiring
+        every word within a single blob would silently stop finding it.
+        """
+        if not needle:
+            return 0
+        terms = str(needle).split()
+        if not terms:
+            return 0
+        raws = [
+            raw
+            for payload, dict_id in (
+                (rest_payload, rest_dict),
+                (input_payload, input_dict),
+            )
+            if payload is not None
+            and (raw := self._raw_payload(payload, dict_id)) is not None
+        ]
+        if not raws:
+            return 0
+        probes = [term.encode("utf-8", "surrogatepass").lower() for term in terms]
+        lowered = [raw.lower() for raw in raws]
+        for term, probe in zip(terms, probes, strict=True):
+            if _is_json_transparent(term) and not any(
+                probe in candidate for candidate in lowered
+            ):
+                return 0
+        merged: dict[str, Any] = {}
+        for raw in raws:
+            merged.update(unpack_bodies(raw))
+        haystack = searchable_text(merged).encode("utf-8", "surrogatepass").lower()
+        return int(all(probe in haystack for probe in probes))
 
     def _body_matches(self, payload: Any, dict_id: Any, needle: Any) -> int:
         """SQL predicate: does this request's stored content match ``needle``?
@@ -608,6 +670,8 @@ class RequestLogStore:
                 conn.executescript(_TOTALS_SCHEMA)
                 conn.executescript(_BODIES_SCHEMA)
                 self._ensure_added_columns(conn)
+                self._ensure_input_sha_column(conn)
+                self._relax_bodies_sha_constraint(conn)
                 self._ensure_bodies_index(conn)
         finally:
             conn.close()
@@ -737,6 +801,47 @@ class RequestLogStore:
         )
 
     @staticmethod
+    def _ensure_input_sha_column(conn: sqlite3.Connection) -> None:
+        """Add the prompt reference to a table created before the split.
+
+        Rows keep ``input_sha`` NULL and their existing blob keeps carrying the
+        prompt inside it, which reads correctly without any rewrite;
+        ``fcc-compact-log`` splits them when it runs.
+        """
+        columns = {
+            str(row[1]) for row in conn.execute("PRAGMA table_info(request_bodies)")
+        }
+        if "sha" in columns and "input_sha" not in columns:
+            with contextlib.suppress(sqlite3.OperationalError):
+                conn.execute("ALTER TABLE request_bodies ADD COLUMN input_sha TEXT")
+
+    @staticmethod
+    def _relax_bodies_sha_constraint(conn: sqlite3.Connection) -> None:
+        """Allow a request to have a prompt but no reply blob.
+
+        The column was declared NOT NULL before the two were separated, when
+        every request had exactly one blob. ``CREATE TABLE IF NOT EXISTS`` will
+        not revise that, and SQLite cannot drop a column constraint in place,
+        so the table is rebuilt -- three short columns, cheap even at 500,000
+        rows.
+        """
+        info = {
+            str(row[1]): row
+            for row in conn.execute("PRAGMA table_info(request_bodies)")
+        }
+        sha = info.get("sha")
+        if sha is None or not sha[3] or "input_sha" not in info:
+            return
+        conn.execute("ALTER TABLE request_bodies RENAME TO request_bodies_old")
+        conn.executescript(_BODIES_SCHEMA)
+        conn.execute(
+            "INSERT INTO request_bodies (request_id, sha, input_sha)"
+            " SELECT request_id, sha, input_sha FROM request_bodies_old"
+        )
+        conn.execute("DROP TABLE request_bodies_old")
+        logger.info("Request log body table rebuilt to allow reply-less requests")
+
+    @staticmethod
     def _ensure_bodies_index(conn: sqlite3.Connection) -> None:
         """Index the blob reference, once the column it names exists.
 
@@ -750,6 +855,11 @@ class RequestLogStore:
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_request_bodies_sha"
                 " ON request_bodies(sha)"
+            )
+        if "input_sha" in columns:
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_request_bodies_input_sha"
+                " ON request_bodies(input_sha)"
             )
 
     def _migrate_bodies_to_content_addressing(self, conn: sqlite3.Connection) -> None:
@@ -781,8 +891,8 @@ class RequestLogStore:
                         (sha, row["dict_id"], row["payload"]),
                     )
                     conn.execute(
-                        "INSERT OR REPLACE INTO request_bodies (request_id, sha)"
-                        " VALUES (?, ?)",
+                        "INSERT OR REPLACE INTO request_bodies"
+                        " (request_id, sha, input_sha) VALUES (?, ?, NULL)",
                         (str(row["request_id"]), sha),
                     )
                 conn.execute("DROP TABLE request_bodies_v1")
@@ -1055,65 +1165,83 @@ class RequestLogStore:
             [(*key, *counters) for key, counters in buckets.items()],
         )
 
-    def _pack_record(self, record: RequestRecord) -> bytes | None:
-        packed = pack_bodies(
-            {
-                "input_text": cap_text(record.input_text),
-                "output_text": cap_text(record.output_text),
-                "thinking_text": cap_text(record.thinking_text),
-                "tool_calls": record.tool_calls,
-            }
+    @staticmethod
+    def _pack_record(record: RequestRecord) -> tuple[bytes | None, bytes | None]:
+        """Return this record's (prompt, everything-else) blobs."""
+        values = {
+            "input_text": cap_text(record.input_text),
+            "output_text": cap_text(record.output_text),
+            "thinking_text": cap_text(record.thinking_text),
+            "tool_calls": record.tool_calls,
+        }
+        return (
+            _packed_or_none(pack_fields(values, _INPUT_FIELDS)),
+            _packed_or_none(pack_fields(values, _REST_FIELDS)),
         )
-        return None if packed == b"{}" else packed
 
-    def _compress_packed(self, packed: bytes) -> tuple[int | None, bytes]:
+    def _compress_packed(
+        self, packed: bytes, *, level: int = _BODY_COMPRESSION_LEVEL
+    ) -> tuple[int | None, bytes]:
         dict_id = self._active_dict_id
         return dict_id, zstd.compress(
-            packed,
-            level=_BODY_COMPRESSION_LEVEL,
-            zstd_dict=self._dictionary(dict_id),
+            packed, level=level, zstd_dict=self._dictionary(dict_id)
         )
 
-    def _store_bodies(self, conn: sqlite3.Connection, packed: dict[str, bytes]) -> None:
-        """Point each request at its body, compressing only unseen content."""
+    def _store_bodies(
+        self,
+        conn: sqlite3.Connection,
+        packed: dict[str, tuple[bytes | None, bytes | None]],
+        *,
+        level: int = _BODY_COMPRESSION_LEVEL,
+    ) -> None:
+        """Point each request at its blobs, compressing only unseen content."""
         if not packed:
             return
-        digests = {
-            request_id: hashlib.sha256(blob).hexdigest()
-            for request_id, blob in packed.items()
-        }
-        wanted = set(digests.values())
-        placeholders = ", ".join("?" * len(wanted))
-        known = {
-            str(row[0])
-            for row in conn.execute(
-                f"SELECT sha FROM body_blobs WHERE sha IN ({placeholders})",
-                sorted(wanted),
-            )
-        }
-        fresh: dict[str, bytes] = {}
-        for request_id, sha in digests.items():
-            if sha not in known and sha not in fresh:
-                fresh[sha] = packed[request_id]
-        if fresh:
-            conn.executemany(
-                "INSERT OR IGNORE INTO body_blobs (sha, dict_id, payload)"
-                " VALUES (?, ?, ?)",
-                [(sha, *self._compress_packed(blob)) for sha, blob in fresh.items()],
-            )
+        mapping: list[tuple[str, str | None, str | None]] = []
+        blobs: dict[str, bytes] = {}
+        for request_id, (input_blob, rest_blob) in packed.items():
+            shas: list[str | None] = []
+            for blob in (rest_blob, input_blob):
+                if blob is None:
+                    shas.append(None)
+                    continue
+                sha = hashlib.sha256(blob).hexdigest()
+                blobs.setdefault(sha, blob)
+                shas.append(sha)
+            mapping.append((request_id, shas[0], shas[1]))
+        if blobs:
+            placeholders = ", ".join("?" * len(blobs))
+            known = {
+                str(row[0])
+                for row in conn.execute(
+                    f"SELECT sha FROM body_blobs WHERE sha IN ({placeholders})",
+                    sorted(blobs),
+                )
+            }
+            fresh = [(sha, blob) for sha, blob in blobs.items() if sha not in known]
+            if fresh:
+                conn.executemany(
+                    "INSERT OR IGNORE INTO body_blobs (sha, dict_id, payload)"
+                    " VALUES (?, ?, ?)",
+                    [
+                        (sha, *self._compress_packed(blob, level=level))
+                        for sha, blob in fresh
+                    ],
+                )
         conn.executemany(
-            "INSERT OR REPLACE INTO request_bodies (request_id, sha) VALUES (?, ?)",
-            list(digests.items()),
+            "INSERT OR REPLACE INTO request_bodies (request_id, sha, input_sha)"
+            " VALUES (?, ?, ?)",
+            mapping,
         )
 
     def _flush(self, batch: list[RequestRecord], conn: sqlite3.Connection) -> None:
         rows = [self._record_to_row(record) for record in batch]
-        packed: dict[str, bytes] = {}
+        packed: dict[str, tuple[bytes | None, bytes | None]] = {}
         if self._compress_bodies:
             for record in batch:
-                blob = self._pack_record(record)
-                if blob is not None:
-                    packed[record.id] = blob
+                blobs = self._pack_record(record)
+                if blobs != (None, None):
+                    packed[record.id] = blobs
         try:
             with conn:
                 already_stored = self._existing_ids(
@@ -1286,9 +1414,12 @@ class RequestLogStore:
                 args.extend([f"%{term}%"] * len(_SEARCHED_COLUMNS))
             clauses.append(
                 f"(({inline}) OR EXISTS ("
-                " SELECT 1 FROM request_bodies r JOIN body_blobs b ON b.sha = r.sha"
+                " SELECT 1 FROM request_bodies r"
+                " LEFT JOIN body_blobs br ON br.sha = r.sha"
+                " LEFT JOIN body_blobs bi ON bi.sha = r.input_sha"
                 " WHERE r.request_id = requests.id"
-                " AND fcc_body_matches(b.payload, b.dict_id, ?)))"
+                " AND fcc_bodies_match(br.payload, br.dict_id,"
+                " bi.payload, bi.dict_id, ?)))"
             )
             args.append(q)
         where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
@@ -1380,20 +1511,35 @@ class RequestLogStore:
             return {}
         placeholders = ", ".join("?" * len(ids))
         found = conn.execute(
-            "SELECT r.request_id, r.sha, b.dict_id, b.payload FROM request_bodies r"
-            " JOIN body_blobs b ON b.sha = r.sha"
+            "SELECT r.request_id, r.sha, r.input_sha,"
+            " br.dict_id AS rest_dict, br.payload AS rest_payload,"
+            " bi.dict_id AS input_dict, bi.payload AS input_payload"
+            " FROM request_bodies r"
+            " LEFT JOIN body_blobs br ON br.sha = r.sha"
+            " LEFT JOIN body_blobs bi ON bi.sha = r.input_sha"
             f" WHERE r.request_id IN ({placeholders})",
             ids,
         ).fetchall()
-        # Several requests share one blob after dedup, so decode each distinct
-        # body once rather than once per request that points at it.
+        # Many requests share a blob after dedup, so decode each distinct one
+        # once rather than once per request pointing at it.
         decoded: dict[str, dict[str, Any]] = {}
         result: dict[str, dict[str, Any]] = {}
         for row in found:
-            sha = str(row["sha"])
-            if sha not in decoded:
-                decoded[sha] = self._decode_bodies(row["payload"], row["dict_id"])
-            result[str(row["request_id"])] = decoded[sha]
+            merged: dict[str, Any] = {}
+            for sha, payload, dict_id in (
+                (row["sha"], row["rest_payload"], row["rest_dict"]),
+                (row["input_sha"], row["input_payload"], row["input_dict"]),
+            ):
+                if sha is None or payload is None:
+                    continue
+                key = str(sha)
+                if key not in decoded:
+                    decoded[key] = self._decode_bodies(payload, dict_id)
+                # The prompt blob is applied last so it wins, but a blob
+                # written before the split still carries its own prompt and
+                # there is no second blob to override it.
+                merged.update(decoded[key])
+            result[str(row["request_id"])] = merged
         return result
 
     @staticmethod
@@ -1816,7 +1962,7 @@ class RequestLogStore:
                 conn.execute(
                     "DELETE FROM body_blobs WHERE NOT EXISTS ("
                     " SELECT 1 FROM request_bodies WHERE request_bodies.sha ="
-                    " body_blobs.sha)"
+                    " body_blobs.sha OR request_bodies.input_sha = body_blobs.sha)"
                 )
             if removed:
                 # Return the freed pages to the filesystem instead of leaving
@@ -1993,6 +2139,11 @@ def reset_request_log_stores() -> None:
 
 
 _COMPACT_BATCH = 200
+# Compaction uses the same level as the write path. Paying once for storage
+# that lasts sounds like a reason to turn it up, but measured on real prompts
+# level 19 is only 4.9% smaller than level 9 (10.57x against 10.08x) at a ninth
+# of the speed -- about three hours instead of twenty minutes on a full log.
+_COMPACT_COMPRESSION_LEVEL = _BODY_COMPRESSION_LEVEL
 
 
 def compact_request_log(
@@ -2033,19 +2184,21 @@ def compact_request_log(
                 ).fetchall()
                 if not rows:
                     break
-                packed: dict[str, bytes] = {}
+                packed: dict[str, tuple[bytes | None, bytes | None]] = {}
                 for row in rows:
-                    blob = pack_bodies(
-                        {
-                            "input_text": row["input_text"],
-                            "output_text": row["output_text"],
-                            "thinking_text": row["thinking_text"],
-                            "tool_calls": _loads_or_none(row["tool_calls"]),
-                        }
+                    values = {
+                        "input_text": row["input_text"],
+                        "output_text": row["output_text"],
+                        "thinking_text": row["thinking_text"],
+                        "tool_calls": _loads_or_none(row["tool_calls"]),
+                    }
+                    blobs = (
+                        _packed_or_none(pack_fields(values, _INPUT_FIELDS)),
+                        _packed_or_none(pack_fields(values, _REST_FIELDS)),
                     )
-                    if blob != b"{}":
-                        packed[str(row["id"])] = blob
-                store._store_bodies(conn, packed)
+                    if blobs != (None, None):
+                        packed[str(row["id"])] = blobs
+                store._store_bodies(conn, packed, level=_COMPACT_COMPRESSION_LEVEL)
                 ids = [str(row["id"]) for row in rows]
                 placeholders = ", ".join("?" * len(ids))
                 conn.execute(
@@ -2057,6 +2210,8 @@ def compact_request_log(
             converted += len(rows)
             if progress is not None:
                 progress(converted)
+        resplit = _resplit_combined_blobs(store, progress, converted)
+        converted += resplit
     finally:
         store.close()
 
@@ -2068,6 +2223,57 @@ def compact_request_log(
         "bytes_after": after,
         "vacuumed": reclaimed,
     }
+
+
+def _resplit_combined_blobs(store: RequestLogStore, progress: Any, already: int) -> int:
+    """Split blobs that still carry the prompt alongside the reply.
+
+    Written before the prompt got its own reference, so they only ever
+    deduplicated when the whole body matched -- which almost never happens,
+    because the reply differs even when the prompt repeats.
+    """
+    done = 0
+    while True:
+        with store._connection() as conn:
+            rows = conn.execute(
+                "SELECT r.request_id, r.sha, b.dict_id, b.payload"
+                " FROM request_bodies r JOIN body_blobs b ON b.sha = r.sha"
+                " WHERE r.input_sha IS NULL LIMIT ?",
+                (_COMPACT_BATCH,),
+            ).fetchall()
+            if not rows:
+                return done
+            packed: dict[str, tuple[bytes | None, bytes | None]] = {}
+            stale: list[str] = []
+            for row in rows:
+                values = store._decode_bodies(row["payload"], row["dict_id"])
+                if not values:
+                    # Unreadable: leave it exactly as it is rather than
+                    # replacing a body with an empty one.
+                    continue
+                blobs = (
+                    _packed_or_none(pack_fields(values, _INPUT_FIELDS)),
+                    _packed_or_none(pack_fields(values, _REST_FIELDS)),
+                )
+                if blobs == (None, None):
+                    continue
+                packed[str(row["request_id"])] = blobs
+                stale.append(str(row["sha"]))
+            if not packed:
+                return done
+            store._store_bodies(conn, packed, level=_COMPACT_COMPRESSION_LEVEL)
+            # Drop combined blobs nothing points at any more.
+            placeholders = ", ".join("?" * len(stale))
+            conn.execute(
+                f"DELETE FROM body_blobs WHERE sha IN ({placeholders})"
+                " AND NOT EXISTS (SELECT 1 FROM request_bodies WHERE"
+                " request_bodies.sha = body_blobs.sha"
+                " OR request_bodies.input_sha = body_blobs.sha)",
+                stale,
+            )
+        done += len(packed)
+        if progress is not None:
+            progress(already + done)
 
 
 def _loads_or_none(raw: Any) -> Any:
