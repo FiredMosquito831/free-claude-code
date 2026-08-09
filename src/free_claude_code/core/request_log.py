@@ -1993,17 +1993,12 @@ def reset_request_log_stores() -> None:
 
 
 _COMPACT_BATCH = 200
-# Larger pages suit blob payloads: a 4 KB page holds 4,092 usable bytes, so a
-# 7 KB body always spills into an overflow chain. Changing it requires a full
-# VACUUM, which compaction is already doing.
-_COMPACT_PAGE_SIZE = 16_384
 
 
 def compact_request_log(
     db_path: Path | str,
     *,
     progress: Any = None,
-    page_size: int = _COMPACT_PAGE_SIZE,
 ) -> dict[str, Any]:
     """Convert stored-inline bodies to deduplicated compressed blobs, in place.
 
@@ -2065,7 +2060,7 @@ def compact_request_log(
     finally:
         store.close()
 
-    reclaimed = _vacuum_with_page_size(path, page_size)
+    reclaimed = _vacuum(path)
     after = path.stat().st_size
     return {
         "converted": converted,
@@ -2084,18 +2079,23 @@ def _loads_or_none(raw: Any) -> Any:
         return None
 
 
-def _vacuum_with_page_size(path: Path, page_size: int) -> bool:
-    """Return freed pages to the filesystem, widening pages on the way.
+def _vacuum(path: Path) -> bool:
+    """Return freed pages to the filesystem.
 
     ``VACUUM`` needs the whole database to itself, so this reports failure
     rather than raising when a server still holds it open -- the conversion
     above has already landed either way.
+
+    It deliberately does not widen ``page_size``. That looked like a free win
+    to fold in here, but SQLite refuses to change page size on a WAL database,
+    so the pragma was silently ignored and the claim was simply false. Undoing
+    it would mean dropping out of WAL around the vacuum, which is a real risk
+    to take on someone's only copy of their history for an uncertain few
+    percent.
     """
     conn = sqlite3.connect(path, timeout=30)
     try:
         conn.isolation_level = None
-        if page_size:
-            conn.execute(f"PRAGMA page_size={int(page_size)}")
         conn.execute("VACUUM")
         return True
     except sqlite3.Error as exc:
