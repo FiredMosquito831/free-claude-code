@@ -395,6 +395,16 @@ Each chain belongs to its own tier and they are never merged: a tier with its ow
 
 A chain rescues the failures that happen before the first word, not the ones that happen at word five hundred. Switching models mid-answer would splice two different replies together, so FCC refuses to.
 
+**A model that goes quiet is a failure too.** Accepting a request and then producing nothing looks, to a proxy with no deadline, exactly like thinking hard — so without a limit it holds the request until the transport gives up, and the chain gets its turn minutes later. Three settings on the **Limits** tab bound that:
+
+| Setting | Default | What it does |
+| --- | --- | --- |
+| First-token deadline | `120s` | How long a model may stay silent before the next one takes over. Nothing has streamed yet, so you never see the switch. |
+| Total request budget | `600s` | The whole request, across every attempt and retry. A stream that already started cannot be replaced, but it can be stopped. |
+| Bench a model after / for | `3` / `30s` | Skip a model that just failed repeatedly instead of re-paying its timeout on every request. |
+
+If every model on a route is benched, FCC tries them in order anyway — skipping a bad model is an optimisation, refusing to try anything is an outage.
+
 Requests that name a provider and model directly (`open_router/…`) are never redirected. An explicit choice is honoured as given.
 
 ### Images and the vision adapter
@@ -608,7 +618,11 @@ REQUEST_LOG_ENABLED=true
 REQUEST_LOG_MAX_ROWS=50000         # oldest rows pruned beyond this
 REQUEST_LOG_COMPRESS_BODIES=true   # false stores text inline, as before
 REQUEST_LOG_CAPTURE_BODIES=true    # false drops text entirely, ~77x more rows/GB
+REQUEST_LOG_TEXT_MAX_CHARS=50000   # longer text is truncated before storage
+REQUEST_LOG_COMPRESSION_LEVEL=9    # 1-22; 19 measured 4.9% smaller at 9x the time
 ```
+
+All of these are editable in **Admin UI → Limits** without touching the file. Leaving one blank means "use the default" rather than "invalid", so clearing a field can never stop the server starting, and a value outside its range is refused by the form and clamped (with a warning) if it was edited into the file by hand.
 
 Two things not to worry about: the dictionary trains itself once the log has seen a few hundred requests, and each blob records which dictionary compressed it, so retraining never orphans an older row.
 

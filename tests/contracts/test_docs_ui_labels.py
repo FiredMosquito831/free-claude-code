@@ -166,3 +166,38 @@ def test_the_search_box_says_what_it_searches() -> None:
         "The search placeholder must state that it covers reasoning and tool "
         "calls; a narrower-looking box makes people distrust the results."
     )
+
+
+def test_all_three_docs_say_a_silent_model_is_a_failure() -> None:
+    """The behaviour that made a configured fallback chain useless.
+
+    A model that accepted a request and then produced nothing held it until the
+    transport read timeout, so the chain fired minutes after the client had
+    given up. Whichever doc a reader reaches for has to say that silence counts
+    and that a deadline bounds it, or the setting looks like an oddity rather
+    than the thing that makes failover work.
+    """
+    readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
+    usage = (REPO_ROOT / "docs/USAGE.md").read_text(encoding="utf-8")
+    guide = (ADMIN_STATIC / "index.html").read_text(encoding="utf-8")
+
+    for name, text in (("README", readme), ("USAGE.md", usage), ("the Guide", guide)):
+        lowered = text.lower()
+        assert "first-token deadline" in lowered or "first token" in lowered, (
+            f"{name} never mentions the first-token deadline"
+        )
+        assert "silent" in lowered or "goes quiet" in lowered, (
+            f"{name} does not say a silent model counts as a failure"
+        )
+        assert "bench" in lowered, f"{name} does not explain ejecting a bad model"
+
+
+def test_docs_say_a_blank_limit_falls_back_to_its_default() -> None:
+    """Clearing a field used to stop the server from starting."""
+    usage = (REPO_ROOT / "docs/USAGE.md").read_text(encoding="utf-8")
+    guide = (ADMIN_STATIC / "index.html").read_text(encoding="utf-8")
+
+    for name, text in (("USAGE.md", usage), ("the Guide", guide)):
+        lowered = text.lower()
+        assert "blank" in lowered, f"{name} never mentions a blank value"
+        assert "default" in lowered, f"{name} does not say blank means the default"

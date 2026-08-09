@@ -53,6 +53,7 @@ Run your coding agents with free, paid, or local models. Choose and validate pro
 | **Protocol fidelity** | Streaming, tool use, reasoning, and image input preserved across compatible models, with configurable reasoning control. |
 | **Key rotation** | Multi-key credential rotation for both model and web search providers: comma-separated keys, four rotation policies, health tracking with cooldowns/circuit breaking/lockout, and per-key admin management. |
 | **Web search** | Claude Code's official `web_search` server tool fulfilled at the proxy level by 14 search providers, with 66 advanced per-provider options, full-page-text retrieval, domain filtering, rich result digests, and zero-config keyless fallback. |
+| **Limits** | Deadlines, retry budgets and retention are editable in the dashboard, each with a stated cost and an enforced range — a stalled model stops holding a request, and a known-bad model is skipped rather than re-tried. |
 | **Observability** | Persistent local request and web-search analytics with consistent filters, range-aware rollups, provider/key health, latency, errors, known spend, export, and auto-refresh. |
 | **Editor integrations** | Claude Code and Codex in VS Code, or Claude Code through JetBrains ACP. |
 | **Messaging** | Optionally run Claude Code sessions through Discord or Telegram with voice-note transcription. |
@@ -423,6 +424,16 @@ A tier with its own override uses only its own chain; the two are never merged. 
 - **Non-streaming requests** commit at the end. The response is assembled into a single message before the client sees anything, so a failure at *any* point still falls back, and the failed attempt's partial output is discarded with it.
 
 Requests that name a provider and model directly (`open_router/…`) are never redirected — an explicit choice is honoured as given.
+
+**A silent model counts as a failure too.** A provider that accepts the request and then produces nothing would otherwise hold it until the transport read timeout — minutes — and the chain would get its turn long after the client gave up. Three limits bound that, all editable in **Admin UI → Limits**:
+
+| Setting | Default | What it does |
+| --- | --- | --- |
+| `FALLBACK_FIRST_TOKEN_TIMEOUT` | `120` | The first-token deadline: seconds a model may stay silent before the next model takes over. Nothing has streamed yet, so the handover is invisible. `0` waits indefinitely. |
+| `FALLBACK_TOTAL_TIMEOUT` | `600` | Whole-request budget across every attempt, retry and recovery — the backstop for a stream that committed and then stalled. `0` disables it. |
+| `FALLBACK_EJECT_AFTER_FAILURES` / `FALLBACK_EJECT_SECONDS` | `3` / `30` | Skip a model that just failed repeatedly, so a request stops re-paying its timeout on the way to a healthy fallback. |
+
+Ejection can never empty a chain: if every model on a route is benched, they are tried in order anyway — skipping a bad model is an optimisation, refusing to try anything is an outage.
 
 Every attempt is recorded. **Analytics** shows the model that actually answered rather than the one the route started from, and the request detail draws the whole chain — see [Route tracing](#route-tracing).
 
