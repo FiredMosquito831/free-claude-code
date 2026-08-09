@@ -4732,7 +4732,14 @@ function renderRequestStatsCards(stats) {
     ? ((Number(stats.success || 0) / Number(stats.total)) * 100).toFixed(1)
     : "0.0";
   const cards = [
-    ["Total requests", stats.total],
+    // Not "Total requests": this counts stored rows, which retention caps, so
+    // the label promised something the number could not deliver and read as a
+    // counter that resets.
+    [
+      "Stored requests",
+      stats.total,
+      atRetentionCap(stats) ? "at the storage cap — older ones deleted" : null,
+    ],
     ["Success rate", `${successRate}%`],
     ["Error rate", `${((stats.error_rate || 0) * 100).toFixed(1)}%`],
     ["Served by fallback", formatFallbackShare(stats)],
@@ -4754,21 +4761,25 @@ function renderRequestStatsCards(stats) {
   renderStatCards(byId("reqStatsCards"), cards);
 }
 
+// Prune leaves the count just above the cap between runs, so an exact
+// comparison would almost never fire.
+function atRetentionCap(stats) {
+  const cap = Number(stats.retained_rows_max || 0);
+  return cap > 0 && Number(stats.total || 0) >= cap;
+}
+
 function renderRequestRetentionNote(stats) {
   const note = byId("reqRetentionNote");
-  const cap = Number(stats.retained_rows_max || 0);
-  const total = Number(stats.total || 0);
-  // Prune leaves the count just above the cap between runs, so an exact
-  // comparison would almost never fire.
-  const rolling = cap > 0 && total >= cap;
-  note.hidden = !rolling;
-  if (rolling) {
-    note.textContent =
-      `Storage is full at ${formatAnalyticsNumber(cap)} requests, so the figures above ` +
-      `cover only the most recent ${formatAnalyticsNumber(cap)} and stop rising. ` +
-      `Older rows have been deleted. Raise REQUEST_LOG_MAX_ROWS to keep more, ` +
-      `or read All time below.`;
-  }
+  note.hidden = !atRetentionCap(stats);
+  if (note.hidden) return;
+  const cap = formatAnalyticsNumber(Number(stats.retained_rows_max || 0));
+  note.textContent =
+    `Only the most recent ${cap} requests are kept. Older ones have been deleted, ` +
+    `so they cannot be listed, opened or searched, and every figure above counts ` +
+    `just those ${cap} — it will hover around the cap rather than keep rising. ` +
+    `All time below keeps counting for good. To browse more of them, raise ` +
+    `REQUEST_LOG_MAX_ROWS: bodies are compressed, so each request now costs about ` +
+    `7 KB instead of 41 KB.`;
 }
 
 function renderRequestLifetime(lifetime) {
@@ -4866,7 +4877,7 @@ function formatDurationShort(seconds) {
 
 function renderStatCards(container, cards) {
   container.innerHTML = "";
-  cards.forEach(([label, value]) => {
+  cards.forEach(([label, value, note]) => {
     const card = document.createElement("div");
     card.className = "requests-card";
     const valueEl = document.createElement("strong");
@@ -4874,6 +4885,11 @@ function renderStatCards(container, cards) {
     const labelEl = document.createElement("span");
     labelEl.textContent = label;
     card.append(valueEl, labelEl);
+    if (note) {
+      const noteEl = document.createElement("small");
+      noteEl.textContent = note;
+      card.appendChild(noteEl);
+    }
     container.appendChild(card);
   });
 }
