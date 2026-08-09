@@ -105,6 +105,16 @@ const VIEW_GROUPS = [
     containerId: "webSearchSections",
   },
   {
+    // Deadlines, retention and log level. Grouped by what a value costs --
+    // live requests, then disk, then noise -- rather than by the subsystem
+    // that happens to read it.
+    id: "limits",
+    label: "Limits",
+    title: "Limits",
+    sections: ["limits", "diagnostics"],
+    containerId: "limitsSections",
+  },
+  {
     // Static content: no settings sections, nothing to fetch, so it stays
     // readable even when the server cannot reach a provider or the network.
     id: "guide",

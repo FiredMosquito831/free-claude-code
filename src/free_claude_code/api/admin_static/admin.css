@@ -3459,3 +3459,15 @@ details.turn-pane > summary:focus-visible {
 .route-vision-summary.is-idle {
   color: var(--muted);
 }
+
+/* A view whose values are trade-offs opens by saying so, rather than making
+   the reader infer it from a wall of number fields. */
+.view-intro {
+  margin: 0 0 22px;
+  max-width: 68ch;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.6;
+  border-left: 2px solid var(--line-strong);
+  padding-left: 14px;
+}
