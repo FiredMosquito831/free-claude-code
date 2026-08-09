@@ -626,6 +626,7 @@
                 <a href="#guide-other">Codex &amp; Pi</a>
                 <a href="#guide-websearch">Search the web</a>
                 <a href="#guide-analytics">See what happened</a>
+                <a href="#guide-limits">Set the limits</a>
                 <a href="#guide-rotation">Rotate keys safely</a>
                 <a href="#guide-updates">Update the server</a>
                 <a href="#guide-security">Lock it down</a>
@@ -1009,6 +1010,68 @@ TAVILY_CHUNKS_PER_SOURCE=3</code></pre>
                   <code>WEBSEARCH_LOG_CAPTURE_CONTENT=false</code> withholds the payloads
                   <em>and</em> the query text, keeping only lengths and hashes. API keys are
                   never written to either store &mdash; only masked labels.
+                </p>
+
+                <h3 id="guide-limits">Set the limits</h3>
+                <p>
+                  Everything on the <strong>Limits</strong> tab is a trade-off
+                  between how long a failing model may hold a live request and
+                  how much history survives on disk. Each field states what the
+                  value costs and the range it accepts.
+                </p>
+                <h4>When to stop waiting</h4>
+                <p>
+                  A fallback chain can only rescue a request while nothing has
+                  reached the client. A model that accepts a request and then
+                  goes silent used to hold it until the transport read timeout,
+                  minutes later, so the chain got its turn long after the client
+                  had given up.
+                </p>
+                <ul>
+                  <li>
+                    <strong>First-token deadline</strong> — seconds a model may
+                    stay silent before the next model on the chain takes over.
+                    Nothing has streamed yet, so the handover is invisible.
+                  </li>
+                  <li>
+                    <strong>Total request budget</strong> — the whole request,
+                    across every attempt, retry and recovery. Once output has
+                    started no fallback can replace it, but it can still stop.
+                  </li>
+                  <li>
+                    <strong>Bench a model after</strong> — consecutive failures
+                    before routing skips a model, so a request stops re-paying a
+                    dead model's timeout on its way to a healthy one. A chain is
+                    never emptied: if every model on a route is benched they are
+                    tried in order anyway.
+                  </li>
+                  <li>
+                    <strong>Retries before the chain</strong> — attempts against
+                    one model on a 429 or 5xx before the next model is tried.
+                    Each retry waits longer than the last.
+                  </li>
+                </ul>
+                <h4>What to keep</h4>
+                <p>
+                  <strong>Requests to keep</strong> is the retention cap: the
+                  newest N requests are kept and older rows are deleted as new
+                  ones arrive. All-time counters keep counting either way, so
+                  raising or lowering it never changes your lifetime totals.
+                  Bodies are about 99% of the stored bytes, so
+                  <strong>Store prompts and replies</strong> is the setting that
+                  decides whether content search works at all, and
+                  <strong>Compress stored text</strong> applies to new rows —
+                  run <code>fcc-compact-log</code> to convert existing history.
+                </p>
+                <h4>Blank means default</h4>
+                <p>
+                  Clearing a field is a way of saying "stop specifying this", so
+                  a blank value falls back to the built-in default rather than
+                  failing. A value outside its range is refused here with the
+                  range quoted; a value edited directly into
+                  <code>~/.fcc/.env</code> is clamped at startup with a warning
+                  in the log, because a proxy that will not start is worse than
+                  one running a sane number.
                 </p>
 
                 <h3 id="guide-rotation">Use more than one key safely</h3>
