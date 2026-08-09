@@ -348,3 +348,30 @@ def test_lifetime_endpoint_disabled_store_shape(tmp_path, monkeypatch) -> None:
 def test_lifetime_endpoint_rejects_remote_callers(seeded_store) -> None:
     remote = TestClient(create_test_app(), client=("203.0.113.10", 50000))
     assert remote.get("/admin/api/requests/lifetime").status_code == 403
+
+
+def test_the_list_can_page_through_every_stored_request(client, seeded_store) -> None:
+    """Nothing beyond retention limits what the dashboard can show.
+
+    The cap on stored rows is the only limit; paging must reach the last one.
+    """
+    seen: set[str] = set()
+    offset = 0
+    while True:
+        page = client.get(
+            "/admin/api/requests", params={"limit": 2, "offset": offset}
+        ).json()
+        if not page["rows"]:
+            break
+        seen.update(row["id"] for row in page["rows"])
+        offset += 2
+    assert seen == {"r0", "r1", "r2", "r3", "r4"}
+    assert page["total"] == 5
+
+
+def test_the_list_accepts_the_largest_page_size_the_ui_offers(
+    client, seeded_store
+) -> None:
+    payload = client.get("/admin/api/requests", params={"limit": 500}).json()
+    assert payload["limit"] == 500
+    assert len(payload["rows"]) == 5
