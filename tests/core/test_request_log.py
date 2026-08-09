@@ -1441,9 +1441,11 @@ def test_rows_written_before_training_stay_readable_after_it(tmp_path) -> None:
     assert old_row is not None and new_row is not None
     assert old_row["input_text"] == _chatty(0)
     assert new_row["input_text"] == _chatty(999)
-    # And search still spans both dictionary generations.
-    assert trained.list_requests(q="failure in module 999")[1] == 1
-    assert trained.list_requests(q="failure in module 0")[1] == 1
+    # And search still spans both dictionary generations. "999" appears only in
+    # the row written after training; the shared prefix appears in every row,
+    # including the 300 compressed without a dictionary.
+    assert trained.list_requests(q="module 999")[1] == 1
+    assert trained.list_requests(q="Claude Code assistant")[1] == 301
 
 
 def test_training_does_not_repeat_on_every_restart(tmp_path) -> None:
@@ -1530,3 +1532,73 @@ def test_search_matches_the_same_rows_with_and_without_compression(tmp_path) -> 
             for term in ("kubernetes", "KUBERNETES", '"quoted"', "relevant", "zzz")
         }
     assert results["inline"] == results["compressed"]
+
+
+# ------------------------------------------------------------ search scope ---
+
+
+@pytest.fixture(params=[True, False], ids=["compressed", "inline"])
+def searchable(request, tmp_path):
+    """The same assertions must hold whichever way bodies are stored."""
+    store = RequestLogStore(
+        tmp_path / "requests.db", max_rows=1000, compress_bodies=request.param
+    )
+    yield store
+    store.close()
+
+
+def test_search_covers_reasoning_and_tool_calls(searchable: RequestLogStore) -> None:
+    """55% of real requests carry reasoning and 78% carry tool calls.
+
+    Searching only the prompt and reply made the log quietly blind to most of
+    what it had stored.
+    """
+    searchable.enqueue(
+        _record(
+            "r1",
+            input_text="the prompt",
+            output_text="the reply",
+            thinking_text="weighing the tradeoffs of a rollback",
+            tool_calls=[{"name": "Bash", "input": {"command": "git revert HEAD"}}],
+        )
+    )
+    searchable.close()
+
+    assert searchable.list_requests(q="prompt")[1] == 1
+    assert searchable.list_requests(q="reply")[1] == 1
+    assert searchable.list_requests(q="tradeoffs")[1] == 1
+    assert searchable.list_requests(q="git revert")[1] == 1
+    assert searchable.list_requests(q="Bash")[1] == 1
+    assert searchable.list_requests(q="absent")[1] == 0
+
+
+def test_search_requires_every_word_but_not_their_order(
+    searchable: RequestLogStore,
+) -> None:
+    searchable.enqueue(_record("both", input_text="deploy the kubernetes cluster"))
+    searchable.enqueue(_record("one", input_text="deploy the docker container"))
+    searchable.close()
+
+    assert {
+        row["id"] for row in searchable.list_requests(q="kubernetes deploy")[0]
+    } == {"both"}
+    assert searchable.list_requests(q="deploy")[1] == 2
+    assert searchable.list_requests(q="kubernetes missing")[1] == 0
+
+
+def test_search_spans_different_parts_of_one_request(
+    searchable: RequestLogStore,
+) -> None:
+    """One word from the prompt and one from the reasoning must still match."""
+    searchable.enqueue(
+        _record("r1", input_text="restart the proxy", thinking_text="port 8082 is busy")
+    )
+    searchable.close()
+    assert searchable.list_requests(q="proxy 8082")[1] == 1
+
+
+def test_search_ignores_surrounding_whitespace(searchable: RequestLogStore) -> None:
+    searchable.enqueue(_record("r1", input_text="a distinctive phrase"))
+    searchable.close()
+    assert searchable.list_requests(q="  distinctive  ")[1] == 1
+    assert searchable.list_requests(q="   ")[1] == 1  # no terms: not a filter

@@ -541,6 +541,21 @@ Input is reported in two parts, because cached and uncached prompt tokens bill d
 >
 > Prompt caching is provider-dependent. OpenAI reports it for prefixes of 1,024+ tokens; DeepSeek reports it with its own fields. **NVIDIA NIM's hosted endpoint does not do real prefix caching** — it returns a small constant regardless of repetition — so a near-zero rate there is accurate rather than a fault. NVIDIA exposes prefix caching as a self-hosted deployment toggle (`NIM_ENABLE_KV_CACHE_REUSE`), not on the shared API.
 
+#### Finding a request again
+
+**Search text** matches across everything a request contains, not just the visible prompt and reply:
+
+| Searched | |
+| --- | --- |
+| Prompt | what you sent |
+| Reply | what the model answered |
+| **Reasoning** | the model's thinking blocks |
+| **Tool calls** | tool names and their arguments — commands, paths, patterns |
+
+Reasoning and tool calls are the majority of a real log: on a typical machine 55% of requests carry thinking text and 78% carry tool calls. Before v4.46.0 neither was searched, so a term that appeared only in a command you ran returned nothing.
+
+**Every word must appear, in any order and anywhere in the request.** Searching `proxy 8082` finds a request that says "restart the proxy" in the prompt and "port 8082 is busy" in the reasoning. A single word behaves exactly as before. Matching is case-insensitive and by substring, so `kube` finds `kubernetes`.
+
 #### Which model actually answered
 
 A request does not always go where the tier points. **View** on any row draws the whole path it took:
