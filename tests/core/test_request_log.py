@@ -1,8 +1,10 @@
 """Unit tests for the SQLite request log store."""
 
 import gc
+import hashlib
 import sqlite3
 import time
+from compression import zstd
 from typing import Any
 
 import pytest
@@ -15,6 +17,7 @@ from free_claude_code.core.request_log import (
     RequestRecord,
     compact_request_log,
     get_request_log_store,
+    pack_bodies,
     reset_request_log_stores,
 )
 
@@ -1360,7 +1363,7 @@ def test_a_corrupt_blob_degrades_instead_of_raising(store: RequestLogStore) -> N
     with sqlite3.connect(store.db_path) as conn:
         conn.execute(
             "UPDATE body_blobs SET payload = ? WHERE sha = ("
-            " SELECT sha FROM request_bodies WHERE request_id = 'r1')",
+            " SELECT input_sha FROM request_bodies WHERE request_id = 'r1')",
             (b"not zstd at all",),
         )
 
@@ -1404,8 +1407,10 @@ def test_a_dictionary_is_trained_once_there_is_enough_traffic(tmp_path) -> None:
 
     with sqlite3.connect(path) as conn:
         dicts = conn.execute("SELECT COUNT(*) FROM body_dictionaries").fetchone()[0]
+        # The prompt blob is the one that carries the volume worth compressing.
         blob = (
-            "SELECT {} FROM request_bodies r JOIN body_blobs b ON b.sha = r.sha"
+            "SELECT {} FROM request_bodies r"
+            " JOIN body_blobs b ON b.sha = r.input_sha"
             " WHERE r.request_id = ?"
         )
         used = conn.execute(blob.format("b.dict_id"), ("after",)).fetchone()[0]
@@ -1610,7 +1615,7 @@ def test_search_ignores_surrounding_whitespace(searchable: RequestLogStore) -> N
 
 
 def test_identical_bodies_are_stored_once(store: RequestLogStore) -> None:
-    """62.7% of real request inputs are byte-identical repeats."""
+    """29.7% of real requests repeat a prompt already stored."""
     body = "the very same context, sent again " * 200
     for index in range(5):
         store.enqueue(_record(f"r{index}", input_text=body, output_text="same"))
@@ -1620,7 +1625,8 @@ def test_identical_bodies_are_stored_once(store: RequestLogStore) -> None:
         mappings = conn.execute("SELECT COUNT(*) FROM request_bodies").fetchone()[0]
         blobs = conn.execute("SELECT COUNT(*) FROM body_blobs").fetchone()[0]
     assert mappings == 5
-    assert blobs == 1
+    # One prompt blob and one reply blob, shared by all five.
+    assert blobs == 2
     for index in range(5):
         row = store.get_request(f"r{index}")
         assert row is not None
@@ -1639,7 +1645,7 @@ def test_a_shared_blob_survives_until_its_last_request_goes(tmp_path) -> None:
 
     with sqlite3.connect(store.db_path) as conn:
         assert conn.execute("SELECT COUNT(*) FROM requests").fetchone()[0] == 2
-        assert conn.execute("SELECT COUNT(*) FROM body_blobs").fetchone()[0] == 1
+        assert conn.execute("SELECT COUNT(*) FROM body_blobs").fetchone()[0] == 2
     survivor = store.get_request("r3")
     assert survivor is not None
     assert survivor["input_text"] == body
@@ -1656,7 +1662,8 @@ def test_orphaned_blobs_are_collected(tmp_path) -> None:
     store.prune()
 
     with sqlite3.connect(store.db_path) as conn:
-        assert conn.execute("SELECT COUNT(*) FROM body_blobs").fetchone()[0] == 1
+        # One surviving request: its own prompt, plus the reply all four shared.
+        assert conn.execute("SELECT COUNT(*) FROM body_blobs").fetchone()[0] == 2
 
 
 # --------------------------------------------------------------- compaction --
@@ -1750,5 +1757,146 @@ def test_compaction_preserves_every_body_exactly(tmp_path) -> None:
             row = store.get_request(request_id)
             assert row is not None, request_id
             assert row["input_text"] == text, request_id
+    finally:
+        store.close()
+
+
+# ------------------------------------------------------- prompt/reply split --
+
+
+def test_a_repeated_prompt_is_stored_once_despite_different_replies(
+    store: RequestLogStore,
+) -> None:
+    """The saving the split exists for.
+
+    A retry re-sends the same context and gets a different answer. Keyed on the
+    whole body that deduplicates nothing; keyed on the prompt alone it removes
+    35.3% of the stored bytes on a real log.
+    """
+    prompt = "the same long prompt, sent again and again " * 200
+    for index in range(4):
+        store.enqueue(
+            _record(f"r{index}", input_text=prompt, output_text=f"reply {index}")
+        )
+    store.close()
+
+    with sqlite3.connect(store.db_path) as conn:
+        prompts = conn.execute(
+            "SELECT COUNT(DISTINCT input_sha) FROM request_bodies"
+        ).fetchone()[0]
+        replies = conn.execute(
+            "SELECT COUNT(DISTINCT sha) FROM request_bodies"
+        ).fetchone()[0]
+    assert prompts == 1
+    assert replies == 4
+    for index in range(4):
+        row = store.get_request(f"r{index}")
+        assert row is not None
+        assert row["input_text"] == prompt
+        assert row["output_text"] == f"reply {index}"
+
+
+def test_a_request_with_only_a_prompt_stores_no_reply_blob(
+    store: RequestLogStore,
+) -> None:
+    store.enqueue(
+        _record("r1", input_text="just a prompt", output_text=None, tool_calls=None)
+    )
+    store.close()
+    with sqlite3.connect(store.db_path) as conn:
+        row = conn.execute(
+            "SELECT sha, input_sha FROM request_bodies WHERE request_id = 'r1'"
+        ).fetchone()
+    assert row[0] is None
+    assert row[1] is not None
+    stored = store.get_request("r1")
+    assert stored is not None
+    assert stored["input_text"] == "just a prompt"
+    assert stored["output_text"] is None
+
+
+def test_search_spans_the_two_blobs_of_one_request(store: RequestLogStore) -> None:
+    """One word in the prompt, one in the reasoning, still one match."""
+    store.enqueue(
+        _record("r1", input_text="restart the proxy", thinking_text="port 8082 is busy")
+    )
+    store.enqueue(_record("r2", input_text="restart the proxy", thinking_text="fine"))
+    store.close()
+    assert {row["id"] for row in store.list_requests(q="proxy 8082")[0]} == {"r1"}
+
+
+def test_bodies_written_before_the_split_are_still_read_and_searched(
+    tmp_path,
+) -> None:
+    """Combined blobs stay readable until compaction splits them."""
+    path = tmp_path / "requests.db"
+    store = RequestLogStore(path, max_rows=100)
+    store.enqueue(_record("r1", input_text="findable prompt", output_text="reply"))
+    store.close()
+
+    # Reproduce the pre-split layout: one blob carrying everything.
+    with sqlite3.connect(path) as conn:
+        conn.execute("DELETE FROM body_blobs")
+        conn.execute("DELETE FROM request_bodies")
+    reopened = RequestLogStore(path, max_rows=100)
+    try:
+        combined = pack_bodies(
+            {"input_text": "findable prompt", "output_text": "reply"}
+        )
+        sha = hashlib.sha256(combined).hexdigest()
+        with sqlite3.connect(path) as conn:
+            conn.execute(
+                "INSERT INTO body_blobs (sha, dict_id, payload) VALUES (?, NULL, ?)",
+                (sha, zstd.compress(combined, level=3)),
+            )
+            conn.execute(
+                "INSERT INTO request_bodies (request_id, sha, input_sha)"
+                " VALUES ('r1', ?, NULL)",
+                (sha,),
+            )
+        row = reopened.get_request("r1")
+        assert row is not None
+        assert row["input_text"] == "findable prompt"
+        assert row["output_text"] == "reply"
+        assert reopened.list_requests(q="findable")[1] == 1
+    finally:
+        reopened.close()
+
+
+def test_compaction_splits_blobs_written_before_the_split(tmp_path) -> None:
+    """The second pass: existing combined blobs are re-keyed, and shrink."""
+    path = tmp_path / "requests.db"
+    legacy = RequestLogStore(path, max_rows=10_000, compress_bodies=False)
+    prompt = "a shared prompt of some length " * 300
+    for index in range(300):
+        legacy.enqueue(
+            _record(f"r{index}", input_text=prompt, output_text=f"reply {index}")
+        )
+    legacy.close()
+
+    compact_request_log(path)
+
+    with sqlite3.connect(path) as conn:
+        assert (
+            conn.execute(
+                "SELECT COUNT(*) FROM request_bodies WHERE input_sha IS NULL"
+            ).fetchone()[0]
+            == 0
+        )
+        assert (
+            conn.execute(
+                "SELECT COUNT(DISTINCT input_sha) FROM request_bodies"
+            ).fetchone()[0]
+            == 1
+        )
+
+    store = RequestLogStore(path, max_rows=10_000)
+    try:
+        for index in (0, 150, 299):
+            row = store.get_request(f"r{index}")
+            assert row is not None
+            assert row["input_text"] == prompt
+            assert row["output_text"] == f"reply {index}"
+        assert store.list_requests(q="shared prompt")[1] == 300
     finally:
         store.close()

@@ -705,7 +705,7 @@ So FCC compresses them. Request and response text is stored zstd-compressed in a
 REQUEST_LOG_COMPRESS_BODIES=true   # false stores text inline, as before
 ```
 
-The dictionary is trained automatically once the log has seen a few hundred requests, and every blob records which dictionary compressed it, so retraining can never make an older row unreadable. Identical bodies are stored once and shared, and a repeat skips compression entirely.
+The dictionary is trained automatically once the log has seen a few hundred requests, and every blob records which dictionary compressed it, so retraining can never make an older row unreadable. Prompts are stored once and shared: the prompt is 98% of the bytes and 35.3% of those are exact repeats, so it lives in its own content-addressed blob apart from the reply, which differs every time. On a real log that removed a further **29.9%** after compression.
 
 Compression applies to **newly written** requests, so a database carried across the upgrade keeps paying the old price for its existing history. **`fcc-compact-log`** rewrites it in place — stop the server first, since the final vacuum needs the file to itself. Measured on a real 1.7 GB log: **1.73 GB → 0.29 GB in 4.9 minutes**, with all 50,034 bodies verified byte-identical against a backup afterwards. Safe to interrupt and resume.
 
