@@ -158,3 +158,41 @@ def chatgpt_oauth_login() -> None:
     from free_claude_code.providers.chatgpt_oauth import chatgpt_oauth_login_command
 
     chatgpt_oauth_login_command()
+
+
+def compact_log() -> None:
+    """Rewrite an existing request log into deduplicated compressed bodies."""
+    from free_claude_code.core.request_log import (
+        compact_request_log,
+        default_request_log_path,
+    )
+
+    path = default_request_log_path()
+    if not path.exists():
+        print(f"No request log at {path}", file=sys.stderr)
+        raise SystemExit(1)
+
+    size = path.stat().st_size
+    print(f"Compacting {path} ({size / 1e9:.2f} GB)")
+    print("Stop the server first, or the final vacuum cannot reclaim space.\n")
+
+    def report(done: int) -> None:
+        print(f"\r  converted {done:,} requests", end="", flush=True)
+
+    result = compact_request_log(path, progress=report)
+    print()
+
+    before = result["bytes_before"]
+    after = result["bytes_after"]
+    print(f"\nConverted   {result['converted']:,} requests")
+    print(f"Before      {before / 1e9:.2f} GB")
+    print(f"After       {after / 1e9:.2f} GB")
+    if after:
+        print(f"Reduction   {before / after:.1f}x")
+    if not result["vacuumed"]:
+        print(
+            "\nThe vacuum could not run, so the file has not shrunk yet: something"
+            " else has the database open. Stop the server and run this again --"
+            " the conversion itself is already done and will not repeat.",
+            file=sys.stderr,
+        )

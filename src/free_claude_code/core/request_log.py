@@ -1,6 +1,7 @@
 """SQLite-backed request log with a non-blocking background writer."""
 
 import contextlib
+import hashlib
 import json
 import os
 import queue
@@ -185,14 +186,25 @@ CREATE TABLE IF NOT EXISTS request_log_meta (
 # history -- 2.7x compressed individually, 9x against a dictionary trained on
 # the traffic itself.
 #
-# Nothing migrates. Rows written by an older version keep their text in the
-# ``requests`` columns and are read from there; retention drains them within a
-# few days of ordinary traffic.
+# Rows written by an older version keep their text in the ``requests`` columns
+# and are read from there. ``compact_request_log`` converts them in place; until
+# it runs, or retention drains them, both forms coexist.
+#
+# Bodies are content-addressed, which is not an optimisation detail but the
+# single largest saving available: 62.7% of request inputs on a real log are
+# byte-identical repeats of something already stored, because a retry or a
+# parallel subagent re-sends the same context. Storing each distinct body once
+# removes that duplication before compression even runs -- and lets a repeat
+# skip compression entirely, which is why writes got faster rather than slower.
 _BODIES_SCHEMA = """
-CREATE TABLE IF NOT EXISTS request_bodies (
-    request_id TEXT PRIMARY KEY,
+CREATE TABLE IF NOT EXISTS body_blobs (
+    sha TEXT PRIMARY KEY,
     dict_id INTEGER,
     payload BLOB NOT NULL
+);
+CREATE TABLE IF NOT EXISTS request_bodies (
+    request_id TEXT PRIMARY KEY,
+    sha TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS body_dictionaries (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -596,6 +608,7 @@ class RequestLogStore:
                 conn.executescript(_TOTALS_SCHEMA)
                 conn.executescript(_BODIES_SCHEMA)
                 self._ensure_added_columns(conn)
+                self._ensure_bodies_index(conn)
         finally:
             conn.close()
 
@@ -723,6 +736,106 @@ class RequestLogStore:
             time.monotonic() - started,
         )
 
+    @staticmethod
+    def _ensure_bodies_index(conn: sqlite3.Connection) -> None:
+        """Index the blob reference, once the column it names exists.
+
+        A database written by 4.45 still has the one-payload-per-request shape
+        at this point, so creating the index unconditionally fails outright.
+        """
+        columns = {
+            str(row[1]) for row in conn.execute("PRAGMA table_info(request_bodies)")
+        }
+        if "sha" in columns:
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_request_bodies_sha"
+                " ON request_bodies(sha)"
+            )
+
+    def _migrate_bodies_to_content_addressing(self, conn: sqlite3.Connection) -> None:
+        """Re-key 4.45-era body rows, which stored one payload per request.
+
+        Only installs that ran 4.45 or 4.46 have any, and only for as long as
+        those versions were running, so this is normally a handful of rows.
+        """
+        columns = {
+            str(row[1]) for row in conn.execute("PRAGMA table_info(request_bodies)")
+        }
+        if "payload" not in columns:
+            return
+        try:
+            legacy = conn.execute(
+                "SELECT request_id, dict_id, payload FROM request_bodies"
+            ).fetchall()
+            with conn:
+                conn.execute("ALTER TABLE request_bodies RENAME TO request_bodies_v1")
+                conn.executescript(_BODIES_SCHEMA)
+                for row in legacy:
+                    packed = self._raw_payload(row["payload"], row["dict_id"])
+                    if packed is None:
+                        continue
+                    sha = hashlib.sha256(packed).hexdigest()
+                    conn.execute(
+                        "INSERT OR IGNORE INTO body_blobs (sha, dict_id, payload)"
+                        " VALUES (?, ?, ?)",
+                        (sha, row["dict_id"], row["payload"]),
+                    )
+                    conn.execute(
+                        "INSERT OR REPLACE INTO request_bodies (request_id, sha)"
+                        " VALUES (?, ?)",
+                        (str(row["request_id"]), sha),
+                    )
+                conn.execute("DROP TABLE request_bodies_v1")
+                self._ensure_bodies_index(conn)
+            logger.info(
+                "Request log bodies re-keyed for deduplication: {} rows", len(legacy)
+            )
+        except sqlite3.Error as exc:
+            logger.warning("Request log body re-keying failed: {}", exc)
+
+    def train_dictionary_from_inline_bodies(self, conn: sqlite3.Connection) -> None:
+        """Seed a dictionary from history when nothing is compressed yet.
+
+        A database being compacted for the first time has no blobs to learn
+        from, so the samples have to come from the inline columns that are
+        about to be replaced.
+        """
+        self._load_active_dictionary(conn)
+        if self._active_dict_id is not None:
+            return
+        rows = conn.execute(
+            "SELECT input_text, output_text, thinking_text, tool_calls FROM requests"
+            " WHERE input_text IS NOT NULL ORDER BY ts_epoch DESC LIMIT ?",
+            (_BODY_DICT_TRAINING_SAMPLES,),
+        ).fetchall()
+        samples = [
+            blob
+            for row in rows
+            if (
+                blob := pack_bodies(
+                    {
+                        "input_text": row["input_text"],
+                        "output_text": row["output_text"],
+                        "thinking_text": row["thinking_text"],
+                        "tool_calls": _loads_or_none(row["tool_calls"]),
+                    }
+                )
+            )
+            != b"{}"
+        ]
+        if len(samples) < _BODY_DICT_MIN_SAMPLES:
+            return
+        trained = zstd.train_dict(samples, _BODY_DICT_SIZE)
+        with conn:
+            cursor = conn.execute(
+                "INSERT INTO body_dictionaries (created_at, content) VALUES (?, ?)",
+                (time.time(), trained.dict_content),
+            )
+        dict_id = int(cursor.lastrowid or 0)
+        if dict_id:
+            self._dict_cache[dict_id] = trained
+            self._active_dict_id = dict_id
+
     def _load_active_dictionary(self, conn: sqlite3.Connection) -> None:
         row = conn.execute(
             "SELECT id FROM body_dictionaries ORDER BY id DESC LIMIT 1"
@@ -741,8 +854,7 @@ class RequestLogStore:
             return
         try:
             rows = conn.execute(
-                "SELECT dict_id, payload FROM request_bodies"
-                " ORDER BY rowid DESC LIMIT ?",
+                "SELECT dict_id, payload FROM body_blobs ORDER BY rowid DESC LIMIT ?",
                 (_BODY_DICT_TRAINING_SAMPLES,),
             ).fetchall()
             if len(rows) < _BODY_DICT_MIN_SAMPLES:
@@ -849,6 +961,9 @@ class RequestLogStore:
             # otherwise both count any request written in between.
             self._ensure_totals_backfill(conn)
             self._ensure_auto_vacuum(conn)
+            # Before any write, or a flush would insert into a table shape that
+            # is about to be replaced.
+            self._migrate_bodies_to_content_addressing(conn)
             self._load_active_dictionary(conn)
             self._maybe_train_dictionary(conn)
             session_id = self._open_session(conn)
@@ -940,8 +1055,7 @@ class RequestLogStore:
             [(*key, *counters) for key, counters in buckets.items()],
         )
 
-    def _encode_bodies(self, record: RequestRecord) -> tuple[int | None, bytes] | None:
-        """Compress one record's text, or ``None`` when it has none."""
+    def _pack_record(self, record: RequestRecord) -> bytes | None:
         packed = pack_bodies(
             {
                 "input_text": cap_text(record.input_text),
@@ -950,8 +1064,9 @@ class RequestLogStore:
                 "tool_calls": record.tool_calls,
             }
         )
-        if packed == b"{}":
-            return None
+        return None if packed == b"{}" else packed
+
+    def _compress_packed(self, packed: bytes) -> tuple[int | None, bytes]:
         dict_id = self._active_dict_id
         return dict_id, zstd.compress(
             packed,
@@ -959,14 +1074,46 @@ class RequestLogStore:
             zstd_dict=self._dictionary(dict_id),
         )
 
+    def _store_bodies(self, conn: sqlite3.Connection, packed: dict[str, bytes]) -> None:
+        """Point each request at its body, compressing only unseen content."""
+        if not packed:
+            return
+        digests = {
+            request_id: hashlib.sha256(blob).hexdigest()
+            for request_id, blob in packed.items()
+        }
+        wanted = set(digests.values())
+        placeholders = ", ".join("?" * len(wanted))
+        known = {
+            str(row[0])
+            for row in conn.execute(
+                f"SELECT sha FROM body_blobs WHERE sha IN ({placeholders})",
+                sorted(wanted),
+            )
+        }
+        fresh: dict[str, bytes] = {}
+        for request_id, sha in digests.items():
+            if sha not in known and sha not in fresh:
+                fresh[sha] = packed[request_id]
+        if fresh:
+            conn.executemany(
+                "INSERT OR IGNORE INTO body_blobs (sha, dict_id, payload)"
+                " VALUES (?, ?, ?)",
+                [(sha, *self._compress_packed(blob)) for sha, blob in fresh.items()],
+            )
+        conn.executemany(
+            "INSERT OR REPLACE INTO request_bodies (request_id, sha) VALUES (?, ?)",
+            list(digests.items()),
+        )
+
     def _flush(self, batch: list[RequestRecord], conn: sqlite3.Connection) -> None:
         rows = [self._record_to_row(record) for record in batch]
-        bodies: list[tuple[str, int | None, bytes]] = []
+        packed: dict[str, bytes] = {}
         if self._compress_bodies:
             for record in batch:
-                encoded = self._encode_bodies(record)
-                if encoded is not None:
-                    bodies.append((record.id, encoded[0], encoded[1]))
+                blob = self._pack_record(record)
+                if blob is not None:
+                    packed[record.id] = blob
         try:
             with conn:
                 already_stored = self._existing_ids(
@@ -989,12 +1136,7 @@ class RequestLogStore:
                     """,
                     rows,
                 )
-                if bodies:
-                    conn.executemany(
-                        "INSERT OR REPLACE INTO request_bodies"
-                        " (request_id, dict_id, payload) VALUES (?, ?, ?)",
-                        bodies,
-                    )
+                self._store_bodies(conn, packed)
                 self._accumulate_totals(
                     conn,
                     [record for record in batch if record.id not in already_stored],
@@ -1144,7 +1286,8 @@ class RequestLogStore:
                 args.extend([f"%{term}%"] * len(_SEARCHED_COLUMNS))
             clauses.append(
                 f"(({inline}) OR EXISTS ("
-                " SELECT 1 FROM request_bodies b WHERE b.request_id = requests.id"
+                " SELECT 1 FROM request_bodies r JOIN body_blobs b ON b.sha = r.sha"
+                " WHERE r.request_id = requests.id"
                 " AND fcc_body_matches(b.payload, b.dict_id, ?)))"
             )
             args.append(q)
@@ -1237,14 +1380,21 @@ class RequestLogStore:
             return {}
         placeholders = ", ".join("?" * len(ids))
         found = conn.execute(
-            "SELECT request_id, dict_id, payload FROM request_bodies"
-            f" WHERE request_id IN ({placeholders})",
+            "SELECT r.request_id, r.sha, b.dict_id, b.payload FROM request_bodies r"
+            " JOIN body_blobs b ON b.sha = r.sha"
+            f" WHERE r.request_id IN ({placeholders})",
             ids,
         ).fetchall()
-        return {
-            str(row["request_id"]): self._decode_bodies(row["payload"], row["dict_id"])
-            for row in found
-        }
+        # Several requests share one blob after dedup, so decode each distinct
+        # body once rather than once per request that points at it.
+        decoded: dict[str, dict[str, Any]] = {}
+        result: dict[str, dict[str, Any]] = {}
+        for row in found:
+            sha = str(row["sha"])
+            if sha not in decoded:
+                decoded[sha] = self._decode_bodies(row["payload"], row["dict_id"])
+            result[str(row["request_id"])] = decoded[sha]
+        return result
 
     @staticmethod
     def _row_to_dict(
@@ -1655,11 +1805,18 @@ class RequestLogStore:
                 removed = cursor.rowcount
                 # Bodies are keyed by request id with no cascade configured, so
                 # they would otherwise outlive the rows that reference them and
-                # keep the file growing forever.
+                # keep the file growing forever. Blobs go only once the last
+                # request pointing at them is gone -- deduplication means one
+                # blob can serve many requests.
                 conn.execute(
                     "DELETE FROM request_bodies WHERE NOT EXISTS ("
                     " SELECT 1 FROM requests WHERE requests.id ="
                     " request_bodies.request_id)"
+                )
+                conn.execute(
+                    "DELETE FROM body_blobs WHERE NOT EXISTS ("
+                    " SELECT 1 FROM request_bodies WHERE request_bodies.sha ="
+                    " body_blobs.sha)"
                 )
             if removed:
                 # Return the freed pages to the filesystem instead of leaving
@@ -1686,6 +1843,7 @@ class RequestLogStore:
             cursor = conn.execute("DELETE FROM requests")
             conn.execute("DELETE FROM request_totals")
             conn.execute("DELETE FROM request_bodies")
+            conn.execute("DELETE FROM body_blobs")
             return cursor.rowcount
 
     def lifetime(self) -> dict[str, Any]:
@@ -1832,6 +1990,119 @@ def reset_request_log_stores() -> None:
         _stores.clear()
     for store in stores:
         store.close()
+
+
+_COMPACT_BATCH = 200
+# Larger pages suit blob payloads: a 4 KB page holds 4,092 usable bytes, so a
+# 7 KB body always spills into an overflow chain. Changing it requires a full
+# VACUUM, which compaction is already doing.
+_COMPACT_PAGE_SIZE = 16_384
+
+
+def compact_request_log(
+    db_path: Path | str,
+    *,
+    progress: Any = None,
+    page_size: int = _COMPACT_PAGE_SIZE,
+) -> dict[str, Any]:
+    """Convert stored-inline bodies to deduplicated compressed blobs, in place.
+
+    Compression only ever applied to newly written requests, so a database
+    carried across the upgrade keeps paying the old price for its whole history
+    -- on a real 1.7 GB log, every one of its 50,000 rows. This rewrites them,
+    then reclaims the freed pages.
+
+    Safe to interrupt: each batch commits on its own and rows are converted only
+    after their blob is stored, so a kill leaves a consistent database with the
+    work simply unfinished. Running it again resumes.
+    """
+    path = Path(db_path)
+    before = path.stat().st_size if path.exists() else 0
+    # max_rows=0 disables pruning: compaction must never decide to delete.
+    store = RequestLogStore(path, max_rows=0, compress_bodies=True)
+    converted = 0
+    try:
+        # A dictionary is what makes this worth doing at all -- without one the
+        # saving is 2.7x instead of 8x -- and on a database that has never
+        # compressed anything, history is the only place to learn from.
+        with store._connection() as conn:
+            store.train_dictionary_from_inline_bodies(conn)
+        while True:
+            with store._connection() as conn:
+                rows = conn.execute(
+                    "SELECT id, input_text, output_text, thinking_text, tool_calls"
+                    " FROM requests WHERE input_text IS NOT NULL"
+                    " OR output_text IS NOT NULL OR thinking_text IS NOT NULL"
+                    " OR tool_calls IS NOT NULL LIMIT ?",
+                    (_COMPACT_BATCH,),
+                ).fetchall()
+                if not rows:
+                    break
+                packed: dict[str, bytes] = {}
+                for row in rows:
+                    blob = pack_bodies(
+                        {
+                            "input_text": row["input_text"],
+                            "output_text": row["output_text"],
+                            "thinking_text": row["thinking_text"],
+                            "tool_calls": _loads_or_none(row["tool_calls"]),
+                        }
+                    )
+                    if blob != b"{}":
+                        packed[str(row["id"])] = blob
+                store._store_bodies(conn, packed)
+                ids = [str(row["id"]) for row in rows]
+                placeholders = ", ".join("?" * len(ids))
+                conn.execute(
+                    "UPDATE requests SET input_text = NULL, output_text = NULL,"
+                    " thinking_text = NULL, tool_calls = NULL"
+                    f" WHERE id IN ({placeholders})",
+                    ids,
+                )
+            converted += len(rows)
+            if progress is not None:
+                progress(converted)
+    finally:
+        store.close()
+
+    reclaimed = _vacuum_with_page_size(path, page_size)
+    after = path.stat().st_size
+    return {
+        "converted": converted,
+        "bytes_before": before,
+        "bytes_after": after,
+        "vacuumed": reclaimed,
+    }
+
+
+def _loads_or_none(raw: Any) -> Any:
+    if not isinstance(raw, str):
+        return None
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        return None
+
+
+def _vacuum_with_page_size(path: Path, page_size: int) -> bool:
+    """Return freed pages to the filesystem, widening pages on the way.
+
+    ``VACUUM`` needs the whole database to itself, so this reports failure
+    rather than raising when a server still holds it open -- the conversion
+    above has already landed either way.
+    """
+    conn = sqlite3.connect(path, timeout=30)
+    try:
+        conn.isolation_level = None
+        if page_size:
+            conn.execute(f"PRAGMA page_size={int(page_size)}")
+        conn.execute("VACUUM")
+        return True
+    except sqlite3.Error as exc:
+        logger.warning("Request log vacuum skipped: {}", exc)
+        return False
+    finally:
+        conn.close()
 
 
 def store_from_settings(settings: Any) -> RequestLogStore | None:

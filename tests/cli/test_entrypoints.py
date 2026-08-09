@@ -1290,3 +1290,31 @@ def test_launch_claude_unreachable_proxy_exits_with_hint(
     captured = capsys.readouterr()
     assert "http://127.0.0.1:9393" in captured.err
     assert "fcc-server" in captured.err
+
+
+def test_compact_log_entrypoint_is_registered_and_reports_version() -> None:
+    """The command has to exist under the name the docs tell people to run."""
+    import tomllib
+
+    from free_claude_code.cli import entrypoints
+
+    root = Path(__file__).resolve().parents[2]
+    manifest = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))
+    scripts = manifest["project"]["scripts"]
+    assert scripts["fcc-compact-log"] == (
+        "free_claude_code.cli.entrypoints:compact_log"
+    )
+    assert callable(entrypoints.compact_log)
+
+
+def test_compact_log_refuses_when_there_is_no_log(tmp_path, monkeypatch, capsys):
+    from free_claude_code.cli import commands
+
+    monkeypatch.setattr(
+        "free_claude_code.core.request_log.default_request_log_path",
+        lambda: tmp_path / "absent.db",
+    )
+    with pytest.raises(SystemExit) as exit_info:
+        commands.compact_log()
+    assert exit_info.value.code == 1
+    assert "No request log" in capsys.readouterr().err
