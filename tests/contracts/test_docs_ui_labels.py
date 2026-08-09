@@ -139,3 +139,30 @@ def test_all_three_docs_explain_that_stored_rows_are_capped() -> None:
         assert "rolling window" in lowered or "roll over" in lowered, (
             f"{name} does not say the windowed figures stop rising at the cap"
         )
+
+
+def test_docs_say_search_covers_reasoning_and_tool_calls() -> None:
+    """Search silently covered only the prompt and reply until v4.46.0.
+
+    Reasoning and tool calls are the majority of a real log, so a reader who
+    assumes search sees everything will conclude requests are missing rather
+    than that search was narrow. Whichever doc they reach for has to say what
+    is actually searched.
+    """
+    readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
+    usage = (REPO_ROOT / "docs/USAGE.md").read_text(encoding="utf-8")
+    guide = (ADMIN_STATIC / "index.html").read_text(encoding="utf-8")
+
+    for name, text in (("README", readme), ("USAGE.md", usage), ("the Guide", guide)):
+        lowered = text.lower()
+        assert "reasoning" in lowered, f"{name} does not say reasoning is searched"
+        assert "tool call" in lowered, f"{name} does not say tool calls are searched"
+
+
+def test_the_search_box_says_what_it_searches() -> None:
+    markup = (ADMIN_STATIC / "index.html").read_text(encoding="utf-8")
+    box = markup[markup.index('id="reqFilterSearch"') :][:600]
+    assert "reasoning" in box and "tool calls" in box, (
+        "The search placeholder must state that it covers reasoning and tool "
+        "calls; a narrower-looking box makes people distrust the results."
+    )

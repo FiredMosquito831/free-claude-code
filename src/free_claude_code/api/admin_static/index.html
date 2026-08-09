@@ -251,7 +251,12 @@
               </label>
               <label>
                 Search text
-                <input id="reqFilterSearch" type="text" placeholder="input or output contains…" />
+                <input
+                  id="reqFilterSearch"
+                  type="text"
+                  placeholder="all words, in prompt, reply, reasoning or tool calls"
+                  title="Every word must appear somewhere in the request: the prompt, the reply, the model's reasoning, or its tool calls."
+                />
               </label>
               <label>
                 Status
@@ -932,6 +937,21 @@ TAVILY_CHUNKS_PER_SOURCE=3</code></pre>
                   actually happened. Web search analytics separate <em>logical
                   searches</em> from <em>provider attempts</em>, so one search that fell
                   back shows as one search and several attempts.
+                </p>
+                <h4>Finding a request again</h4>
+                <p>
+                  <strong>Search text</strong> looks at everything a request contains
+                  &mdash; the prompt, the reply, the model's reasoning, and its tool
+                  calls including commands and paths. That matters more than it sounds:
+                  on a typical machine reasoning appears in about half of all requests
+                  and tool calls in three quarters, so searching only the prompt and
+                  reply missed most of the transcript.
+                </p>
+                <p>
+                  Every word has to appear, in any order and anywhere in the request, so
+                  <code>proxy 8082</code> finds one that says "restart the proxy" in the
+                  prompt and "port 8082 is busy" in the reasoning. One word behaves as it
+                  always did. Matching ignores case and matches inside words.
                 </p>
                 <h4>When the numbers stop moving</h4>
                 <p>
