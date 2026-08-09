@@ -35,7 +35,12 @@ from free_claude_code.api.web_tools.request import (
 )
 from free_claude_code.api.web_tools.streaming import stream_web_server_tool_response
 from free_claude_code.application.errors import ApplicationError, InvalidRequestError
-from free_claude_code.application.execution import ProviderExecutor, TokenCounter
+from free_claude_code.application.execution import (
+    ProviderExecutor,
+    TokenCounter,
+    route_execution_policy,
+    route_health_registry,
+)
 from free_claude_code.application.ports import ProviderResolver
 from free_claude_code.application.routing import (
     ModelRouter,
@@ -90,6 +95,8 @@ class MessagesHandler:
         self._token_counter = token_counter
         self._provider_executor = provider_executor or ProviderExecutor(
             provider_resolver,
+            policy=route_execution_policy(settings),
+            health=route_health_registry(settings),
             token_counter=token_counter,
             generation_id=generation_id,
             log_raw_payloads=settings.log_raw_api_payloads,

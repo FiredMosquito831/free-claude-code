@@ -8,6 +8,10 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from .constants import (
     CHATGPT_OAUTH_MANAGED_CREDENTIAL_REFERENCE,
+    FALLBACK_EJECT_AFTER_FAILURES_DEFAULT,
+    FALLBACK_EJECT_SECONDS_DEFAULT,
+    FALLBACK_FIRST_TOKEN_TIMEOUT_DEFAULT,
+    FALLBACK_TOTAL_TIMEOUT_DEFAULT,
     HTTP_CONNECT_TIMEOUT_DEFAULT,
 )
 from .env_files import (
@@ -230,6 +234,38 @@ class Settings(BaseSettings):
     # one unreachable vision model must not lose every image on the machine.
     model_vision_fallbacks: str | None = Field(
         default=None, validation_alias="MODEL_VISION_FALLBACKS"
+    )
+
+    # ==================== Fallback timing ====================
+    # A chain can only rescue a request while nothing has been sent to the
+    # client, so a stalled model has to be declared stalled inside that window.
+    # Without a deadline the only thing that ends a silent attempt is the
+    # transport read timeout, minutes later and long past any use.
+    #
+    # Seconds to wait for a model's first output before giving the next model
+    # on the chain a turn. Nothing has been streamed yet, so this is invisible
+    # to the client. 0 disables it.
+    fallback_first_token_timeout: float = Field(
+        default=FALLBACK_FIRST_TOKEN_TIMEOUT_DEFAULT,
+        validation_alias="FALLBACK_FIRST_TOKEN_TIMEOUT",
+    )
+    # Whole-request budget covering every attempt, retry and recovery. This is
+    # the backstop for a stream that already committed and then stalled: no
+    # chain can replace it, but it should still end. 0 disables it.
+    fallback_total_timeout: float = Field(
+        default=FALLBACK_TOTAL_TIMEOUT_DEFAULT,
+        validation_alias="FALLBACK_TOTAL_TIMEOUT",
+    )
+    # Consecutive failures before a provider/model is skipped by routing, and
+    # how long it stays skipped. Without this every request re-pays a dead
+    # model's timeout on its way to a healthy fallback. 0 disables ejection.
+    fallback_eject_after_failures: int = Field(
+        default=FALLBACK_EJECT_AFTER_FAILURES_DEFAULT,
+        validation_alias="FALLBACK_EJECT_AFTER_FAILURES",
+    )
+    fallback_eject_seconds: float = Field(
+        default=FALLBACK_EJECT_SECONDS_DEFAULT,
+        validation_alias="FALLBACK_EJECT_SECONDS",
     )
 
     # ==================== Per-Provider Proxy ====================

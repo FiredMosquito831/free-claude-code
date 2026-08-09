@@ -15,7 +15,11 @@ from free_claude_code.api.response_streams import (
     trace_terminal_execution_error,
 )
 from free_claude_code.application.errors import ApplicationError, InvalidRequestError
-from free_claude_code.application.execution import ProviderExecutor
+from free_claude_code.application.execution import (
+    ProviderExecutor,
+    route_execution_policy,
+    route_health_registry,
+)
 from free_claude_code.application.ports import ProviderResolver
 from free_claude_code.application.routing import ModelRouter
 from free_claude_code.config.settings import Settings
@@ -48,6 +52,8 @@ class ResponsesHandler:
         self._responses_adapter = responses_adapter or OpenAIResponsesAdapter()
         self._provider_executor = provider_executor or ProviderExecutor(
             provider_resolver,
+            policy=route_execution_policy(settings),
+            health=route_health_registry(settings),
             generation_id=generation_id,
             log_raw_payloads=settings.log_raw_api_payloads,
         )
