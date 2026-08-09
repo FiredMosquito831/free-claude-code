@@ -1,7 +1,9 @@
 """Admin configuration manifest."""
 
 from collections.abc import Iterable
+from dataclasses import replace
 
+from free_claude_code.config.limits import describe_range, range_for
 from free_claude_code.config.reasoning import (
     ROOT_REASONING_PREFERENCES,
     ROUTE_REASONING_PREFERENCES,
@@ -1053,10 +1055,33 @@ _NON_PROVIDER_FIELDS: tuple[ConfigFieldSpec, ...] = (
 )
 
 
-FIELDS: tuple[ConfigFieldSpec, ...] = (
-    *(ConfigFieldSpec(**spec) for spec in provider_field_specs()),
-    *_NON_PROVIDER_FIELDS,
-    *(ConfigFieldSpec(**spec) for spec in websearch_field_specs()),
+def _with_range(field: ConfigFieldSpec) -> ConfigFieldSpec:
+    """Attach the usable range to a numeric field, and say so in its help.
+
+    Written here rather than in each spec so the bounds the form enforces are
+    the same object the server clamps to; two hand-maintained copies would
+    eventually disagree, and the form would accept a value the server changes.
+    """
+    limit = range_for(field.settings_attr)
+    if limit is None:
+        return field
+    text = f"Accepts {describe_range(limit)}."
+    description = f"{field.description} {text}".strip()
+    return replace(
+        field,
+        minimum=limit.minimum,
+        maximum=limit.maximum,
+        description=description,
+    )
+
+
+FIELDS: tuple[ConfigFieldSpec, ...] = tuple(
+    _with_range(field)
+    for field in (
+        *(ConfigFieldSpec(**spec) for spec in provider_field_specs()),
+        *_NON_PROVIDER_FIELDS,
+        *(ConfigFieldSpec(**spec) for spec in websearch_field_specs()),
+    )
 )
 FIELD_BY_KEY = {field.key: field for field in FIELDS}
 

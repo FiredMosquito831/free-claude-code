@@ -55,3 +55,7 @@ class ConfigFieldSpec:
     restart_required: bool = False
     session_sensitive: bool = False
     description: str = ""
+    # Inclusive bounds for a numeric field, published so the browser can refuse
+    # a value before it is saved instead of the server clamping it afterwards.
+    minimum: float | None = None
+    maximum: float | None = None
