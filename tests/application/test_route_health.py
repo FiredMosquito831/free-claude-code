@@ -3,8 +3,17 @@
 from free_claude_code.application.route_health import RouteHealthRegistry
 
 
-def _registry(clock: list[float], **kwargs: object) -> RouteHealthRegistry:
-    return RouteHealthRegistry(now=lambda: clock[0], **kwargs)
+def _registry(
+    clock: list[float],
+    *,
+    eject_after_failures: int,
+    eject_seconds: float,
+) -> RouteHealthRegistry:
+    return RouteHealthRegistry(
+        eject_after_failures=eject_after_failures,
+        eject_seconds=eject_seconds,
+        now=lambda: clock[0],
+    )
 
 
 def test_a_model_is_ejected_only_after_the_configured_streak() -> None:
