@@ -1209,15 +1209,22 @@ async def check_version(request: Request):
 
 
 @router.post("/admin/api/version/upgrade")
-async def upgrade_version(request: Request):
-    """Install the latest release. The running server is left untouched.
+async def upgrade_version(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    services: ApiServices = Depends(get_services),
+):
+    """Install the latest release, then restart into the new process.
 
-    A live process keeps serving the code it already imported, so the response
-    reports that a restart is required rather than restarting mid-request and
-    dropping in-flight streams.
+    The response is committed before the background restart request runs, so
+    the dashboard can enter its reconnect state instead of losing the request
+    which initiated the update.
     """
     require_loopback_admin(request)
     result = await perform_upgrade()
     payload = result.as_dict()
     payload["restart_required"] = result.ok
+    payload["automatic_restart"] = result.ok
+    if result.ok:
+        background_tasks.add_task(services.admin.request_process_restart)
     return payload

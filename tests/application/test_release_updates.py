@@ -125,6 +125,34 @@ async def test_offline_still_reports_the_running_version(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
+async def test_deferred_outcome_is_reported_once_then_consumed(
+    monkeypatch, tmp_path
+) -> None:
+    monkeypatch.setattr(release_updates, "_stage_dir", lambda: tmp_path)
+    monkeypatch.setattr(release_updates, "current_version", lambda: "4.15.0")
+    receipt = tmp_path / release_updates._PENDING_RESULT_FILENAME
+    receipt.write_text(
+        '{"ok": true, "message": "Deferred install completed."}',
+        encoding="utf-8",
+    )
+
+    async def _fetch():
+        return _release("v4.15.0"), None
+
+    monkeypatch.setattr(release_updates, "_fetch_latest_release", _fetch)
+
+    first = await get_release_status()
+    second = await get_release_status()
+
+    assert first.pending_upgrade == {
+        "ok": True,
+        "message": "Deferred install completed.",
+    }
+    assert second.pending_upgrade is None
+    assert not receipt.exists()
+
+
+@pytest.mark.asyncio
 async def test_release_lookup_is_cached_until_forced(monkeypatch) -> None:
     monkeypatch.setattr(release_updates, "current_version", lambda: "4.14.2")
     calls = 0
@@ -190,7 +218,7 @@ def test_upgrade_installs_a_verified_wheel(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(release_updates.shutil, "which", lambda _n: "/usr/bin/uv")
     _stub_download(monkeypatch, body)
     monkeypatch.setattr(
-        release_updates, "_installed_extras_and_python", lambda: ([], "3.14.0")
+        release_updates, "_installed_extras_and_python", lambda _uv=None: ([], "3.14.0")
     )
     captured: dict[str, list[str]] = {}
 
@@ -203,7 +231,7 @@ def test_upgrade_installs_a_verified_wheel(monkeypatch, tmp_path) -> None:
     result = upgrade_to_latest(_release("v4.15.0", digest=digest))
     assert result.ok is True
     assert result.installed_version == "4.15.0"
-    assert "Restart the server" in result.message
+    assert "restart automatically" in result.message
     command = captured["command"]
     assert "--force" in command
     assert "--refresh-package" in command
@@ -218,7 +246,9 @@ def test_upgrade_preserves_installed_extras(monkeypatch) -> None:
     monkeypatch.setattr(release_updates.shutil, "which", lambda _n: "/usr/bin/uv")
     _stub_download(monkeypatch, body)
     monkeypatch.setattr(
-        release_updates, "_installed_extras_and_python", lambda: (["voice"], "3.14.0")
+        release_updates,
+        "_installed_extras_and_python",
+        lambda _uv=None: (["voice"], "3.14.0"),
     )
     captured: dict[str, list[str]] = {}
 
@@ -240,7 +270,7 @@ def test_upgrade_reports_a_failing_install_command(monkeypatch) -> None:
     monkeypatch.setattr(release_updates.shutil, "which", lambda _n: "/usr/bin/uv")
     _stub_download(monkeypatch, body)
     monkeypatch.setattr(
-        release_updates, "_installed_extras_and_python", lambda: ([], "3.14.0")
+        release_updates, "_installed_extras_and_python", lambda _uv=None: ([], "3.14.0")
     )
     monkeypatch.setattr(
         release_updates.subprocess,
@@ -316,15 +346,56 @@ def test_extras_and_python_come_from_the_uv_receipt(monkeypatch, tmp_path) -> No
         'python = "3.14.0"\n',
         encoding="utf-8",
     )
-    monkeypatch.setattr(release_updates, "_receipt_path", lambda: receipt)
+    monkeypatch.setattr(release_updates, "_receipt_path", lambda _uv=None: receipt)
     extras, python = release_updates._installed_extras_and_python()
     assert extras == ["voice"]
     assert python == "3.14.0"
 
 
+def test_uv_tool_paths_come_from_uv_not_a_posix_home_assumption(
+    monkeypatch, tmp_path
+) -> None:
+    tool_dir = tmp_path / "platform" / "uv" / "tools"
+    bin_dir = tmp_path / "platform" / "uv" / "bin"
+    launcher = bin_dir / ("fcc-server.exe" if os.name == "nt" else "fcc-server")
+    launcher.parent.mkdir(parents=True)
+    launcher.write_text("launcher", encoding="utf-8")
+
+    def run(command, **_kwargs):
+        value = str(bin_dir if "--bin" in command else tool_dir)
+        return subprocess.CompletedProcess(command, 0, stdout=value + "\n", stderr="")
+
+    monkeypatch.setattr(release_updates.shutil, "which", lambda name: f"/tools/{name}")
+    monkeypatch.setattr(release_updates.subprocess, "run", run)
+
+    assert release_updates._uv_tool_dir("/tools/uv") == tool_dir
+    assert release_updates._uv_tool_bin_dir("/tools/uv") == bin_dir
+    assert release_updates._receipt_path("/tools/uv") == (
+        tool_dir / release_updates.PACKAGE_NAME / "uv-receipt.toml"
+    )
+    assert release_updates._server_launcher("/tools/uv") == launcher
+
+
+def test_wsl_drvfs_tool_directory_is_detected(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(release_updates, "_WINDOWS", False)
+    monkeypatch.setenv("WSL_DISTRO_NAME", "Ubuntu")
+    monkeypatch.setattr(
+        release_updates, "_uv_tool_dir", lambda _uv=None: Path("/mnt/c/uv/tools")
+    )
+
+    assert release_updates._wsl_windows_mount_tool_dir("uv") is True
+
+    monkeypatch.setattr(
+        release_updates, "_uv_tool_dir", lambda _uv=None: tmp_path / "uv" / "tools"
+    )
+    assert release_updates._wsl_windows_mount_tool_dir("uv") is False
+
+
 def test_missing_receipt_falls_back_to_the_running_python(monkeypatch) -> None:
     monkeypatch.setattr(
-        release_updates, "_receipt_path", lambda: Path("/definitely/missing.toml")
+        release_updates,
+        "_receipt_path",
+        lambda _uv=None: Path("/definitely/missing.toml"),
     )
     extras, python = release_updates._installed_extras_and_python()
     assert extras == []
@@ -400,6 +471,17 @@ def _stub_stream(body: bytes):
 # ------------------------------------------------- deferred Windows upgrade
 
 
+def _deferred_script(tmp_path: Path, *, command: list[str] | None = None) -> str:
+    return release_updates._deferred_helper_script(
+        uv_executable="uv",
+        command=command or ["uv", "tool", "install", "--force", "pkg"],
+        result_path=tmp_path / "r.json",
+        stage_dir=tmp_path,
+        server_launcher=tmp_path / "bin" / "fcc-server.exe",
+        working_directory=tmp_path / "cwd",
+    )
+
+
 def test_deferred_helper_script_waits_then_installs(tmp_path) -> None:
     """The helper must not run uv until this process is gone.
 
@@ -412,22 +494,27 @@ def test_deferred_helper_script_waits_then_installs(tmp_path) -> None:
         command=[r"C:\tools\uv.exe", "tool", "install", "--force", "pkg"],
         result_path=tmp_path / "result.json",
         stage_dir=tmp_path,
+        server_launcher=tmp_path / "bin" / "fcc-server.exe",
+        working_directory=tmp_path / "cwd",
     )
     assert f"$parent = {os.getpid()}" in script
     # The wait loop must precede the install, not follow it.
     assert script.index("Get-Process -Id $parent") < script.index("tool")
     assert "'tool', 'install', '--force', 'pkg'" in script
     assert str(tmp_path / "result.json") in script
+    result_write = script.index("ConvertTo-Json | Set-Content")
+    launch = script.index("Start-Process -FilePath")
+    assert result_write < launch
+    assert str(tmp_path / "bin" / "fcc-server.exe") in script
+    assert str(tmp_path / "cwd") in script
+    assert "if ($ok)" in script[:launch]
 
 
 def test_deferred_helper_script_quotes_hostile_arguments(tmp_path) -> None:
     """Release metadata reaches the wheel name; it must not break out."""
 
-    script = release_updates._deferred_helper_script(
-        uv_executable="uv",
-        command=["uv", "tool", "install", "it's; rm -rf /"],
-        result_path=tmp_path / "r.json",
-        stage_dir=tmp_path,
+    script = _deferred_script(
+        tmp_path, command=["uv", "tool", "install", "it's; rm -rf /"]
     )
     assert "'it''s; rm -rf /'" in script
 
@@ -439,7 +526,12 @@ def test_upgrade_stages_instead_of_installing_on_windows(monkeypatch, tmp_path) 
     monkeypatch.setattr(release_updates, "_stage_dir", lambda: tmp_path)
     monkeypatch.setattr(release_updates.shutil, "which", lambda name: f"/bin/{name}")
     monkeypatch.setattr(
-        release_updates, "_installed_extras_and_python", lambda: ((), "3.14")
+        release_updates,
+        "_server_launcher",
+        lambda _uv=None: tmp_path / "fcc-server.exe",
+    )
+    monkeypatch.setattr(
+        release_updates, "_installed_extras_and_python", lambda _uv=None: ((), "3.14")
     )
 
     def _boom(*args, **kwargs):
@@ -463,7 +555,7 @@ def test_upgrade_stages_instead_of_installing_on_windows(monkeypatch, tmp_path) 
     result = release_updates.upgrade_to_latest(payload)
 
     assert result.ok is True
-    assert "stop" in result.message.lower()
+    assert "start the updated server automatically" in result.message.lower()
     assert spawned, "expected a detached helper to be spawned"
     # Detached + new process group so it outlives this server and its console.
     kwargs = spawned["kwargs"]
@@ -505,12 +597,7 @@ def test_deferred_helper_survives_native_stderr(tmp_path) -> None:
     anything and never wrote its result file.
     """
 
-    script = release_updates._deferred_helper_script(
-        uv_executable="uv",
-        command=["uv", "tool", "install", "--force", "pkg"],
-        result_path=tmp_path / "r.json",
-        stage_dir=tmp_path,
-    )
+    script = _deferred_script(tmp_path)
     invoke = script.index("$output = &")
     # The native call must run with Continue in effect, not Stop.
     preference_before = script.rfind("$ErrorActionPreference = 'Continue'", 0, invoke)
@@ -528,12 +615,7 @@ def test_deferred_helper_pins_parent_identity_not_just_pid(tmp_path) -> None:
     deadline without ever installing.
     """
 
-    script = release_updates._deferred_helper_script(
-        uv_executable="uv",
-        command=["uv", "tool", "install", "--force", "pkg"],
-        result_path=tmp_path / "r.json",
-        stage_dir=tmp_path,
-    )
+    script = _deferred_script(tmp_path)
     assert "$parentStart" in script
     assert "StartTime.ToFileTimeUtc()" in script
     # An unknown start time must mean "assume alive", never "assume gone":
@@ -544,12 +626,7 @@ def test_deferred_helper_pins_parent_identity_not_just_pid(tmp_path) -> None:
 def test_deferred_helper_retries_the_install(tmp_path) -> None:
     """Handle release lags; one lost race must not leave a broken install."""
 
-    script = release_updates._deferred_helper_script(
-        uv_executable="uv",
-        command=["uv", "tool", "install", "--force", "pkg"],
-        result_path=tmp_path / "r.json",
-        stage_dir=tmp_path,
-    )
+    script = _deferred_script(tmp_path)
     assert "$delays = @(0, 5, 10, 20, 30)" in script
     assert "foreach ($wait in $delays)" in script
     assert "if ($code -eq 0) { break }" in script

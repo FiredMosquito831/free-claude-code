@@ -27,6 +27,8 @@ class AdminRuntimePort(Protocol):
 
     async def request_restart(self) -> None: ...
 
+    async def request_process_restart(self) -> None: ...
+
 
 @dataclass(frozen=True, slots=True)
 class ApiServices:

@@ -363,6 +363,35 @@ async def test_restart_required_apply_commits_without_hot_publication(tmp_path) 
 
 
 @pytest.mark.asyncio
+async def test_process_restart_uses_its_own_callback() -> None:
+    manager = ProviderRuntimeManager(_settings("nvidia_nim/model"))
+    config_restart = AsyncMock()
+    process_restart = AsyncMock()
+    runtime = ApplicationRuntime(
+        manager,
+        transcriber=None,
+        restart_callback=config_restart,
+        process_restart_callback=process_restart,
+    )
+
+    await runtime.request_process_restart()
+
+    process_restart.assert_awaited_once()
+    config_restart.assert_not_awaited()
+    await manager.close()
+
+
+@pytest.mark.asyncio
+async def test_process_restart_without_callback_is_a_noop() -> None:
+    manager = ProviderRuntimeManager(_settings("nvidia_nim/model"))
+    runtime = ApplicationRuntime(manager, transcriber=None)
+
+    await runtime.request_process_restart()
+
+    await manager.close()
+
+
+@pytest.mark.asyncio
 async def test_close_drains_messaging_before_transcriber_and_is_idempotent() -> None:
     events: list[str] = []
     manager = ProviderRuntimeManager(_settings("nvidia_nim/model"))
