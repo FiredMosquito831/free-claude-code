@@ -293,6 +293,7 @@ Enter the listed setting in the Admin UI, open **Model Config**, then search the
 | [NVIDIA NIM](https://build.nvidia.com/settings/api-keys) | `NVIDIA_NIM_API_KEY` | `nvidia_nim/nvidia/nemotron-3-super-120b-a12b` |
 | [OpenRouter](https://openrouter.ai/keys) | `OPENROUTER_API_KEY` | `open_router/openrouter/free` |
 | [Google AI Studio (Gemini)](https://aistudio.google.com/apikey) | `GEMINI_API_KEY` | `gemini/models/gemini-3.1-flash-lite` |
+| [Azure OpenAI](https://portal.azure.com/) | `AZURE_OPENAI_API_KEY` | `azure_openai/my-gpt-5-deployment` |
 | [DeepSeek](https://platform.deepseek.com/api_keys) | `DEEPSEEK_API_KEY` | `deepseek/deepseek-chat` |
 | [Mistral La Plateforme](https://console.mistral.ai/) | `MISTRAL_API_KEY` | `mistral/devstral-small-latest` |
 | [Mistral Codestral](https://console.mistral.ai/) | `CODESTRAL_API_KEY` | `mistral_codestral/codestral-latest` |
@@ -329,7 +330,11 @@ Enter the listed setting in the Admin UI, open **Model Config**, then search the
 Important provider notes:
 
 - Mistral Codestral uses a separate key from Mistral La Plateforme.
-- OpenCode Zen and OpenCode Go share `OPENCODE_API_KEY` but use different model prefixes.
+- OpenCode Zen and OpenCode Go share `OPENCODE_API_KEY` but use different model prefixes. Either card manages the shared key; the rotation policy lives on the OpenCode Zen card.
+- Azure OpenAI needs `AZURE_OPENAI_BASE_URL` as well as its key — the endpoint
+  names your own resource, so there is no default. Use the v1 form,
+  `https://YOUR-RESOURCE.openai.azure.com/openai/v1/`, and note that the model
+  you request is your **deployment name**, not the underlying model name.
 - Cloudflare requires both its API token and account ID.
 - Ollama Cloud connects directly to `ollama.com`; use the exact model IDs shown
   by FCC's model picker. Local Ollama remains available through the separate

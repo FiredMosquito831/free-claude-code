@@ -173,6 +173,17 @@ class Settings(BaseSettings):
     # ==================== Ollama Cloud ====================
     ollama_api_key: str = Field(default="", validation_alias="OLLAMA_API_KEY")
 
+    # ==================== Azure OpenAI (v1 API) ====================
+    # The endpoint is per-resource, so there is no default base URL to ship:
+    # AZURE_OPENAI_BASE_URL must name your own resource. ``model`` is the
+    # deployment name you chose in Azure, not the underlying model name.
+    azure_openai_api_key: str = Field(
+        default="", validation_alias="AZURE_OPENAI_API_KEY"
+    )
+    azure_openai_base_url: str = Field(
+        default="", validation_alias="AZURE_OPENAI_BASE_URL"
+    )
+
     # ==================== Messaging Platform Selection ====================
     # Valid: "telegram" | "discord" | "none"
     messaging_platform: str = Field(
@@ -370,6 +381,8 @@ class Settings(BaseSettings):
         default="", validation_alias="ALIBABA_CODING_CN_PROXY"
     )
     cloudflare_proxy: str = Field(default="", validation_alias="CLOUDFLARE_PROXY")
+    deepseek_proxy: str = Field(default="", validation_alias="DEEPSEEK_PROXY")
+    azure_openai_proxy: str = Field(default="", validation_alias="AZURE_OPENAI_PROXY")
     gemini_proxy: str = Field(default="", validation_alias="GEMINI_PROXY")
     groq_proxy: str = Field(default="", validation_alias="GROQ_PROXY")
     cerebras_proxy: str = Field(default="", validation_alias="CEREBRAS_PROXY")
