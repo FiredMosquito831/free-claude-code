@@ -179,6 +179,44 @@ async def test_stop_all_maps_messaging_outcome_to_application_count() -> None:
 
 
 @pytest.mark.asyncio
+async def test_provider_test_reports_why_it_failed_not_the_exception_class() -> None:
+    """ "ApplicationUnavailableError" reads as "application error" to a user.
+
+    The exception is raised with the sentence that tells them what to do, and
+    the card used to show only the class name, so a missing key looked like a
+    crash in FCC.
+    """
+    manager = ProviderRuntimeManager(_settings("nvidia_nim/model"))
+    runtime = ApplicationRuntime(manager, transcriber=None)
+
+    result = await runtime.test_provider("gemini")
+
+    assert result["ok"] is False
+    assert result["error_type"] == "ApplicationUnavailableError"
+    assert "GEMINI_API_KEY is not set" in result["message"]
+    assert "aistudio.google.com" in result["message"]
+    await manager.close()
+
+
+@pytest.mark.asyncio
+async def test_provider_test_redacts_secrets_out_of_the_message() -> None:
+    """The message reaches a browser, so it goes through the log redactor."""
+    manager = ProviderRuntimeManager(_settings("nvidia_nim/model"))
+    runtime = ApplicationRuntime(manager, transcriber=None)
+
+    lease = MagicMock()
+    lease.resolve_provider.side_effect = RuntimeError(
+        "refused: Authorization: Bearer sk-secret-value-1234567890"
+    )
+    lease.release = AsyncMock()
+    with patch.object(manager, "acquire", AsyncMock(return_value=lease)):
+        result = await runtime.test_provider("gemini")
+
+    assert "sk-secret-value-1234567890" not in result["message"]
+    await manager.close()
+
+
+@pytest.mark.asyncio
 async def test_provider_apply_constructs_before_commit_then_publishes(tmp_path) -> None:
     factory = TrackingFactory()
     manager = ProviderRuntimeManager(

@@ -2,7 +2,10 @@
 
 from typing import Any
 
-from free_claude_code.config.provider_catalog import PROVIDER_CATALOG
+from free_claude_code.config.provider_catalog import (
+    AZURE_OPENAI_BASE_URL_EXAMPLE,
+    PROVIDER_CATALOG,
+)
 from free_claude_code.config.settings import Settings
 
 _PROVIDER_FIELD_OVERRIDES: dict[str, dict[str, Any]] = {
@@ -220,6 +223,26 @@ _PROVIDER_FIELD_OVERRIDES: dict[str, dict[str, Any]] = {
             "Ollama API key for direct OpenAI-compatible Cloud access at ollama.com/v1."
         ),
     },
+    "AZURE_OPENAI_API_KEY": {
+        "label": "Azure OpenAI Key",
+        "description": (
+            "Key for your Azure OpenAI resource, from the resource's Keys and "
+            "Endpoint page in the [Azure portal](https://portal.azure.com/). "
+            "Set the Base URL below as well — it names your own resource, so "
+            "there is no default that could work. The model you request is "
+            "your **deployment name**, not the underlying model name."
+        ),
+    },
+    "AZURE_OPENAI_BASE_URL": {
+        "label": "Azure OpenAI Base URL",
+        "description": (
+            "Required. Your resource endpoint with the v1 path appended, e.g. "
+            f"`{AZURE_OPENAI_BASE_URL_EXAMPLE}`. Use this `/openai/v1/` form "
+            "rather than the older `/openai/deployments/...?api-version=` one: "
+            "it speaks plain OpenAI Chat Completions, which is the dialect FCC "
+            "sends."
+        ),
+    },
 }
 
 
@@ -232,9 +255,24 @@ def provider_field_specs() -> tuple[dict[str, Any], ...]:
         *_chatgpt_oauth_login_field_specs(),
         *_chatgpt_oauth_account_field_specs(),
         *_cloudflare_account_field_specs(),
-        *_local_base_url_field_specs(),
+        *_base_url_field_specs(),
         *_proxy_field_specs(),
     )
+
+
+def credential_env_owner(credential_env: str) -> str | None:
+    """Return the provider that owns the editable field for one credential.
+
+    Two providers may legitimately share one key -- OpenCode Zen and OpenCode
+    Go are one account behind two gateways. Only the first in catalog order
+    gets the field, because a second input bound to the same env var would put
+    two controls on the page writing one value. The other providers still need
+    to say where their key is managed, which is what this answers.
+    """
+    for descriptor in PROVIDER_CATALOG.values():
+        if descriptor.credential_env == credential_env:
+            return descriptor.provider_id
+    return None
 
 
 def _credential_field_specs() -> tuple[dict[str, Any], ...]:
@@ -243,6 +281,7 @@ def _credential_field_specs() -> tuple[dict[str, Any], ...]:
     for descriptor in PROVIDER_CATALOG.values():
         if descriptor.credential_env is None:
             continue
+        # See credential_env_owner: one field per credential, not per provider.
         if descriptor.credential_env in seen_env_keys:
             continue
         seen_env_keys.add(descriptor.credential_env)
@@ -295,21 +334,27 @@ def _rotation_field_specs() -> tuple[dict[str, Any], ...]:
     return tuple(specs)
 
 
-def _local_base_url_field_specs() -> tuple[dict[str, Any], ...]:
+def _base_url_field_specs() -> tuple[dict[str, Any], ...]:
+    """Base URL fields for providers whose endpoint is the user's to choose.
+
+    Local runtimes and region-specific hosts ship a usable default; Azure
+    OpenAI does not, because the host carries the customer's resource name.
+    """
     specs: list[dict[str, Any]] = []
     for descriptor in PROVIDER_CATALOG.values():
         if descriptor.base_url_attr is None:
             continue
-        specs.append(
-            {
-                "key": _settings_env_key(descriptor.base_url_attr),
-                "label": f"{descriptor.display_name} Base URL",
-                "section_id": "providers",
-                "provider": descriptor.provider_id,
-                "settings_attr": descriptor.base_url_attr,
-                "default": descriptor.default_base_url or "",
-            }
-        )
+        key = _settings_env_key(descriptor.base_url_attr)
+        spec = {
+            "key": key,
+            "label": f"{descriptor.display_name} Base URL",
+            "section_id": "providers",
+            "provider": descriptor.provider_id,
+            "settings_attr": descriptor.base_url_attr,
+            "default": descriptor.default_base_url or "",
+        }
+        spec.update(_PROVIDER_FIELD_OVERRIDES.get(key, {}))
+        specs.append(spec)
     return tuple(specs)
 
 

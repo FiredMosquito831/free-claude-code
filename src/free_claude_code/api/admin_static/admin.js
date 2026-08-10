@@ -905,14 +905,23 @@ function renderProviderGroups(fields) {
 
   const grid = document.createElement("div");
   grid.className = "provider-grid pv-grid";
-  fieldsByProvider.forEach((providerFields, providerId) => {
+  // Card order follows provider_status, which is catalog order, so related
+  // gateways stay adjacent. Ordering by first-field-seen instead put OpenCode
+  // Go last on the page -- its only field was an advanced proxy, generated
+  // after every credential -- which is nowhere near the OpenCode Zen card it
+  // shares an account with.
+  const ordered = [
+    ...[...statusById.keys()].filter((id) => fieldsByProvider.has(id)),
+    ...[...fieldsByProvider.keys()].filter((id) => !statusById.has(id)),
+  ];
+  ordered.forEach((providerId) => {
     const provider = statusById.get(providerId) || {
       provider_id: providerId,
       display_name: providerId,
       status: "unknown",
       label: "Unknown",
     };
-    grid.appendChild(renderProviderCard(provider, providerFields));
+    grid.appendChild(renderProviderCard(provider, fieldsByProvider.get(providerId)));
   });
   wrap.appendChild(grid);
 
@@ -1078,6 +1087,20 @@ function renderProviderCard(provider, fields) {
   const body = document.createElement("div");
   body.className = "pv-card-body";
   fields.forEach((field) => body.appendChild(renderField(field)));
+
+  // Two providers can be one account behind two endpoints (OpenCode Zen and
+  // OpenCode Go). Only one of them owns the credential input, because a second
+  // control bound to the same variable would be two ways to write one value.
+  // Without the block below the other card has nothing to configure at all,
+  // which is indistinguishable from broken. The key pool is addressed by
+  // variable rather than by provider, so add and remove work from either card.
+  const owner = provider.credential_owner_id;
+  if (owner && owner !== provider.provider_id) {
+    const shared = state.fields?.get(provider.credential_env);
+    if (shared) body.appendChild(renderSharedCredential(provider, shared));
+  } else if ((provider.credential_shared_with || []).length) {
+    body.appendChild(renderSharedCredentialNote(provider));
+  }
   card.appendChild(body);
 
   configure.addEventListener("click", () => {
@@ -1095,6 +1118,41 @@ function renderProviderCard(provider, fields) {
   });
 
   return card;
+}
+
+/** Manage a credential this provider borrows from another provider's card. */
+function renderSharedCredential(provider, field) {
+  const wrapper = document.createElement("div");
+  wrapper.className = "field field-pooled";
+
+  const label = document.createElement("label");
+  const labelText = document.createElement("span");
+  labelText.textContent = field.label;
+  label.appendChild(labelText);
+
+  const note = document.createElement("div");
+  note.className = "field-description";
+  note.textContent =
+    `Shared with ${provider.credential_owner_name}: one ` +
+    `${provider.credential_env} serves both, so adding or removing a key ` +
+    `here changes it for both. The rotation policy is set on the ` +
+    `${provider.credential_owner_name} card.`;
+
+  // No rotation select: the owner card holds it, and a second control on the
+  // same variable would be a duplicate id that never saves.
+  wrapper.append(label, note, keyManagerForField(field, { rotation: false }));
+  return wrapper;
+}
+
+/** Say on the owning card that other providers draw on the same key. */
+function renderSharedCredentialNote(provider) {
+  const note = document.createElement("div");
+  note.className = "field-description";
+  const names = (provider.credential_shared_with || []).map(
+    (other) => other.display_name,
+  );
+  note.textContent = `This key is also used by ${names.join(", ")}.`;
+  return note;
 }
 
 /** The one line on a card face that says what you actually have. */
@@ -1217,7 +1275,7 @@ function renderField(field) {
   return wrapper;
 }
 
-function keyManagerForField(field) {
+function keyManagerForField(field, { rotation = true } = {}) {
   const container = document.createElement("div");
   container.className = "key-manager";
 
@@ -1231,8 +1289,9 @@ function keyManagerForField(field) {
   header.appendChild(toggle);
 
   // Rotation policy select for this credential (participates in the normal
-  // dirty/apply flow via the shared input machinery).
-  const rotationField = state.fields.get(`${field.key}_ROTATION`);
+  // dirty/apply flow via the shared input machinery). Suppressed on a card
+  // that borrows the credential, so the select exists exactly once.
+  const rotationField = rotation ? state.fields.get(`${field.key}_ROTATION`) : null;
   if (rotationField) {
     const rotationWrap = document.createElement("label");
     rotationWrap.className = "key-manager-rotation";
@@ -1994,7 +2053,14 @@ async function testProvider(providerId, button) {
         ...result.models.map((model) => `${providerId}/${model}`),
       ]);
     } else {
-      updateProviderCard(providerId, "offline", result.error_type, result.error_type);
+      // error_type alone reads as "application error". The message says which
+      // variable is missing and where to get a key, so lead with it.
+      updateProviderCard(
+        providerId,
+        "offline",
+        result.error_type,
+        result.message || result.error_type,
+      );
     }
   } finally {
     button.disabled = false;

@@ -31,6 +31,7 @@ from free_claude_code.config.model_refs import parse_provider_type
 from free_claude_code.config.paths import messaging_state_dir_path
 from free_claude_code.config.server_urls import local_admin_url, local_proxy_root_url
 from free_claude_code.config.settings import Settings, get_settings
+from free_claude_code.core.diagnostics import redact_sensitive_error_text
 from free_claude_code.core.request_log import reset_request_log_stores
 from free_claude_code.messaging.platforms import factory as messaging_platform_factory
 from free_claude_code.messaging.platforms.factory import MessagingPlatformOptions
@@ -250,10 +251,15 @@ class ApplicationRuntime:
             provider = lease.resolve_provider(provider_id)
             infos = await provider.list_model_infos()
         except Exception as exc:
+            # The class name alone reads as "application error" to the person
+            # who pressed the button, while the message it was raised with
+            # already says what to do ("AZURE_OPENAI_API_KEY is not set. Get a
+            # key at ..."). Send both, redacted the same way logged errors are.
             return {
                 "provider_id": provider_id,
                 "ok": False,
                 "error_type": type(exc).__name__,
+                "message": redact_sensitive_error_text(str(exc).strip()),
             }
         finally:
             await lease.release()

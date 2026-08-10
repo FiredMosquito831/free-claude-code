@@ -5,7 +5,10 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from free_claude_code.application.errors import UnknownProviderError
+from free_claude_code.application.errors import (
+    ApplicationUnavailableError,
+    UnknownProviderError,
+)
 from free_claude_code.config.nim import NimSettings
 from free_claude_code.config.provider_catalog import (
     COHERE_DEFAULT_BASE,
@@ -380,6 +383,20 @@ def test_create_provider_uses_openai_chat_openrouter_by_default():
     assert isinstance(provider, OpenRouterProvider)
 
 
+def test_azure_openai_without_a_base_url_names_the_variable_to_set():
+    """No default endpoint exists, so the error has to say which one is missing.
+
+    Any shipped default would point at somebody else's Azure resource, which
+    fails later and less clearly than refusing here.
+    """
+    settings = _make_settings(azure_openai_api_key="test_azure_key")
+
+    with pytest.raises(ApplicationUnavailableError) as excinfo:
+        create_provider("azure_openai", settings)
+
+    assert "AZURE_OPENAI_BASE_URL" in str(excinfo.value)
+
+
 def test_create_provider_instantiates_each_builtin():
     settings = _make_settings(
         gemini_api_key="test_gemini_key",
@@ -397,6 +414,10 @@ def test_create_provider_instantiates_each_builtin():
         provider_rate_window=11,
         provider_max_concurrency=3,
         sambanova_api_key="test_sambanova_key",
+        azure_openai_api_key="test_azure_key",
+        # Azure ships no default endpoint: the host names the user's own
+        # resource, so construction needs one supplied here.
+        azure_openai_base_url="https://unit-test.openai.azure.com/openai/v1/",
     )
     cases = {
         "nvidia_nim": NvidiaNimProvider,
@@ -427,6 +448,7 @@ def test_create_provider_instantiates_each_builtin():
         "alibaba_coding": OpenAIChatProvider,
         "alibaba_coding_cn": OpenAIChatProvider,
         "gemini": GeminiProvider,
+        "azure_openai": OpenAIChatProvider,
         "groq": OpenAIChatProvider,
         "sambanova": OpenAIChatProvider,
         "cerebras": OpenAIChatProvider,

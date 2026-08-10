@@ -11,6 +11,16 @@ from free_claude_code.config.provider_catalog import (
 from free_claude_code.config.provider_registry import get_provider_registry
 
 from .manifest import FIELDS
+from .provider_manifest import credential_env_owner
+
+
+def _credential_sharers(credential_env: str, provider_id: str) -> list[dict[str, str]]:
+    """Every *other* provider that draws on the same credential."""
+    return [
+        {"provider_id": other.provider_id, "display_name": other.display_name}
+        for other in PROVIDER_CATALOG.values()
+        if other.credential_env == credential_env and other.provider_id != provider_id
+    ]
 
 
 def provider_config_status(
@@ -36,8 +46,20 @@ def provider_config_status(
             )
             continue
 
-        value = str(state.get(descriptor.credential_env, {}).get("value", ""))
+        # ``credential_env`` is optional on the descriptor because local
+        # runtimes have none; everything reaching here is remote, and a remote
+        # provider with no credential variable could not be configured at all.
+        credential_env = descriptor.credential_env
+        assert credential_env is not None, (
+            f"{provider_id}: a remote provider must name a credential variable"
+        )
+        value = str(state.get(credential_env, {}).get("value", ""))
         configured = bool(value.strip())
+        # Only one provider owns the editable field for a shared credential, so
+        # every other provider on that key has to be told where it lives --
+        # otherwise its card offers no way to add a key and looks broken.
+        owner_id = credential_env_owner(credential_env)
+        owner = PROVIDER_CATALOG.get(owner_id) if owner_id else None
         statuses.append(
             {
                 "provider_id": provider_id,
@@ -46,7 +68,12 @@ def provider_config_status(
                 "kind": "remote",
                 "status": "configured" if configured else "missing_key",
                 "label": "Configured" if configured else "Missing key",
-                "credential_env": descriptor.credential_env,
+                "credential_env": credential_env,
+                "credential_owner_id": owner_id,
+                "credential_owner_name": owner.display_name if owner else None,
+                "credential_shared_with": _credential_sharers(
+                    credential_env, provider_id
+                ),
                 # How many keys are in the pool. Secret values are masked to a
                 # constant before they reach the client, so the Admin UI cannot
                 # derive this itself, and fetching it per provider would mean

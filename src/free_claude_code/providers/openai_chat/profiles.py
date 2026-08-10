@@ -367,6 +367,28 @@ OPENAI_CHAT_PROFILES: dict[str, OpenAIChatProfile] = {
         ),
         NO_REASONING,
     ),
+    # Azure OpenAI addresses a *deployment*, and the deployment name is chosen
+    # by the customer -- so nothing in the request tells FCC whether it is
+    # talking to a reasoning model. ``reasoning_effort`` is therefore not sent:
+    # omitting it costs thinking on a reasoning deployment, whereas sending it
+    # to a non-reasoning one 400s every request. ``extra_body`` passes through
+    # for users who know which of theirs is which. Same trade-off, and the same
+    # resolution, as the Alibaba profiles above.
+    #
+    # ``max_completion_tokens`` rather than ``max_tokens``: the o-series and
+    # gpt-5 deployments reject the older field outright, and Azure accepts the
+    # newer one across the Chat Completions models that support either.
+    "azure_openai": OpenAIChatProfile(
+        _policy(
+            "AZURE_OPENAI",
+            ReasoningReplayMode.THINK_TAGS,
+            include_extra_body=True,
+            extra_body_validator=validate_extra_body_does_not_override_reasoning_fields,
+            max_tokens_field="max_completion_tokens",
+            default_max_tokens=ANTHROPIC_DEFAULT_MAX_OUTPUT_TOKENS,
+        ),
+        NO_REASONING,
+    ),
     "ollama_cloud": OpenAIChatProfile(
         _policy(
             "OLLAMA_CLOUD",

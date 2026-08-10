@@ -144,6 +144,95 @@ def test_provider_status_reports_the_size_of_each_key_pool(monkeypatch) -> None:
     assert by_id["nvidia_nim"]["status"] == "configured"
 
 
+def test_every_remote_provider_can_be_given_a_key_from_its_own_card() -> None:
+    """A card with no credential field and no owner offers nothing to configure.
+
+    ``opencode_go`` shipped exactly that: it shares ``OPENCODE_API_KEY`` with
+    ``opencode``, the manifest emits one field per credential rather than per
+    provider, so its card rendered a single advanced proxy input and no way to
+    add a key at all.
+    """
+    from free_claude_code.config.admin.status import provider_config_status
+
+    stranded: list[str] = []
+    for entry in provider_config_status({}):
+        if entry["kind"] != "remote":
+            continue
+        owner = entry["credential_owner_id"]
+        if owner is None:
+            stranded.append(f"{entry['provider_id']}: no provider owns its credential")
+            continue
+        if owner == entry["provider_id"]:
+            if entry["credential_env"] not in FIELD_BY_KEY:
+                stranded.append(
+                    f"{entry['provider_id']}: owns {entry['credential_env']} "
+                    "but it is not an editable field"
+                )
+            continue
+        # A borrower must name a real owner, or the UI cannot point anywhere.
+        if owner not in PROVIDER_CATALOG:
+            stranded.append(
+                f"{entry['provider_id']}: owner {owner!r} is not a provider"
+            )
+        if not entry["credential_owner_name"]:
+            stranded.append(f"{entry['provider_id']}: owner has no display name")
+
+    assert not stranded, "\n".join(stranded)
+
+
+def test_shared_credentials_name_each_other_in_both_directions() -> None:
+    """OpenCode Zen and OpenCode Go are one account behind two endpoints."""
+    from free_claude_code.config.admin.status import provider_config_status
+
+    by_id = {entry["provider_id"]: entry for entry in provider_config_status({})}
+
+    assert by_id["opencode"]["credential_owner_id"] == "opencode"
+    assert by_id["opencode_go"]["credential_owner_id"] == "opencode"
+    assert by_id["opencode_go"]["credential_owner_name"] == "OpenCode Zen"
+    # The owner says who else draws on the key; the borrower does not list itself.
+    assert [
+        other["provider_id"] for other in by_id["opencode"]["credential_shared_with"]
+    ] == ["opencode_go"]
+    assert [
+        other["provider_id"] for other in by_id["opencode_go"]["credential_shared_with"]
+    ] == ["opencode"]
+    # An unshared credential must not claim a sharer.
+    assert by_id["groq"]["credential_shared_with"] == []
+    assert by_id["groq"]["credential_owner_id"] == "groq"
+
+
+def test_every_remote_provider_can_be_routed_through_a_proxy() -> None:
+    """DeepSeek was the only remote provider with no proxy field.
+
+    Every other remote provider accepts one, so the omission read as "DeepSeek
+    cannot be proxied" rather than as the oversight it was.
+    """
+    without_proxy = [
+        provider_id
+        for provider_id, desc in PROVIDER_CATALOG.items()
+        if not desc.local and desc.proxy_attr is None
+    ]
+
+    assert without_proxy == [], (
+        f"these remote providers have no way to be proxied: {without_proxy}"
+    )
+
+
+def test_azure_openai_requires_a_base_url_naming_the_users_resource() -> None:
+    """Azure's endpoint contains the customer's resource name.
+
+    Shipping any default would send requests somewhere that is wrong for
+    everyone, so the field is deliberately empty and the missing-URL error
+    names the variable to set.
+    """
+    desc = PROVIDER_CATALOG["azure_openai"]
+
+    assert desc.default_base_url is None
+    assert desc.base_url_attr == "azure_openai_base_url"
+    assert FIELD_BY_KEY["AZURE_OPENAI_BASE_URL"].default == ""
+    assert "deployment name" in FIELD_BY_KEY["AZURE_OPENAI_API_KEY"].description
+
+
 def test_every_remote_provider_reports_a_key_count() -> None:
     """A provider missing this renders a card face with no summary line."""
     from free_claude_code.config.admin.status import provider_config_status

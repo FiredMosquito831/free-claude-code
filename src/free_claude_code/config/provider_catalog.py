@@ -62,6 +62,12 @@ ALIBABA_CN_DEFAULT_BASE = "https://dashscope.aliyuncs.com/compatible-mode/v1"
 # FCC uses the OpenAI-compatible one because that is the dialect it speaks upstream.
 ALIBABA_CODING_DEFAULT_BASE = "https://coding-intl.dashscope.aliyuncs.com/v1"
 ALIBABA_CODING_CN_DEFAULT_BASE = "https://coding.dashscope.aliyuncs.com/v1"
+# Azure OpenAI has no shippable default: the host carries your own resource
+# name (``https://<resource>.openai.azure.com/openai/v1/``), so the base URL is
+# required configuration rather than an override. The ``/openai/v1`` surface is
+# the one that speaks plain OpenAI Chat Completions with no ``api-version``
+# query parameter and no deployment path segment.
+AZURE_OPENAI_BASE_URL_EXAMPLE = "https://YOUR-RESOURCE.openai.azure.com/openai/v1/"
 
 
 @dataclass(frozen=True, slots=True)
@@ -171,6 +177,21 @@ PROVIDER_CATALOG: dict[str, ProviderDescriptor] = {
         proxy_attr="gemini_proxy",
         group="direct",
     ),
+    # Azure OpenAI, v1 API surface. ``default_base_url`` is deliberately unset:
+    # the endpoint contains the customer's own resource name, so there is no
+    # value that could be correct for anyone else. Leaving it None makes the
+    # missing URL a configuration error naming AZURE_OPENAI_BASE_URL rather
+    # than a request that silently goes somewhere wrong.
+    "azure_openai": ProviderDescriptor(
+        provider_id="azure_openai",
+        display_name="Azure OpenAI",
+        credential_env="AZURE_OPENAI_API_KEY",
+        credential_url="https://portal.azure.com/",
+        credential_attr="azure_openai_api_key",
+        base_url_attr="azure_openai_base_url",
+        proxy_attr="azure_openai_proxy",
+        group="direct",
+    ),
     "deepseek": ProviderDescriptor(
         provider_id="deepseek",
         display_name="DeepSeek",
@@ -178,6 +199,7 @@ PROVIDER_CATALOG: dict[str, ProviderDescriptor] = {
         credential_url="https://platform.deepseek.com/api_keys",
         credential_attr="deepseek_api_key",
         default_base_url=DEEPSEEK_DEFAULT_BASE,
+        proxy_attr="deepseek_proxy",
         group="direct",
     ),
     "mistral": ProviderDescriptor(
