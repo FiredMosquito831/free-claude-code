@@ -18,6 +18,7 @@ def create_test_app(
     *,
     providers: MutableMapping[str, BaseProvider] | None = None,
     restart_callback: RestartCallback | None = None,
+    process_restart_callback: RestartCallback | None = None,
 ) -> FastAPI:
     """Build an API app with explicit in-memory runtime services."""
     settings = settings or Settings()
@@ -35,6 +36,7 @@ def create_test_app(
         manager,
         transcriber=None,
         restart_callback=restart_callback,
+        process_restart_callback=process_restart_callback,
     )
     return create_app(
         ApiServices(

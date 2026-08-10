@@ -6,16 +6,13 @@ published for the latest tag, verify its SHA-256, then hand it to
 upgrade byte-identical to one done from the command line, checksum
 verification included.
 
-Upgrading never restarts the server. A running process keeps serving the code
-it already imported, so the caller is told a restart is required and chooses
-when to take the downtime.
-
-Windows cannot replace the environment underneath a running process: the
-interpreter and its loaded DLLs are held open, so ``uv tool install --force``
-fails partway through removing the old environment and leaves it broken. There
-the install is therefore *deferred* -- the verified wheel is staged and a
-detached helper installs it once this process exits. POSIX unlinks open files
-happily, so it keeps installing in place.
+A successful dashboard upgrade automatically closes the current runtime and
+starts the updated server. POSIX installs first and then replaces the process
+image through the stable ``fcc-server`` launcher. Windows cannot replace the
+environment underneath a running process: its interpreter and loaded DLLs are
+held open, so ``uv tool install --force`` would fail partway and leave it
+broken. There the verified wheel is staged and a detached PowerShell helper
+installs only after this process exits, then relaunches that stable launcher.
 """
 
 import asyncio
@@ -39,6 +36,10 @@ import httpx
 from loguru import logger
 
 from free_claude_code.config.paths import config_dir_path
+from free_claude_code.core.process_handoff import (
+    reset_process_handoff_for_tests,
+    set_external_upgrade_helper_pending,
+)
 
 PACKAGE_NAME = "free-claude-code"
 # Kept in step with the URLs in scripts/install.sh and scripts/install.ps1.
@@ -210,14 +211,21 @@ async def get_release_status(*, force: bool = False) -> ReleaseStatus:
     """Current version plus the latest published release, best effort."""
     running = current_version()
     payload, checked_at, error = await _CACHE.get(force=force)
+    pending = pending_upgrade_result()
     status = ReleaseStatus(
         current=running,
         checked_at=checked_at,
         error=error,
         restart_required=_CACHE.restart_required,
         staged_install=_CACHE.staged_install,
-        pending_upgrade=pending_upgrade_result(),
+        pending_upgrade=pending,
     )
+    # A deferred helper writes this after the old process has exited. The first
+    # version-status response from the relaunched server carries the outcome to
+    # the dashboard, then consumes it so a historical success or failure does
+    # not become a permanent banner.
+    if pending is not None:
+        clear_pending_upgrade_result()
     if payload is None:
         return status
     latest = str(payload.get("tag_name") or "").lstrip("vV") or None
@@ -230,26 +238,88 @@ async def get_release_status(*, force: bool = False) -> ReleaseStatus:
     return status
 
 
-def _receipt_path() -> Path:
-    return (
-        Path.home()
-        / ".local"
-        / "share"
-        / "uv"
-        / "tools"
-        / PACKAGE_NAME
-        / "uv-receipt.toml"
-    )
+def _uv_tool_dir(uv_executable: str | None = None) -> Path | None:
+    """Return uv's platform-correct tool root, honoring ``UV_TOOL_DIR``."""
+    uv = uv_executable or shutil.which("uv")
+    if uv is None:
+        return None
+    try:
+        completed = subprocess.run(
+            [uv, "tool", "dir"],
+            capture_output=True,
+            text=True,
+            timeout=15,
+            check=False,
+        )
+    except OSError, subprocess.SubprocessError:
+        return None
+    path = completed.stdout.strip()
+    return Path(path) if completed.returncode == 0 and path else None
 
 
-def _installed_extras_and_python() -> tuple[list[str], str]:
+def _uv_tool_bin_dir(uv_executable: str | None = None) -> Path | None:
+    """Return the stable executable directory outside a uv tool environment."""
+    uv = uv_executable or shutil.which("uv")
+    if uv is None:
+        return None
+    try:
+        completed = subprocess.run(
+            [uv, "tool", "dir", "--bin"],
+            capture_output=True,
+            text=True,
+            timeout=15,
+            check=False,
+        )
+    except OSError, subprocess.SubprocessError:
+        return None
+    path = completed.stdout.strip()
+    return Path(path) if completed.returncode == 0 and path else None
+
+
+def _server_launcher(uv_executable: str | None = None) -> Path | None:
+    """Resolve the launcher which survives replacement of the tool environment."""
+    bin_dir = _uv_tool_bin_dir(uv_executable)
+    if bin_dir is not None:
+        candidate = bin_dir / ("fcc-server.exe" if os.name == "nt" else "fcc-server")
+        if candidate.is_file():
+            return candidate
+    found = shutil.which("fcc-server")
+    return Path(found) if found else None
+
+
+def _receipt_path(uv_executable: str | None = None) -> Path:
+    root = _uv_tool_dir(uv_executable)
+    if root is None:
+        # Last-resort compatibility path for an old uv install or tests which
+        # deliberately run without uv on PATH.
+        root = Path.home() / ".local" / "share" / "uv" / "tools"
+    return root / PACKAGE_NAME / "uv-receipt.toml"
+
+
+def _wsl_windows_mount_tool_dir(uv_executable: str | None = None) -> bool:
+    """Whether WSL stores uv's tool environment on a Windows DrvFs mount."""
+    if _WINDOWS or not os.getenv("WSL_DISTRO_NAME"):
+        return False
+    root = _uv_tool_dir(uv_executable)
+    if root is None:
+        return False
+    # Check the WSL spelling before ``Path.resolve()``. A Windows test runner
+    # resolves ``/mnt/c`` as a drive-relative Windows path even when simulating
+    # WSL, while inside WSL the uv command returns this POSIX spelling directly.
+    normalized = root.as_posix().rstrip("/")
+    return normalized == "/mnt" or normalized.startswith("/mnt/")
+
+
+def _installed_extras_and_python(
+    uv_executable: str | None = None,
+) -> tuple[list[str], str]:
     """Recover the extras and Python pin uv recorded for this install.
 
     Reinstalling without them would silently drop optional features such as
     voice support, so they are carried across the upgrade.
     """
     default_python = ".".join(str(part) for part in sys.version_info[:3])
-    receipt = _receipt_path()
+    receipt = _receipt_path(uv_executable)
     try:
         data = tomllib.loads(receipt.read_text(encoding="utf-8"))
     except OSError, tomllib.TOMLDecodeError:
@@ -381,6 +451,8 @@ def _deferred_helper_script(
     command: list[str],
     result_path: Path,
     stage_dir: Path,
+    server_launcher: Path,
+    working_directory: Path,
 ) -> str:
     """PowerShell that waits for this process to exit, then installs.
 
@@ -449,7 +521,14 @@ $result = @{{
     output = $output
 }}
 $result | ConvertTo-Json | Set-Content -Path {_powershell_literal(str(result_path))} -Encoding utf8
-if ($ok) {{ Remove-Item -Path {_powershell_literal(str(stage_dir / "wheel"))} -Recurse -Force -ErrorAction SilentlyContinue }}
+if ($ok) {{
+    Remove-Item -Path {_powershell_literal(str(stage_dir / "wheel"))} -Recurse -Force -ErrorAction SilentlyContinue
+    # The launcher lives in uv's bin directory, outside the tool environment
+    # which was just replaced. Start it only after a successful install; a
+    # failed helper leaves the receipt for the dashboard and never starts a
+    # half-installed server.
+    Start-Process -FilePath {_powershell_literal(str(server_launcher))} -WorkingDirectory {_powershell_literal(str(working_directory))}
+}}
 """
 
 
@@ -474,6 +553,16 @@ def _spawn_deferred_upgrade(
         )
     stage_dir = _stage_dir()
     result_path = stage_dir / _PENDING_RESULT_FILENAME
+    server_launcher = _server_launcher(uv_executable)
+    if server_launcher is None:
+        return UpgradeResult(
+            ok=False,
+            message=(
+                "fcc-server was not found in uv's tool bin directory, so the "
+                "update cannot be restarted safely. Re-run the install command instead."
+            ),
+            log=log,
+        )
     with suppress(OSError):
         result_path.unlink()
     script_path = stage_dir / "apply-upgrade.ps1"
@@ -484,6 +573,8 @@ def _spawn_deferred_upgrade(
                 command=command,
                 result_path=result_path,
                 stage_dir=stage_dir,
+                server_launcher=server_launcher,
+                working_directory=Path.cwd(),
             ),
             encoding="utf-8",
         )
@@ -523,15 +614,16 @@ def _spawn_deferred_upgrade(
             ok=False, message=f"Could not start the update helper: {exc!s}", log=log
         )
 
-    log.append("staged for install after shutdown (Windows)")
+    log.append("staged for install and automatic restart after shutdown (Windows)")
     _CACHE.restart_required = True
     _CACHE.staged_install = True
+    set_external_upgrade_helper_pending(True)
     return UpgradeResult(
         ok=True,
         message=(
-            f"{tag or 'The latest release'} is verified and staged. Windows cannot "
-            "replace the environment while the server is running, so stop "
-            "fcc-server to finish installing, then start it again."
+            f"{tag or 'The latest release'} is verified and staged. The server "
+            "will close, install it after Windows releases the environment, then "
+            "start the updated server automatically."
         ),
         installed_version=tag or None,
         log=log,
@@ -561,6 +653,16 @@ def upgrade_to_latest(payload: dict[str, Any]) -> UpgradeResult:
 
     expected_digest = str(asset.get("digest") or "").removeprefix("sha256:").lower()
     tag = str(payload.get("tag_name") or "").lstrip("vV")
+
+    if _wsl_windows_mount_tool_dir(uv_executable):
+        return UpgradeResult(
+            ok=False,
+            message=(
+                "The uv tool directory is under /mnt, where Windows file locks can "
+                "corrupt an in-place WSL update. Move UV_TOOL_DIR to the WSL "
+                "filesystem or re-run the install command after stopping the server."
+            ),
+        )
 
     with ExitStack() as stack:
         if _WINDOWS:
@@ -605,7 +707,7 @@ def upgrade_to_latest(payload: dict[str, Any]) -> UpgradeResult:
             else "release published no digest; skipped checksum verification"
         )
 
-        extras, python = _installed_extras_and_python()
+        extras, python = _installed_extras_and_python(uv_executable)
         spec = wheel_path.as_uri()
         if extras:
             spec = f"{spec}[{','.join(extras)}]"
@@ -656,7 +758,8 @@ def upgrade_to_latest(payload: dict[str, Any]) -> UpgradeResult:
     return UpgradeResult(
         ok=True,
         message=(
-            f"Installed {tag or 'the latest release'}. Restart the server to run it."
+            f"Installed {tag or 'the latest release'}. The server will restart "
+            "automatically and reconnect the dashboard."
         ),
         installed_version=tag or None,
         log=log,
@@ -677,6 +780,7 @@ def reset_cache_for_tests() -> None:
     """Clear cached release state so tests start from a known point."""
     global _CACHE
     _CACHE = _ReleaseCache()
+    reset_process_handoff_for_tests()
 
 
 _RELEASE_NOTES_MAX_CHARS = 4000

@@ -10,6 +10,7 @@ from free_claude_code.application.model_metadata import (
     ProviderModelInfo,
     ProviderModelRefreshResult,
 )
+from free_claude_code.application.release_updates import UpgradeResult
 from free_claude_code.config.admin.values import MASKED_SECRET
 from free_claude_code.config.server_urls import local_admin_url
 from free_claude_code.config.settings import Settings
@@ -20,6 +21,53 @@ from free_claude_code.providers.chatgpt_oauth.browser_login import (
 from free_claude_code.providers.credential_rotation import CredentialRotationState
 from free_claude_code.providers.runtime.rotating import RotatingProvider
 from tests.api.support import create_test_app, provider_manager_for_app
+
+
+@pytest.mark.asyncio
+async def test_successful_upgrade_schedules_process_restart_after_response(
+    monkeypatch,
+) -> None:
+    process_restart = AsyncMock()
+    app = create_test_app(process_restart_callback=process_restart)
+
+    async def successful_upgrade() -> UpgradeResult:
+        return UpgradeResult(
+            ok=True,
+            message="Installed 9.9.9; restarting.",
+            installed_version="9.9.9",
+        )
+
+    monkeypatch.setattr(
+        "free_claude_code.api.admin_routes.perform_upgrade", successful_upgrade
+    )
+
+    with _local_client(app) as client:
+        response = client.post("/admin/api/version/upgrade", json={})
+
+    assert response.status_code == 200
+    assert response.json()["automatic_restart"] is True
+    assert response.json()["installed_version"] == "9.9.9"
+    process_restart.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_failed_upgrade_does_not_restart(monkeypatch) -> None:
+    process_restart = AsyncMock()
+    app = create_test_app(process_restart_callback=process_restart)
+
+    async def failed_upgrade() -> UpgradeResult:
+        return UpgradeResult(ok=False, message="checksum mismatch")
+
+    monkeypatch.setattr(
+        "free_claude_code.api.admin_routes.perform_upgrade", failed_upgrade
+    )
+
+    with _local_client(app) as client:
+        response = client.post("/admin/api/version/upgrade", json={})
+
+    assert response.status_code == 200
+    assert response.json()["automatic_restart"] is False
+    process_restart.assert_not_awaited()
 
 
 def _local_client(app):

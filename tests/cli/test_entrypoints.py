@@ -289,7 +289,9 @@ def test_serve_skips_admin_browser_when_setting_is_disabled() -> None:
     with (
         patch.object(commands, "get_settings", get_settings),
         patch.object(
-            commands, "_run_supervised_server", return_value=False
+            commands,
+            "_run_supervised_server",
+            return_value=commands.ServerExitAction.STOP,
         ) as run_server,
         patch.object(commands, "kill_all_best_effort"),
     ):
@@ -309,7 +311,12 @@ def test_serve_supervisor_restarts_when_app_requests_restart() -> None:
 
     apps: list[SimpleNamespace] = []
 
-    def build_asgi_app(_settings: Settings, restart_callback: Callable[[], None]):
+    def build_asgi_app(
+        _settings: Settings,
+        restart_callback: Callable[[], None],
+        process_restart_callback: Callable[[], None],
+    ):
+        assert callable(process_restart_callback)
         restart_callbacks.append(restart_callback)
         app = SimpleNamespace(runtime=SimpleNamespace(is_closed=False))
         apps.append(app)
@@ -346,6 +353,106 @@ def test_serve_supervisor_restarts_when_app_requests_restart() -> None:
     kill_all.assert_called_once()
 
 
+def test_serve_supervisor_replaces_process_after_update() -> None:
+    from free_claude_code.cli import commands
+
+    settings = _launcher_settings()
+    get_settings = MagicMock(return_value=settings)
+    get_settings.cache_clear = MagicMock()
+    process_callbacks: list[Callable[[], None]] = []
+
+    def build_asgi_app(
+        _settings: Settings,
+        restart_callback: Callable[[], None],
+        process_restart_callback: Callable[[], None],
+    ):
+        assert callable(restart_callback)
+        process_callbacks.append(process_restart_callback)
+        return SimpleNamespace(runtime=SimpleNamespace(is_closed=False))
+
+    class FakeServer:
+        def __init__(self, config):
+            self.config = config
+            self.should_exit = False
+
+        def run(self):
+            process_callbacks[-1]()
+            assert self.should_exit is True
+            self.config.app.runtime.is_closed = True
+
+    def fake_config(app, **kwargs):
+        return SimpleNamespace(app=app, kwargs=kwargs)
+
+    with (
+        patch.object(commands, "get_settings", get_settings),
+        patch.object(commands.uvicorn, "Config", side_effect=fake_config),
+        patch.object(commands.uvicorn, "Server", side_effect=FakeServer),
+        patch.object(commands, "build_asgi_app", side_effect=build_asgi_app),
+        patch.object(commands, "_schedule_open_admin_browser"),
+        patch.object(commands, "_replace_server_process") as replace_process,
+        patch.object(commands, "kill_all_best_effort") as kill_all,
+    ):
+        commands.serve()
+
+    replace_process.assert_called_once()
+    get_settings.cache_clear.assert_not_called()
+    kill_all.assert_called_once()
+
+
+def test_process_replacement_flushes_logs_and_execs_stable_launcher() -> None:
+    from free_claude_code.cli import commands
+
+    with (
+        patch.object(commands, "_WINDOWS", False),
+        patch.object(commands, "external_upgrade_helper_pending", return_value=False),
+        patch.object(commands, "_server_launcher", return_value="/stable/fcc-server"),
+        patch.object(commands.logger, "complete") as complete,
+        patch.object(commands, "kill_all_best_effort") as kill_all,
+        patch.object(commands.os, "execv") as execv,
+        patch.object(commands.sys, "argv", ["fcc-server", "--example"]),
+    ):
+        commands._replace_server_process()
+
+    complete.assert_called_once()
+    kill_all.assert_called_once()
+    execv.assert_called_once_with(
+        "/stable/fcc-server", ["/stable/fcc-server", "--example"]
+    )
+
+
+def test_windows_process_replacement_exits_for_the_external_helper() -> None:
+    from free_claude_code.cli import commands
+
+    with (
+        patch.object(commands, "_WINDOWS", True),
+        patch.object(commands.logger, "complete") as complete,
+        patch.object(commands, "kill_all_best_effort") as kill_all,
+        patch.object(commands.os, "execv") as execv,
+    ):
+        commands._replace_server_process()
+
+    complete.assert_called_once()
+    kill_all.assert_called_once()
+    execv.assert_not_called()
+
+
+def test_wsl_drvfs_process_replacement_exits_for_the_external_helper() -> None:
+    from free_claude_code.cli import commands
+
+    with (
+        patch.object(commands, "_WINDOWS", False),
+        patch.object(commands, "external_upgrade_helper_pending", return_value=True),
+        patch.object(commands.logger, "complete") as complete,
+        patch.object(commands, "kill_all_best_effort") as kill_all,
+        patch.object(commands.os, "execv") as execv,
+    ):
+        commands._replace_server_process()
+
+    complete.assert_called_once()
+    kill_all.assert_called_once()
+    execv.assert_not_called()
+
+
 def test_serve_supervisor_refuses_restart_after_incomplete_shutdown() -> None:
     from free_claude_code.cli import commands
 
@@ -355,7 +462,12 @@ def test_serve_supervisor_refuses_restart_after_incomplete_shutdown() -> None:
     servers: list[object] = []
     restart_callbacks: list[Callable[[], None]] = []
 
-    def build_asgi_app(_settings: Settings, restart_callback: Callable[[], None]):
+    def build_asgi_app(
+        _settings: Settings,
+        restart_callback: Callable[[], None],
+        process_restart_callback: Callable[[], None],
+    ):
+        assert callable(process_restart_callback)
         restart_callbacks.append(restart_callback)
         return SimpleNamespace(runtime=SimpleNamespace(is_closed=False))
 
@@ -400,7 +512,11 @@ def test_serve_migrates_legacy_env_before_loading_settings(tmp_path: Path) -> No
     with (
         patch("pathlib.Path.home", return_value=tmp_path),
         patch.object(commands, "get_settings", get_settings),
-        patch.object(commands, "_run_supervised_server", return_value=False),
+        patch.object(
+            commands,
+            "_run_supervised_server",
+            return_value=commands.ServerExitAction.STOP,
+        ),
         patch.object(commands, "kill_all_best_effort"),
     ):
         commands.serve()
@@ -428,7 +544,11 @@ def test_serve_migrates_hf_token_before_loading_settings(
     with (
         patch("pathlib.Path.home", return_value=tmp_path),
         patch.object(commands, "get_settings", get_settings),
-        patch.object(commands, "_run_supervised_server", return_value=False),
+        patch.object(
+            commands,
+            "_run_supervised_server",
+            return_value=commands.ServerExitAction.STOP,
+        ),
         patch.object(commands, "kill_all_best_effort"),
         patch.object(commands, "explicit_env_file_migration_warning"),
     ):

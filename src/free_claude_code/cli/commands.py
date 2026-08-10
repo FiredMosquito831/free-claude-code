@@ -2,13 +2,16 @@
 
 import os
 import shutil
+import subprocess
 import sys
 import threading
 import time
 import webbrowser
+from enum import Enum
 from pathlib import Path
 
 import uvicorn
+from loguru import logger
 
 from free_claude_code.cli.launchers.common import preflight_proxy
 from free_claude_code.cli.process_registry import kill_all_best_effort
@@ -24,9 +27,71 @@ from free_claude_code.config.paths import (
 )
 from free_claude_code.config.server_urls import local_admin_url, local_proxy_root_url
 from free_claude_code.config.settings import Settings, get_settings
+from free_claude_code.core.process_handoff import external_upgrade_helper_pending
 from free_claude_code.runtime.bootstrap import build_asgi_app
 
 SERVER_GRACEFUL_SHUTDOWN_SECONDS = 5
+_WINDOWS = os.name == "nt"
+
+
+class ServerExitAction(Enum):
+    """What the supervisor does after one fully closed server generation."""
+
+    STOP = "stop"
+    RELOAD = "reload"
+    REPLACE_PROCESS = "replace_process"
+
+
+def _server_launcher() -> str | None:
+    """Return the stable launcher outside the uv-managed tool environment."""
+    bin_dir = _uv_tool_bin_dir()
+    if bin_dir is not None:
+        candidate = bin_dir / ("fcc-server.exe" if os.name == "nt" else "fcc-server")
+        if candidate.is_file():
+            return str(candidate)
+    return shutil.which("fcc-server")
+
+
+def _uv_tool_bin_dir() -> Path | None:
+    uv = shutil.which("uv")
+    if uv is None:
+        return None
+    try:
+        completed = subprocess.run(
+            [uv, "tool", "dir", "--bin"],
+            capture_output=True,
+            text=True,
+            timeout=15,
+            check=False,
+        )
+    except OSError, subprocess.SubprocessError:
+        return None
+    path = completed.stdout.strip()
+    return Path(path) if completed.returncode == 0 and path else None
+
+
+def _replace_server_process() -> None:
+    """Hand off to the updated server after the old runtime fully closes."""
+    # Windows cannot replace the environment until this interpreter exits. Its
+    # external PowerShell helper is already waiting and will launch the stable
+    # shim after a successful install, so the only safe action here is to flush
+    # and return from serve().
+    if _WINDOWS or external_upgrade_helper_pending():
+        logger.info("Server closed; the update helper will install and restart it.")
+        logger.complete()
+        kill_all_best_effort()
+        return
+
+    launcher = _server_launcher()
+    if launcher is None:
+        logger.error("Updated successfully, but fcc-server could not be found on PATH.")
+        return
+    # ``enqueue=True`` logging uses a background queue. exec() destroys its
+    # writer thread, so wait until every queued record reaches its sink first.
+    logger.info("Restarting with the updated server...")
+    logger.complete()
+    kill_all_best_effort()
+    os.execv(launcher, [launcher, *sys.argv[1:]])
 
 
 def serve() -> None:
@@ -41,9 +106,13 @@ def serve() -> None:
                 should_open_admin = (
                     settings.open_admin_browser and not opened_admin_browser
                 )
-                if not _run_supervised_server(
+                action = _run_supervised_server(
                     settings, open_admin_browser=should_open_admin
-                ):
+                )
+                if action is ServerExitAction.STOP:
+                    return
+                if action is ServerExitAction.REPLACE_PROCESS:
+                    _replace_server_process()
                     return
                 opened_admin_browser = opened_admin_browser or should_open_admin
                 get_settings.cache_clear()
@@ -72,19 +141,31 @@ def _schedule_open_admin_browser(settings: Settings) -> None:
     ).start()
 
 
-def _run_supervised_server(settings: Settings, *, open_admin_browser: bool) -> bool:
-    """Run once; restart only after the old ownership graph fully closes."""
+def _run_supervised_server(
+    settings: Settings, *, open_admin_browser: bool
+) -> ServerExitAction:
+    """Run once; act only after the old ownership graph fully closes."""
 
-    restart_requested = False
+    requested = ServerExitAction.STOP
     server_holder: dict[str, uvicorn.Server] = {}
 
-    def request_restart() -> None:
-        nonlocal restart_requested
-        restart_requested = True
+    def request(action: ServerExitAction) -> None:
+        nonlocal requested
+        requested = action
         if server := server_holder.get("server"):
             server.should_exit = True
 
-    asgi_app = build_asgi_app(settings, restart_callback=request_restart)
+    def request_restart() -> None:
+        request(ServerExitAction.RELOAD)
+
+    def request_process_restart() -> None:
+        request(ServerExitAction.REPLACE_PROCESS)
+
+    asgi_app = build_asgi_app(
+        settings,
+        restart_callback=request_restart,
+        process_restart_callback=request_process_restart,
+    )
     config = uvicorn.Config(
         asgi_app,
         host=settings.host,
@@ -97,7 +178,9 @@ def _run_supervised_server(settings: Settings, *, open_admin_browser: bool) -> b
     if open_admin_browser:
         _schedule_open_admin_browser(settings)
     server.run()
-    return restart_requested and asgi_app.runtime.is_closed
+    if requested is ServerExitAction.STOP:
+        return requested
+    return requested if asgi_app.runtime.is_closed else ServerExitAction.STOP
 
 
 def init() -> None:

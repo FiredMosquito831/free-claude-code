@@ -4025,21 +4025,27 @@ function renderVersionBanners() {
   const info = state.versionInfo;
   if (!info || info.error) return;
 
-  // A deferred install (Windows) reports its outcome only after the server
-  // that staged it has exited, so surface it on the next start.
-  if (info.pending_upgrade && info.pending_upgrade.ok === false) {
+  // A deferred install reports its outcome only after the old server has exited,
+  // so surface the one-time receipt from the relaunched process.
+  if (info.pending_upgrade) {
     const banner = document.createElement("div");
-    banner.className = "version-banner restart-required";
+    banner.className = info.pending_upgrade.ok
+      ? "version-banner"
+      : "version-banner restart-required";
     const body = document.createElement("div");
     body.className = "version-banner-body";
     const title = document.createElement("div");
     title.className = "version-banner-title";
-    title.textContent = "The staged update did not install";
+    title.textContent = info.pending_upgrade.ok
+      ? `Updated and restarted on v${info.current}`
+      : "The staged update did not install";
     const detail = document.createElement("div");
     detail.className = "version-banner-detail";
-    detail.textContent = `${
-      info.pending_upgrade.message || "The update helper reported a failure."
-    } Your current version is still intact — re-run the install command to update.`;
+    detail.textContent = info.pending_upgrade.ok
+      ? info.pending_upgrade.message || "The deferred install completed."
+      : `${
+          info.pending_upgrade.message || "The update helper reported a failure."
+        } Re-run the install command to update.`;
     body.append(title, detail);
     banner.appendChild(body);
     container.appendChild(banner);
@@ -4054,15 +4060,13 @@ function renderVersionBanners() {
     const title = document.createElement("div");
     title.className = "version-banner-title";
     title.textContent = info.staged_install
-      ? "Update staged — stop the server to finish installing"
-      : "Update installed — restart the server to apply";
+      ? "Update staged — restarting automatically"
+      : "Update installed — restarting automatically";
     const detail = document.createElement("div");
     detail.className = "version-banner-detail";
     detail.textContent = info.staged_install
-      ? "Windows cannot replace the environment while the server is running. Stop fcc-server; the update installs automatically, then start it again."
-      : info.installed_version
-        ? `Installed v${info.installed_version}.`
-        : "The new version is installed.";
+      ? "The helper will install after this process closes, then start the updated server."
+      : "The new version is installed; the server is closing and will reconnect here.";
     body.append(title, detail);
     banner.appendChild(body);
     container.appendChild(banner);
@@ -4188,6 +4192,27 @@ async function checkForUpdates(button) {
   }
 }
 
+async function waitForUpdatedServer(expectedVersion) {
+  const deadline = Date.now() + 120000;
+  let sawDisconnect = false;
+  while (Date.now() < deadline) {
+    try {
+      const info = await api("/admin/api/version");
+      if (!expectedVersion || info.current === expectedVersion) return info;
+    } catch {
+      // The old process is expected to disappear between the upgrade response
+      // and the new process binding the port. Silence that ordinary handoff.
+      sawDisconnect = true;
+    }
+    await new Promise((resolve) => setTimeout(resolve, sawDisconnect ? 1000 : 500));
+  }
+  throw new Error(
+    expectedVersion
+      ? `The server did not come back on v${expectedVersion} within two minutes.`
+      : "The server did not come back within two minutes.",
+  );
+}
+
 async function runVersionUpgrade(button) {
   if (state.versionUpgrading) return;
   state.versionUpgrading = true;
@@ -4213,11 +4238,24 @@ async function runVersionUpgrade(button) {
       logEl.hidden = false;
     }
     if (result.ok) {
-      showMessage(result.message || "Update installed", "ok");
+      [button, updateButton].forEach((candidate) => {
+        if (candidate) candidate.textContent = "Restarting — reconnecting...";
+      });
+      showMessage(result.message || "Update installed; restarting...", "ok");
+      state.versionInfo = await waitForUpdatedServer(result.installed_version);
+      renderVersionIndicator();
+      renderVersionBanners();
+      renderVersionPanel();
+      showMessage(
+        state.versionInfo.current
+          ? `Updated and restarted on v${state.versionInfo.current}`
+          : "Updated and restarted",
+        "ok",
+      );
     } else {
       showMessage(result.message || "Update failed", "error");
+      await loadVersionInfo();
     }
-    await loadVersionInfo();
   } catch (error) {
     showMessage(`Update failed: ${error.message}`, "error");
   } finally {

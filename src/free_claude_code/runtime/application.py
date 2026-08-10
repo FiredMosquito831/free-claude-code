@@ -109,10 +109,12 @@ class ApplicationRuntime:
         *,
         transcriber: Transcriber | None,
         restart_callback: RestartCallback | None = None,
+        process_restart_callback: RestartCallback | None = None,
     ) -> None:
         self.provider_manager = provider_manager
         self._transcriber = transcriber
         self._restart_callback = restart_callback
+        self._process_restart_callback = process_restart_callback
         self._config_lock = asyncio.Lock()
         self._pending_fields: list[str] = []
         self._messaging_runtime: MessagingRuntime | None = None
@@ -275,6 +277,20 @@ class ApplicationRuntime:
 
     async def request_restart(self) -> None:
         callback = self._restart_callback
+        if callback is None:
+            return
+        result = callback()
+        if inspect.isawaitable(result):
+            await result
+
+    async def request_process_restart(self) -> None:
+        """Close this process and relaunch the installed server executable.
+
+        Distinct from :meth:`request_restart`, which rebuilds the ASGI app in
+        the current interpreter for configuration changes. A package update has
+        replaced code on disk, so only a new process can import it.
+        """
+        callback = self._process_restart_callback
         if callback is None:
             return
         result = callback()
