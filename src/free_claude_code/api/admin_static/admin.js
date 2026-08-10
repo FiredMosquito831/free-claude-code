@@ -1134,13 +1134,16 @@ function renderSharedCredential(provider, field) {
   note.className = "field-description";
   note.textContent =
     `Shared with ${provider.credential_owner_name}: one ` +
-    `${provider.credential_env} serves both, so adding or removing a key ` +
-    `here changes it for both. The rotation policy is set on the ` +
-    `${provider.credential_owner_name} card.`;
+    `${provider.credential_env} serves both. Keys and rotation can be managed ` +
+    `from either card, and a change here applies to both.`;
 
-  // No rotation select: the owner card holds it, and a second control on the
-  // same variable would be a duplicate id that never saves.
-  wrapper.append(label, note, keyManagerForField(field, { rotation: false }));
+  // Its own key manager and its own rotation select, with a card-scoped
+  // element id so the duplicate control is still addressable and labelled.
+  wrapper.append(
+    label,
+    note,
+    keyManagerForField(field, { idSuffix: `--${provider.provider_id}` }),
+  );
   return wrapper;
 }
 
@@ -1151,7 +1154,9 @@ function renderSharedCredentialNote(provider) {
   const names = (provider.credential_shared_with || []).map(
     (other) => other.display_name,
   );
-  note.textContent = `This key is also used by ${names.join(", ")}.`;
+  note.textContent =
+    `This key is also used by ${names.join(", ")}, and can be managed from ` +
+    `either card.`;
   return note;
 }
 
@@ -1275,7 +1280,7 @@ function renderField(field) {
   return wrapper;
 }
 
-function keyManagerForField(field, { rotation = true } = {}) {
+function keyManagerForField(field, { idSuffix = "" } = {}) {
   const container = document.createElement("div");
   container.className = "key-manager";
 
@@ -1289,24 +1294,30 @@ function keyManagerForField(field, { rotation = true } = {}) {
   header.appendChild(toggle);
 
   // Rotation policy select for this credential (participates in the normal
-  // dirty/apply flow via the shared input machinery). Suppressed on a card
-  // that borrows the credential, so the select exists exactly once.
-  const rotationField = rotation ? state.fields.get(`${field.key}_ROTATION`) : null;
+  // dirty/apply flow via the shared input machinery). Providers that share a
+  // credential each get their own select, kept in step by syncSharedControls:
+  // the policy is a property of the key pool, so changing it on either card
+  // has to be the same change, not two competing ones.
+  const rotationField = state.fields.get(`${field.key}_ROTATION`);
   if (rotationField) {
     const rotationWrap = document.createElement("label");
     rotationWrap.className = "key-manager-rotation";
     const rotationLabel = document.createElement("span");
     rotationLabel.textContent = "Rotation";
     const rotationInput = inputForField(rotationField);
-    rotationInput.id = `field-${rotationField.key}`;
+    rotationInput.id = `field-${rotationField.key}${idSuffix}`;
     rotationInput.dataset.key = rotationField.key;
     rotationInput.dataset.original = rotationField.value || "";
     rotationInput.dataset.secret = "false";
     rotationInput.dataset.configured = rotationField.configured ? "true" : "false";
     rotationInput.dataset.fieldType = rotationField.type;
     rotationInput.disabled = rotationField.locked;
-    rotationInput.addEventListener("input", updateDirtyState);
-    rotationInput.addEventListener("change", updateDirtyState);
+    const onRotationChange = () => {
+      syncSharedControls(rotationInput);
+      updateDirtyState();
+    };
+    rotationInput.addEventListener("input", onRotationChange);
+    rotationInput.addEventListener("change", onRotationChange);
     rotationInput.title = rotationField.description || "Key rotation policy";
     rotationWrap.append(rotationLabel, rotationInput);
     header.appendChild(rotationWrap);
@@ -1965,6 +1976,24 @@ function changedValues() {
     }
   });
   return values;
+}
+
+/** Keep every control bound to one variable showing the same value.
+ *
+ * Providers that share a credential each render their own rotation select, so
+ * the setting is editable wherever you happen to be looking. They are the same
+ * variable, so leaving them to disagree would mean the page shows two answers
+ * and `changedValues()` submits whichever it walked last. Mirroring on edit
+ * makes the duplicate a view of one value rather than a second copy of it, and
+ * the dirty count stays at one because it counts keys, not controls.
+ */
+function syncSharedControls(source) {
+  const key = source.dataset.key;
+  document
+    .querySelectorAll(`input[data-key="${key}"], select[data-key="${key}"]`)
+    .forEach((twin) => {
+      if (twin !== source && twin.value !== source.value) twin.value = source.value;
+    });
 }
 
 function updateDirtyState() {
