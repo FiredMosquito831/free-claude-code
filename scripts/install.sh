@@ -519,11 +519,16 @@ if [ "$dry_run" -eq 1 ]; then
 else
     printf '\nMy Claude Code %s is installed and verified.\n' "$FCC_VERSION"
     printf '\nStart the proxy:\n'
-    printf '  mcc-server\n'
+    printf '  mcc-server              Start the local proxy and admin dashboard\n'
     printf '\nUse a coding agent through the proxy:\n'
-    printf '  mcc-claude   Claude Code via the proxy\n'
-    printf '  mcc-codex    Codex via the proxy\n'
-    printf '  mcc-pi       Pi via the proxy\n'
-    printf '\nModel discovery for Claude Code (recommended):\n'
-    printf '  mcc-claude --discover-models\n'
+    printf '  mcc-claude              Launch Claude Code through the proxy\n'
+    printf '  mcc-claude --discover-models   Enable the model picker from the catalog\n'
+    printf '  mcc-codex               Launch Codex through the proxy\n'
+    printf '  mcc-pi                  Launch Pi through the proxy\n'
+    printf '\nManage and inspect:\n'
+    printf '  mcc-init                Create or repair ~/.fcc/.env\n'
+    printf '  mcc-help                Show what each command does\n'
+    printf '\nThe legacy fcc-* commands (fcc-server, fcc-claude, ...) remain as aliases.\n'
+    printf '\nTo use an update installed while the server is running, restart the proxy\n'
+    printf 'with: mcc-server\n'
 fi
