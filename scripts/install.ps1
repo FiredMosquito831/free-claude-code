@@ -533,7 +533,7 @@ function Install-FreeClaudeCode {
     }
     $uvPath = $uvCommand.Source
 
-    $running = Get-RunningLaunchers
+    $running = @(Get-RunningLaunchers)
     if ($running.Count -gt 0) {
         # The app is live. Windows cannot replace the tool environment while a
         # process runs from it, so stage the verified wheel and let a detached
@@ -631,7 +631,13 @@ function Get-RunningLaunchers {
             $running += $process
         }
     }
-    return $running
+    # Emit to the pipeline (no explicit return) so the caller's @(...) captures
+    # 0, 1, or many results as an array. A bare return of $running would unwrap
+    # a single Process object into a scalar and a later `.Count` would fail
+    # under Set-StrictMode.
+    foreach ($process in $running) {
+        $process
+    }
 }
 
 function Start-DeferredInstall {
