@@ -304,8 +304,8 @@ def test_install_sh_fresh_install_is_verified(posix_harness: PosixHarness) -> No
     assert calls.index("uv-install") < calls.index("uv:--version")
     assert any(
         call.startswith(
-            "uv:tool install --force --refresh-package free-claude-code "
-            "--python 3.14.0 free-claude-code @ file://"
+            "uv:tool install --force --refresh-package my-claude-code "
+            "--python 3.14.0 my-claude-code @ file://"
         )
         and FCC_WHEEL_NAME in call
         for call in calls
@@ -320,6 +320,33 @@ def test_install_sh_fresh_install_is_verified(posix_harness: PosixHarness) -> No
         for call in calls
         for host in ("claude.ai", "chatgpt.com", "pi.dev")
     ), calls
+
+
+def test_install_sh_digest_comes_from_the_asset_not_the_release_body(
+    posix_harness: PosixHarness,
+) -> None:
+    """A release body that mentions a sha256 must not pollute the wheel digest.
+
+    GitHub places the release ``body`` before the ``assets`` in the payload, and
+    release notes often repeat the wheel digest as prose (the v5.0.0 notes do).
+    The installer must verify against the asset's own ``digest`` field, not the
+    first ``"digest"`` in the feed.
+    """
+    poisoned = RELEASE_FEED_JSON.replace(
+        '"name": "v{FCC_VERSION}",',
+        '"name": "v{FCC_VERSION}",\n  "body": "built sha256:0000000000000000000000000000000000000000000000000000000000000000",',
+        1,
+    )
+    (posix_harness.fixtures / "release-feed.json").write_text(
+        poisoned, encoding="utf-8"
+    )
+
+    result = posix_harness.run()
+
+    # The body's bogus digest must not have been used, or the checksum check
+    # (which compares against the real FCC_WHEEL_SHA256) would have refused.
+    assert result.returncode == 0, result.stderr
+    assert "is installed and verified." in result.stdout
 
 
 def test_install_sh_replaces_obsolete_uv(posix_harness: PosixHarness) -> None:
@@ -399,7 +426,7 @@ def test_install_sh_voice_flags_only_change_fcc_spec(
 
     assert result.returncode == 0, result.stderr
     assert any(
-        "--torch-backend cu130 free-claude-code[voice,voice_local] @ file://" in call
+        "--torch-backend cu130 my-claude-code[voice,voice_local] @ file://" in call
         and FCC_WHEEL_NAME in call
         for call in posix_harness.calls()
     )
@@ -696,8 +723,8 @@ def test_install_ps1_fresh_install_is_verified(
     assert calls.index("uv-install") < calls.index("uv:--version")
     assert any(
         call.startswith(
-            "uv:tool install --force --refresh-package free-claude-code "
-            '--python 3.14.0 "free-claude-code @ file:///'
+            "uv:tool install --force --refresh-package my-claude-code "
+            '--python 3.14.0 "my-claude-code @ file:///'
         )
         and FCC_WHEEL_NAME in call
         for call in calls
@@ -806,7 +833,7 @@ def test_install_ps1_voice_flags_only_change_fcc_spec(
 
     assert result.returncode == 0, result.stderr
     assert any(
-        '--torch-backend cu130 "free-claude-code[voice,voice_local] @ file:///' in call
+        '--torch-backend cu130 "my-claude-code[voice,voice_local] @ file:///' in call
         and FCC_WHEEL_NAME in call
         for call in powershell_harness.calls()
     )

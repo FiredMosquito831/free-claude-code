@@ -412,7 +412,7 @@ function Resolve-Release {
             $resolvedSha256 = ([string] $wheelAsset[0].digest) -replace '^sha256:', ''
         }
     }
-    $wheelName = "free_claude_code-$resolvedVersion-py3-none-any.whl"
+    $wheelName = "my_claude_code-$resolvedVersion-py3-none-any.whl"
     # Returned rather than stored in script scope: when this file is run as a
     # scriptblock (the published `irm | iex` form) a function's `$script:`
     # writes are not visible to the rest of the script.
@@ -485,15 +485,15 @@ function Get-PackageSpec {
     }
 
     if ($includeNim -and $includeLocal) {
-        return "free-claude-code[voice,voice_local] @ $PackageUrl"
+        return "my-claude-code[voice,voice_local] @ $PackageUrl"
     }
     if ($includeNim) {
-        return "free-claude-code[voice] @ $PackageUrl"
+        return "my-claude-code[voice] @ $PackageUrl"
     }
     if ($includeLocal) {
-        return "free-claude-code[voice_local] @ $PackageUrl"
+        return "my-claude-code[voice_local] @ $PackageUrl"
     }
-    return "free-claude-code @ $PackageUrl"
+    return "my-claude-code @ $PackageUrl"
 }
 
 function Install-FreeClaudeCode {
@@ -511,7 +511,7 @@ function Install-FreeClaudeCode {
         "install",
         "--force",
         "--refresh-package",
-        "free-claude-code",
+        "my-claude-code",
         "--python",
         $PythonVersion
     )

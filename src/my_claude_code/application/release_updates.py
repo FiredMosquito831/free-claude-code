@@ -45,7 +45,7 @@ from my_claude_code.core.process_handoff import (
     set_external_upgrade_helper_pending,
 )
 
-PACKAGE_NAME = "free-claude-code"
+PACKAGE_NAME = "my-claude-code"
 # Kept in step with the URLs in scripts/install.sh and scripts/install.ps1.
 RELEASE_REPO = "FiredMosquito831/free-claude-code"
 _LATEST_RELEASE_URL = f"https://api.github.com/repos/{RELEASE_REPO}/releases/latest"

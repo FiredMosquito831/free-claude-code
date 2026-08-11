@@ -87,7 +87,7 @@ def _uv_tool_bin_dir() -> Path | None:
     return Path(path) if completed.returncode == 0 and path else None
 
 
-def _replace_server_process() -> None:
+def _replace_server_process(settings: Settings) -> None:
     """Hand off to the updated server after the old runtime fully closes."""
     # Windows cannot replace the environment until this interpreter exits. Its
     # external PowerShell helper is already waiting and will launch the stable
@@ -103,6 +103,20 @@ def _replace_server_process() -> None:
     if launcher is None:
         logger.error("Updated successfully, but fcc-server could not be found on PATH.")
         return
+    # The graceful drain already finished (server.run() returned), but the OS can
+    # still hold the listening socket for a beat afterward -- especially under
+    # WSL. Wait a bounded moment for it to release so the new process binds
+    # cleanly instead of failing its own bind and dying. Read-only probe: it
+    # never kills anything and returns within the budget regardless.
+    wait_budget = max(5.0, min(float(settings.server_graceful_shutdown_seconds), 30.0))
+    if not wait_for_port_free(settings.host, settings.port, timeout=wait_budget):
+        logger.warning(
+            "Port {host}:{port} did not free within {budget}s before restart; "
+            "the new server will wait again on bind.",
+            host=settings.host,
+            port=settings.port,
+            budget=wait_budget,
+        )
     # ``enqueue=True`` logging uses a background queue. exec() destroys its
     # writer thread, so wait until every queued record reaches its sink first.
     logger.info("Restarting with the updated server...")
@@ -190,7 +204,7 @@ def serve() -> None:
                 if action is ServerExitAction.STOP:
                     return
                 if action is ServerExitAction.REPLACE_PROCESS:
-                    _replace_server_process()
+                    _replace_server_process(settings)
                     return
                 opened_admin_browser = opened_admin_browser or should_open_admin
                 get_settings.cache_clear()
@@ -259,12 +273,14 @@ def _run_supervised_server(
     if open_admin_browser:
         _schedule_open_admin_browser(settings)
     # A held port is the usual reason a start fails. During a restart the
-    # previous generation may still own the socket for a beat, so wait a bounded
-    # moment for it to free before declaring a genuine conflict. Never kills the
-    # owner; at worst it is diagnosed and the start is abandoned.
+    # previous generation may still own the socket for a beat (longer under WSL),
+    # so wait a bounded moment -- scaled to the configured graceful-shutdown
+    # budget -- for it to free before declaring a genuine conflict. Never kills
+    # the owner; at worst it is diagnosed and the start is abandoned.
+    bind_wait = max(5.0, min(float(settings.server_graceful_shutdown_seconds), 60.0))
     if not probe_port_available(
         settings.host, settings.port
-    ) and not wait_for_port_free(settings.host, settings.port):
+    ) and not wait_for_port_free(settings.host, settings.port, timeout=bind_wait):
         _log_bind_failure(settings, _address_in_use_error(settings))
         raise SystemExit(1)
     try:
