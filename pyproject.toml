@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "free-claude-code"
-version = "4.54.2"
+version = "4.55.0"
 description = "Local proxy connecting coding agents to OpenAI-compatible AI providers"
 readme = "README.md"
 requires-python = ">=3.14.0"
@@ -27,6 +27,7 @@ dependencies = [
 ]
 
 [project.scripts]
+# Legacy command family (free-claude-code owner) — preserved as aliases.
 fcc-server = "free_claude_code.cli.entrypoints:serve"
 free-claude-code = "free_claude_code.cli.entrypoints:serve"
 fcc-init = "free_claude_code.cli.entrypoints:init"
@@ -36,6 +37,16 @@ fcc-codex = "free_claude_code.cli.launchers.codex:launch"
 fcc-pi = "free_claude_code.cli.launchers.pi:launch"
 fcc-chatgpt-oauth-login = "free_claude_code.cli.entrypoints:chatgpt_oauth_login"
 fcc-compact-log = "free_claude_code.cli.entrypoints:compact_log"
+# Native command family (my-claude-code owner) — same implementations.
+mcc-server = "free_claude_code.cli.entrypoints:serve"
+my-claude-code = "free_claude_code.cli.entrypoints:serve"
+mcc-init = "free_claude_code.cli.entrypoints:init"
+mcc-claude = "free_claude_code.cli.launchers.claude:launch"
+mcc-claude-old = "free_claude_code.cli.launchers.claude:launch_legacy"
+mcc-codex = "free_claude_code.cli.launchers.codex:launch"
+mcc-pi = "free_claude_code.cli.launchers.pi:launch"
+mcc-chatgpt-oauth-login = "free_claude_code.cli.entrypoints:chatgpt_oauth_login"
+mcc-compact-log = "free_claude_code.cli.entrypoints:compact_log"
 
 [project.optional-dependencies]
 voice = [

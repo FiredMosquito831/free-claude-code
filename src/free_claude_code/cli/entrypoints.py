@@ -1,13 +1,19 @@
-"""Lightweight entry points for installed Free Claude Code commands."""
+"""Lightweight entry points for installed commands.
+
+Both the legacy ``free-claude-code`` owner and the native ``my-claude-code``
+owner register console scripts that delegate to these same implementations, so
+the two command families are interchangeable entry points.
+"""
 
 import sys
 from collections.abc import Sequence
 
+from free_claude_code.core.identity import owner_for_invocation
 from free_claude_code.core.version import package_version
 
 
 def serve(argv: Sequence[str] | None = None) -> None:
-    """Start the FastAPI server (registered as ``fcc-server``)."""
+    """Start the FastAPI server."""
     if _print_version_if_requested(argv):
         return
 
@@ -18,7 +24,7 @@ def serve(argv: Sequence[str] | None = None) -> None:
 
 
 def init(argv: Sequence[str] | None = None) -> None:
-    """Scaffold config at ~/.fcc/.env (registered as ``fcc-init``)."""
+    """Scaffold config at ~/.fcc/.env."""
     if _print_version_if_requested(argv):
         return
 
@@ -29,7 +35,7 @@ def init(argv: Sequence[str] | None = None) -> None:
 
 
 def chatgpt_oauth_login(argv: Sequence[str] | None = None) -> None:
-    """Log in to ChatGPT/Codex via OAuth device flow (``fcc-chatgpt-oauth-login``)."""
+    """Log in to ChatGPT/Codex via OAuth device flow."""
     if _print_version_if_requested(argv):
         return
 
@@ -42,12 +48,13 @@ def _print_version_if_requested(argv: Sequence[str] | None) -> bool:
     args = sys.argv[1:] if argv is None else argv
     if "--version" not in args:
         return False
-    print(f"free-claude-code {package_version()}")
+    owner = owner_for_invocation()
+    print(f"{owner.distribution} {package_version()}")
     return True
 
 
 def compact_log(argv: Sequence[str] | None = None) -> None:
-    """Compact the request log in place (``fcc-compact-log``)."""
+    """Compact the request log in place."""
     if _print_version_if_requested(argv):
         return
 
