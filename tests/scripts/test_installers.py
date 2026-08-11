@@ -920,6 +920,10 @@ def test_installers_allow_install_while_running_and_lead_with_mcc() -> None:
     for name in ("fcc-server", "fcc-claude", "fcc-codex", "mcc-server", "mcc-claude"):
         assert name in powershell
     assert "Install-FreeClaudeCode" in powershell
+    # The command reference is shared so both the direct and deferred (app
+    # running) paths show the same mcc message as the WSL/Linux installer.
+    assert "Write-MccCommandReference" in powershell
+    assert powershell.count("Write-MccCommandReference") >= 2  # def + both calls
 
     # The success message leads with mcc and does not advertise legacy commands.
     assert "Start the proxy" in shell and "Start the proxy" in powershell

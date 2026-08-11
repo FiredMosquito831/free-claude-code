@@ -606,6 +606,29 @@ function Configure-AndConfirmFreeClaudeCode {
     }
 }
 
+function Write-MccCommandReference {
+    # Shown after a successful install (direct or deferred) so the user sees the
+    # same command reference on Windows as on Linux/WSL.
+    Write-Host ""
+    Write-Host "Start the proxy:"
+    Write-Host "  mcc-server              Start the local proxy and admin dashboard"
+    Write-Host ""
+    Write-Host "Use a coding agent through the proxy:"
+    Write-Host "  mcc-claude              Launch Claude Code through the proxy"
+    Write-Host "  mcc-claude --discover-models   Enable the model picker from the catalog"
+    Write-Host "  mcc-codex               Launch Codex through the proxy"
+    Write-Host "  mcc-pi                  Launch Pi through the proxy"
+    Write-Host ""
+    Write-Host "Manage and inspect:"
+    Write-Host "  mcc-init                Create or repair ~/.fcc/.env"
+    Write-Host "  mcc-help                Show what each command does"
+    Write-Host ""
+    Write-Host "The legacy fcc-* commands (fcc-server, fcc-claude, ...) remain as aliases."
+    Write-Host ""
+    Write-Host "To use an update installed while the server is running, restart the proxy"
+    Write-Host "with: mcc-server"
+}
+
 function Get-LauncherCommands {
     # Both command families share the tool bin directory, so any of them holds
     # the shim uv must replace.
@@ -733,8 +756,8 @@ else {
 
     Write-Host "My Claude Code is currently running. The update to v$Version is staged and"
     Write-Host "will complete after you stop the running app, then restart it (mcc-server)."
-    Write-Host ""
     Write-Host "The new version is picked up on restart."
+    Write-MccCommandReference
     return $Version
 }
 
@@ -774,22 +797,5 @@ else {
 
     Write-Host ""
     Write-Host "My Claude Code $InstalledVersion is installed and verified."
-    Write-Host ""
-    Write-Host "Start the proxy:"
-    Write-Host "  mcc-server              Start the local proxy and admin dashboard"
-    Write-Host ""
-    Write-Host "Use a coding agent through the proxy:"
-    Write-Host "  mcc-claude              Launch Claude Code through the proxy"
-    Write-Host "  mcc-claude --discover-models   Enable the model picker from the catalog"
-    Write-Host "  mcc-codex               Launch Codex through the proxy"
-    Write-Host "  mcc-pi                  Launch Pi through the proxy"
-    Write-Host ""
-    Write-Host "Manage and inspect:"
-    Write-Host "  mcc-init                Create or repair ~/.fcc/.env"
-    Write-Host "  mcc-help                Show what each command does"
-    Write-Host ""
-    Write-Host "The legacy fcc-* commands (fcc-server, fcc-claude, ...) remain as aliases."
-    Write-Host ""
-    Write-Host "To use an update installed while the server is running, restart the proxy"
-    Write-Host "with: mcc-server"
+    Write-MccCommandReference
 }
