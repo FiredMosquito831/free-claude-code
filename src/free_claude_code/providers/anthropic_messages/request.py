@@ -5,7 +5,7 @@ from typing import Any
 
 from free_claude_code.application.errors import InvalidRequestError
 from free_claude_code.config.constants import ANTHROPIC_DEFAULT_MAX_OUTPUT_TOKENS
-from free_claude_code.core.anthropic.models import MessagesRequest
+from free_claude_code.core.anthropic.models import Message, MessagesRequest
 from free_claude_code.core.reasoning import ReasoningControl, ReasoningPolicy
 
 _INTERNAL_FIELDS = frozenset(
@@ -37,11 +37,33 @@ def build_anthropic_messages_body(
     body = request.model_dump(exclude_none=True)
     for field in _INTERNAL_FIELDS:
         body.pop(field, None)
+    body["messages"] = [_native_message(message) for message in request.messages]
     body["stream"] = True
     body.setdefault("max_tokens", ANTHROPIC_DEFAULT_MAX_OUTPUT_TOKENS)
     _apply_reasoning(body, request, reasoning)
     _merge_extra_body(body, request.extra_body)
     return body
+
+
+def _native_message(message: Message) -> dict[str, Any]:
+    role = "user" if message.role == "system" else message.role
+    return {
+        "role": role,
+        "content": _native_content(message.content),
+    }
+
+
+def _native_content(content: Any) -> Any:
+    if not isinstance(content, list):
+        return content
+    return [
+        {
+            key: deepcopy(value)
+            for key, value in block.model_dump(exclude_none=True).items()
+            if key != "reasoning_content"
+        }
+        for block in content
+    ]
 
 
 def _apply_reasoning(
@@ -57,6 +79,9 @@ def _apply_reasoning(
 
     budget = policy.numeric_budget_tokens
     if budget is not None:
+        max_tokens = body.get("max_tokens")
+        if isinstance(max_tokens, int) and max_tokens <= budget:
+            body["max_tokens"] = budget + 1
         body["thinking"] = {"type": "enabled", "budget_tokens": budget}
         return
 
