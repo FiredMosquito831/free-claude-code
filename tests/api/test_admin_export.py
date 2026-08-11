@@ -254,6 +254,7 @@ class TestFullDBBypass:
         # The autouse _isolate_request_log fixture makes the app read
         # tmp_path/requests.db, so seed exactly that path.
         store = get_request_log_store(tmp_path / "requests.db")
+        assert store is not None
         base = time.time() - 1000
         for index in range(600):
             store.enqueue(

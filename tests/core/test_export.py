@@ -37,6 +37,7 @@ def _seed_requests(store, count: int = 650) -> None:
 
 def test_iter_export_rows_bypasses_500_row_cap(tmp_path) -> None:
     store = get_request_log_store(tmp_path / "requests.db")
+    assert store is not None
     _seed_requests(store, 650)
     columns = export_engine.request_detail_columns(
         ["providers", "models", "tokens_out"]
@@ -56,6 +57,7 @@ def test_iter_export_rows_bypasses_500_row_cap(tmp_path) -> None:
 
 def test_body_decompression_only_when_requested(tmp_path) -> None:
     store = get_request_log_store(tmp_path / "requests.db")
+    assert store is not None
     _seed_requests(store, 20)
     # No body fields selected: bodies are not decompressed, so the projected
     # row carries no input_text column at all.
@@ -72,6 +74,7 @@ def test_body_decompression_only_when_requested(tmp_path) -> None:
 
 def test_iter_export_aggregates_groups_and_orders(tmp_path) -> None:
     store = get_request_log_store(tmp_path / "requests.db")
+    assert store is not None
     _seed_requests(store, 12)
     group_by = ["provider", "period", "model"]
     select, names = export_engine.request_aggregate_sql(
