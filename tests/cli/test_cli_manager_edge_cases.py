@@ -5,10 +5,10 @@ import pytest
 
 @pytest.mark.asyncio
 async def test_register_real_session_id_moves_pending_to_active_and_maps():
-    from free_claude_code.cli.managed.manager import ManagedClaudeSessionManager
+    from my_claude_code.cli.managed.manager import ManagedClaudeSessionManager
 
     with patch(
-        "free_claude_code.cli.managed.manager.ManagedClaudeSession"
+        "my_claude_code.cli.managed.manager.ManagedClaudeSession"
     ) as mock_session_cls:
         mock_session = MagicMock()
         mock_session.is_busy = False
@@ -38,7 +38,7 @@ async def test_register_real_session_id_moves_pending_to_active_and_maps():
 
 @pytest.mark.asyncio
 async def test_register_real_session_id_missing_temp_id_returns_false():
-    from free_claude_code.cli.managed.manager import ManagedClaudeSessionManager
+    from my_claude_code.cli.managed.manager import ManagedClaudeSessionManager
 
     manager = ManagedClaudeSessionManager(
         workspace_path="/tmp", proxy_root_url="http://x"
@@ -49,10 +49,10 @@ async def test_register_real_session_id_missing_temp_id_returns_false():
 
 @pytest.mark.asyncio
 async def test_remove_session_pending_stops_and_returns_true():
-    from free_claude_code.cli.managed.manager import ManagedClaudeSessionManager
+    from my_claude_code.cli.managed.manager import ManagedClaudeSessionManager
 
     with patch(
-        "free_claude_code.cli.managed.manager.ManagedClaudeSession"
+        "my_claude_code.cli.managed.manager.ManagedClaudeSession"
     ) as mock_session_cls:
         mock_session = MagicMock()
         mock_session.is_busy = False
@@ -71,10 +71,10 @@ async def test_remove_session_pending_stops_and_returns_true():
 
 @pytest.mark.asyncio
 async def test_remove_session_active_removes_temp_mapping():
-    from free_claude_code.cli.managed.manager import ManagedClaudeSessionManager
+    from my_claude_code.cli.managed.manager import ManagedClaudeSessionManager
 
     with patch(
-        "free_claude_code.cli.managed.manager.ManagedClaudeSession"
+        "my_claude_code.cli.managed.manager.ManagedClaudeSession"
     ) as mock_session_cls:
         mock_session = MagicMock()
         mock_session.is_busy = False
@@ -98,7 +98,7 @@ async def test_remove_session_active_removes_temp_mapping():
 
 @pytest.mark.asyncio
 async def test_stop_all_reports_and_retains_stop_exceptions():
-    from free_claude_code.cli.managed.manager import ManagedClaudeSessionManager
+    from my_claude_code.cli.managed.manager import ManagedClaudeSessionManager
 
     manager = ManagedClaudeSessionManager(
         workspace_path="/tmp", proxy_root_url="http://x"

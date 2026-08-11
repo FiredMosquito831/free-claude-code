@@ -1,16 +1,3 @@
-"""Platform-agnostic messaging layer."""
+"""Compatibility re-export of ``my_claude_code.messaging``."""
 
-from .managed_protocols import (
-    ManagedClaudeSessionManagerProtocol,
-    ManagedClaudeSessionProtocol,
-)
-from .models import IncomingMessage, MessageScope
-from .platforms.ports import OutboundMessenger
-
-__all__ = [
-    "IncomingMessage",
-    "ManagedClaudeSessionManagerProtocol",
-    "ManagedClaudeSessionProtocol",
-    "MessageScope",
-    "OutboundMessenger",
-]
+from my_claude_code.messaging import *  # noqa: F403

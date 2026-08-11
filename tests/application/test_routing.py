@@ -2,17 +2,17 @@ from unittest.mock import patch
 
 import pytest
 
-from free_claude_code.application.errors import UnknownProviderError
-from free_claude_code.application.routing import ModelRouter
-from free_claude_code.config.provider_catalog import PROVIDER_CATALOG
-from free_claude_code.config.reasoning import ReasoningPreference
-from free_claude_code.config.settings import Settings
-from free_claude_code.core.anthropic.models import (
+from my_claude_code.application.errors import UnknownProviderError
+from my_claude_code.application.routing import ModelRouter
+from my_claude_code.config.provider_catalog import PROVIDER_CATALOG
+from my_claude_code.config.reasoning import ReasoningPreference
+from my_claude_code.config.settings import Settings
+from my_claude_code.core.anthropic.models import (
     Message,
     MessagesRequest,
     TokenCountRequest,
 )
-from free_claude_code.core.reasoning import ReasoningControl, ReasoningEffort
+from my_claude_code.core.reasoning import ReasoningControl, ReasoningEffort
 
 
 @pytest.fixture
@@ -250,7 +250,7 @@ def test_model_router_routes_token_count_request(settings):
 
 
 def test_model_router_logs_mapping(settings):
-    with patch("free_claude_code.application.routing.logger.debug") as mock_log:
+    with patch("my_claude_code.application.routing.logger.debug") as mock_log:
         ModelRouter(settings).resolve("claude-2.1")
 
     mock_log.assert_called()

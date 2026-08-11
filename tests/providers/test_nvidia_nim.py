@@ -5,12 +5,12 @@ import openai
 import pytest
 from httpx import Request, Response
 
-from free_claude_code.config.nim import NimSettings
-from free_claude_code.config.provider_catalog import NVIDIA_NIM_DEFAULT_BASE
-from free_claude_code.core.failures import ExecutionFailure
-from free_claude_code.core.reasoning import ReasoningEffort, ReasoningPolicy
-from free_claude_code.providers.nvidia_nim import NvidiaNimProvider
-from free_claude_code.providers.nvidia_nim.tool_schema import (
+from my_claude_code.config.nim import NimSettings
+from my_claude_code.config.provider_catalog import NVIDIA_NIM_DEFAULT_BASE
+from my_claude_code.core.failures import ExecutionFailure
+from my_claude_code.core.reasoning import ReasoningEffort, ReasoningPolicy
+from my_claude_code.providers.nvidia_nim import NvidiaNimProvider
+from my_claude_code.providers.nvidia_nim.tool_schema import (
     NIM_TOOL_ARGUMENT_ALIASES_KEY,
 )
 from tests.providers.request_factory import make_messages_request
@@ -108,7 +108,7 @@ def _make_internal_server_error(message: str) -> openai.InternalServerError:
 async def test_init(provider_config):
     """Test provider initialization."""
     with patch(
-        "free_claude_code.providers.openai_chat.provider.AsyncOpenAI"
+        "my_claude_code.providers.openai_chat.provider.AsyncOpenAI"
     ) as mock_openai:
         provider = NvidiaNimProvider(
             provider_config,
@@ -123,7 +123,7 @@ async def test_init(provider_config):
 @pytest.mark.asyncio
 async def test_init_uses_configurable_timeouts():
     """Test that provider passes configurable read/write/connect timeouts to client."""
-    from free_claude_code.providers.base import ProviderConfig
+    from my_claude_code.providers.base import ProviderConfig
 
     config = ProviderConfig(
         api_key="test_key",
@@ -133,7 +133,7 @@ async def test_init_uses_configurable_timeouts():
         http_connect_timeout=5.0,
     )
     with patch(
-        "free_claude_code.providers.openai_chat.provider.AsyncOpenAI"
+        "my_claude_code.providers.openai_chat.provider.AsyncOpenAI"
     ) as mock_openai:
         NvidiaNimProvider(
             config, nim_settings=NimSettings(), rate_limiter=passthrough_rate_limiter()

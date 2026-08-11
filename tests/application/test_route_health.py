@@ -1,6 +1,6 @@
 """Passive ejection of models that have just failed repeatedly."""
 
-from free_claude_code.application.route_health import RouteHealthRegistry
+from my_claude_code.application.route_health import RouteHealthRegistry
 
 
 def _registry(

@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from telegram.error import TelegramError
 
-from free_claude_code.messaging.platforms.telegram import TelegramRuntime
+from my_claude_code.messaging.platforms.telegram import TelegramRuntime
 
 
 def _limiter_mock() -> MagicMock:
@@ -26,9 +26,7 @@ def _telegram_runtime(
 
 @pytest.fixture
 def telegram_platform():
-    with patch(
-        "free_claude_code.messaging.platforms.telegram.TELEGRAM_AVAILABLE", True
-    ):
+    with patch("my_claude_code.messaging.platforms.telegram.TELEGRAM_AVAILABLE", True):
         platform = _telegram_runtime(bot_token="test_token", allowed_user_id="12345")
         return platform
 
@@ -62,9 +60,7 @@ async def test_telegram_platform_start_success(telegram_platform):
 @pytest.mark.asyncio
 async def test_telegram_platform_start_with_proxy():
     limiter = _limiter_mock()
-    with patch(
-        "free_claude_code.messaging.platforms.telegram.TELEGRAM_AVAILABLE", True
-    ):
+    with patch("my_claude_code.messaging.platforms.telegram.TELEGRAM_AVAILABLE", True):
         platform = _telegram_runtime(
             bot_token="test_token",
             allowed_user_id="12345",
@@ -75,7 +71,7 @@ async def test_telegram_platform_start_with_proxy():
     with (
         patch("telegram.ext.Application.builder") as mock_builder,
         patch(
-            "free_claude_code.messaging.platforms.telegram.HTTPXRequest"
+            "my_claude_code.messaging.platforms.telegram.HTTPXRequest"
         ) as request_cls,
     ):
         mock_app = MagicMock()

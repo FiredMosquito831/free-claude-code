@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from free_claude_code.config.claude_settings import (
+from my_claude_code.config.claude_settings import (
     CLAUDE_AUTH_TOKEN_ENV,
     CLAUDE_BASE_URL_ENV,
     CLAUDE_SETTINGS_BACKUP_SUFFIX,
@@ -253,7 +253,7 @@ def test_local_override_none_when_sibling_sets_no_anthropic_keys(
 
 
 def test_managed_overrides_are_reported_in_order(tmp_path: Path, monkeypatch) -> None:
-    from free_claude_code.config import claude_settings as claude_settings_module
+    from my_claude_code.config import claude_settings as claude_settings_module
 
     path = tmp_path / "settings.json"
     path.write_text(json.dumps({}), encoding="utf-8")
@@ -281,7 +281,7 @@ def test_managed_overrides_are_reported_in_order(tmp_path: Path, monkeypatch) ->
 def test_managed_override_malformed_produces_no_override_and_no_state_change(
     tmp_path: Path, monkeypatch
 ) -> None:
-    from free_claude_code.config import claude_settings as claude_settings_module
+    from my_claude_code.config import claude_settings as claude_settings_module
 
     path = tmp_path / "settings.json"
     path.write_text(json.dumps({}), encoding="utf-8")
@@ -305,7 +305,7 @@ def test_managed_override_malformed_produces_no_override_and_no_state_change(
 def test_managed_override_with_no_anthropic_keys_produces_no_override(
     tmp_path: Path, monkeypatch
 ) -> None:
-    from free_claude_code.config import claude_settings as claude_settings_module
+    from my_claude_code.config import claude_settings as claude_settings_module
 
     path = tmp_path / "settings.json"
     path.write_text(json.dumps({}), encoding="utf-8")

@@ -1,20 +1,3 @@
-"""Messaging platform runtimes and ports."""
+"""Compatibility re-export of ``my_claude_code.messaging.platforms``."""
 
-from .factory import MessagingPlatformOptions, create_messaging_components
-from .ports import (
-    MessagingPlatformComponents,
-    MessagingRuntime,
-    MessagingStartupNotice,
-    OutboundMessenger,
-    VoiceCancellation,
-)
-
-__all__ = [
-    "MessagingPlatformComponents",
-    "MessagingPlatformOptions",
-    "MessagingRuntime",
-    "MessagingStartupNotice",
-    "OutboundMessenger",
-    "VoiceCancellation",
-    "create_messaging_components",
-]
+from my_claude_code.messaging.platforms import *  # noqa: F403

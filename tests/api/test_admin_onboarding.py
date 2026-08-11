@@ -5,8 +5,8 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-from free_claude_code.config.settings import Settings
-from free_claude_code.core.request_log import RequestRecord, get_request_log_store
+from my_claude_code.config.settings import Settings
+from my_claude_code.core.request_log import RequestRecord, get_request_log_store
 from tests.api.support import create_test_app
 
 EXPECTED_STEP_IDS = (

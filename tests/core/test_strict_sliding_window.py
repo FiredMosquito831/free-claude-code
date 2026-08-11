@@ -5,8 +5,8 @@ import time
 
 import pytest
 
-import free_claude_code.core.rate_limit as rate_limit_module
-from free_claude_code.core.rate_limit import StrictSlidingWindowLimiter
+import my_claude_code.core.rate_limit as rate_limit_module
+from my_claude_code.core.rate_limit import StrictSlidingWindowLimiter
 
 
 @pytest.mark.asyncio

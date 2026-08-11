@@ -7,10 +7,10 @@ import openai
 import pytest
 from httpx import Request, Response
 
-from free_claude_code.config.provider_catalog import MISTRAL_DEFAULT_BASE
-from free_claude_code.core.failures import ExecutionFailure
-from free_claude_code.providers.base import ProviderConfig
-from free_claude_code.providers.mistral import MistralProvider
+from my_claude_code.config.provider_catalog import MISTRAL_DEFAULT_BASE
+from my_claude_code.core.failures import ExecutionFailure
+from my_claude_code.providers.base import ProviderConfig
+from my_claude_code.providers.mistral import MistralProvider
 from tests.providers.request_factory import make_messages_request
 from tests.providers.support import (
     REASONING_OFF,
@@ -41,7 +41,7 @@ def mistral_provider(mistral_config):
 def test_init(mistral_config):
     """Test provider initialization."""
     with patch(
-        "free_claude_code.providers.openai_chat.provider.AsyncOpenAI"
+        "my_claude_code.providers.openai_chat.provider.AsyncOpenAI"
     ) as mock_openai:
         provider = MistralProvider(
             mistral_config, rate_limiter=passthrough_rate_limiter()

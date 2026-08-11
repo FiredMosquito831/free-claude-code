@@ -2,12 +2,12 @@
 
 from pathlib import Path
 
-from free_claude_code.config.settings import Settings
-from free_claude_code.config.websearch_catalog import (
+from my_claude_code.config.settings import Settings
+from my_claude_code.config.websearch_catalog import (
     SUPPORTED_WEBSEARCH_PROVIDER_IDS,
     WEBSEARCH_CATALOG,
 )
-from free_claude_code.websearch.adapters import ADAPTER_CLASSES
+from my_claude_code.websearch.adapters import ADAPTER_CLASSES
 
 _EXPECTED_WEBSEARCH_ORDER: tuple[str, ...] = (
     "ddgs",

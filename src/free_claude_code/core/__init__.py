@@ -1,15 +1,3 @@
-"""Neutral shared application core."""
+"""Compatibility re-export of ``my_claude_code.core``."""
 
-from .reasoning import (
-    DEFAULT_REASONING_POLICY,
-    ReasoningControl,
-    ReasoningEffort,
-    ReasoningPolicy,
-)
-
-__all__ = [
-    "DEFAULT_REASONING_POLICY",
-    "ReasoningControl",
-    "ReasoningEffort",
-    "ReasoningPolicy",
-]
+from my_claude_code.core import *  # noqa: F403

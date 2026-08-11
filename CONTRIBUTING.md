@@ -1,6 +1,6 @@
 # Contributing
 
-Thanks for helping improve Free Claude Code. Keep changes focused, test the behavior you change, and preserve the public Claude Code and Codex workflows.
+Thanks for helping improve My Claude Code. Keep changes focused, test the behavior you change, and preserve the public Claude Code and Codex workflows.
 
 ## Before Opening A Pull Request
 
@@ -18,7 +18,7 @@ Install [uv](https://docs.astral.sh/uv/) and Python 3.14, then run directly from
 git clone https://github.com/Alishahryar1/free-claude-code.git
 cd free-claude-code
 uv python install 3.14.0
-uv run fcc-server
+uv run mcc-server
 ```
 
 Use `uv run` for Python commands. Do not run the project with a global Python interpreter.
@@ -52,7 +52,7 @@ GitHub CI runs Ruff in check-only mode and also bans `# type: ignore`, `# ty: ig
 
 - Target Python 3.14 and rely on native lazy annotations; do not add `from __future__ import annotations`.
 - Python 3.14 supports multiple exception types without parentheses, such as `except TypeError, ValueError:`.
-- Keep shared Anthropic protocol behavior under `src/free_claude_code/core/anthropic/` rather than importing utilities from another provider.
+- Keep shared Anthropic protocol behavior under `src/my_claude_code/core/anthropic/` rather than importing utilities from another provider.
 - Keep provider-specific configuration in the provider that owns it.
 - Remove dead compatibility code when completing migrations unless preserving a published interface is explicitly required.
 

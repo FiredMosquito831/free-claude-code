@@ -5,8 +5,8 @@ from collections.abc import AsyncIterator
 
 import pytest
 
-from free_claude_code.application.errors import InvalidRequestError
-from free_claude_code.core.anthropic.models import (
+from my_claude_code.application.errors import InvalidRequestError
+from my_claude_code.core.anthropic.models import (
     ContentBlockThinking,
     ContentBlockToolResult,
     ContentBlockToolUse,
@@ -15,12 +15,12 @@ from free_claude_code.core.anthropic.models import (
     ThinkingConfig,
     Tool,
 )
-from free_claude_code.core.reasoning import ReasoningPolicy
-from free_claude_code.providers.anthropic_messages import (
+from my_claude_code.core.reasoning import ReasoningPolicy
+from my_claude_code.providers.anthropic_messages import (
     build_anthropic_messages_body,
     iter_anthropic_sse_frames,
 )
-from free_claude_code.providers.stream_recovery import TruncatedProviderStreamError
+from my_claude_code.providers.stream_recovery import TruncatedProviderStreamError
 
 
 def test_native_request_preserves_tools_thinking_and_extensions() -> None:
@@ -216,7 +216,7 @@ async def test_native_sse_handles_crlf_split_across_chunks() -> None:
 
 @pytest.mark.asyncio
 async def test_native_sse_promotes_error_event_to_execution_failure() -> None:
-    from free_claude_code.core.failures import ExecutionFailure, FailureKind
+    from my_claude_code.core.failures import ExecutionFailure, FailureKind
 
     with pytest.raises(ExecutionFailure) as caught:
         _ = [

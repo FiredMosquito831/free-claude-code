@@ -6,15 +6,15 @@ import httpx
 import pytest
 from fastapi.responses import JSONResponse, StreamingResponse
 
-import free_claude_code.api.web_tools.constants as web_tool_constants
-from free_claude_code.api.handlers import MessagesHandler
-from free_claude_code.api.web_tools import egress as web_egress
-from free_claude_code.api.web_tools.egress import (
+import my_claude_code.api.web_tools.constants as web_tool_constants
+from my_claude_code.api.handlers import MessagesHandler
+from my_claude_code.api.web_tools import egress as web_egress
+from my_claude_code.api.web_tools.egress import (
     WebFetchEgressPolicy,
     WebFetchEgressViolation,
     enforce_web_fetch_egress,
 )
-from free_claude_code.api.web_tools.outbound import (
+from my_claude_code.api.web_tools.outbound import (
     _drain_response_body_capped,
     _read_response_body_capped,
     _run_web_fetch,
@@ -22,47 +22,47 @@ from free_claude_code.api.web_tools.outbound import (
     _web_search_response_items,
     _web_tool_client_error_summary,
 )
-from free_claude_code.api.web_tools.request import (
+from my_claude_code.api.web_tools.request import (
     WebSearchToolOptions,
     is_web_server_tool_request,
     web_search_tool_options,
 )
-from free_claude_code.api.web_tools.streaming import (
+from my_claude_code.api.web_tools.streaming import (
     _format_page_age,
     _search_summary,
     _web_search_error_code,
     stream_web_server_tool_response,
 )
-from free_claude_code.application.errors import InvalidRequestError
-from free_claude_code.application.routing import (
+from my_claude_code.application.errors import InvalidRequestError
+from my_claude_code.application.routing import (
     ModelRouter,
     ResolvedModel,
     RoutedMessagesRequest,
 )
-from free_claude_code.config.provider_catalog import PROVIDER_CATALOG
-from free_claude_code.config.reasoning import ReasoningPreference
-from free_claude_code.config.settings import Settings
-from free_claude_code.core.anthropic.models import Message, MessagesRequest, Tool
-from free_claude_code.core.anthropic.stream_contracts import (
+from my_claude_code.config.provider_catalog import PROVIDER_CATALOG
+from my_claude_code.config.reasoning import ReasoningPreference
+from my_claude_code.config.settings import Settings
+from my_claude_code.core.anthropic.models import Message, MessagesRequest, Tool
+from my_claude_code.core.anthropic.stream_contracts import (
     assert_anthropic_stream_contract,
     parse_sse_text,
     text_content,
 )
-from free_claude_code.core.reasoning import ReasoningPolicy
-from free_claude_code.core.version import package_version
-from free_claude_code.core.websearch.models import (
+from my_claude_code.core.reasoning import ReasoningPolicy
+from my_claude_code.core.version import package_version
+from my_claude_code.core.websearch.models import (
     WebSearchResponse,
     WebSearchResultItem,
 )
-from free_claude_code.messaging.event_parser import parse_cli_event
-from free_claude_code.websearch.errors import (
+from my_claude_code.messaging.event_parser import parse_cli_event
+from my_claude_code.websearch.errors import (
     WebSearchConfigError,
     WebSearchInvalidRequestError,
     WebSearchQuotaError,
     WebSearchRateLimitError,
     WebSearchUpstreamError,
 )
-from free_claude_code.websearch.registry import SearchOutcome, SearchRouteOutcome
+from my_claude_code.websearch.registry import SearchOutcome, SearchRouteOutcome
 
 _STRICT_EGRESS = WebFetchEgressPolicy(
     allow_private_network_targets=False,
@@ -76,11 +76,11 @@ def _disable_default_websearch_analytics(monkeypatch):
     """Keep routing tests hermetic; dedicated tests install capture recorders."""
 
     monkeypatch.setattr(
-        "free_claude_code.api.web_tools.outbound.emit_search_outcome",
+        "my_claude_code.api.web_tools.outbound.emit_search_outcome",
         lambda _outcome: None,
     )
     monkeypatch.setattr(
-        "free_claude_code.api.web_tools.outbound.emit_route_outcome",
+        "my_claude_code.api.web_tools.outbound.emit_route_outcome",
         lambda _outcome: None,
     )
 
@@ -313,7 +313,7 @@ async def test_run_web_fetch_follows_redirect_when_each_hop_is_allowed():
     res_ok = _aiohttp_response(200, url="http://8.8.8.8/final", body=b"hello world")
     client_cm, session = _aiohttp_client_session_patch(res_redirect, res_ok)
     with patch(
-        "free_claude_code.api.web_tools.outbound.ClientSession", return_value=client_cm
+        "my_claude_code.api.web_tools.outbound.ClientSession", return_value=client_cm
     ):
         out = await _run_web_fetch("http://8.8.8.8/start", _STRICT_EGRESS)
 
@@ -328,7 +328,7 @@ async def test_run_web_fetch_truncates_large_body_to_byte_cap(monkeypatch):
     client_cm, _ = _aiohttp_client_session_patch(res_ok)
     monkeypatch.setattr(web_tool_constants, "_MAX_WEB_FETCH_RESPONSE_BYTES", 100)
     with patch(
-        "free_claude_code.api.web_tools.outbound.ClientSession", return_value=client_cm
+        "my_claude_code.api.web_tools.outbound.ClientSession", return_value=client_cm
     ):
         out = await _run_web_fetch("http://8.8.8.8/big", _STRICT_EGRESS)
 
@@ -347,7 +347,7 @@ async def test_run_web_fetch_redirect_to_blocked_host_raises():
     client_cm, session = _aiohttp_client_session_patch(res_redirect)
     with (
         patch(
-            "free_claude_code.api.web_tools.outbound.ClientSession",
+            "my_claude_code.api.web_tools.outbound.ClientSession",
             return_value=client_cm,
         ),
         pytest.raises(WebFetchEgressViolation),
@@ -363,7 +363,7 @@ async def test_run_web_fetch_redirect_without_location_raises():
     client_cm, _ = _aiohttp_client_session_patch(res_bad)
     with (
         patch(
-            "free_claude_code.api.web_tools.outbound.ClientSession",
+            "my_claude_code.api.web_tools.outbound.ClientSession",
             return_value=client_cm,
         ),
         pytest.raises(WebFetchEgressViolation, match="missing Location"),
@@ -377,9 +377,9 @@ async def test_run_web_fetch_excess_redirects_raises():
     res2 = _aiohttp_response(302, url="http://8.8.8.8/b", location="/c", body=b"")
     client_cm, _ = _aiohttp_client_session_patch(res1, res2)
     with (
-        patch("free_claude_code.api.web_tools.constants._MAX_WEB_FETCH_REDIRECTS", 1),
+        patch("my_claude_code.api.web_tools.constants._MAX_WEB_FETCH_REDIRECTS", 1),
         patch(
-            "free_claude_code.api.web_tools.outbound.ClientSession",
+            "my_claude_code.api.web_tools.outbound.ClientSession",
             return_value=client_cm,
         ),
         pytest.raises(WebFetchEgressViolation, match="exceeded maximum redirects"),
@@ -396,7 +396,7 @@ async def test_streams_web_search_server_tool_result(monkeypatch):
         return [{"title": "DeepSeek V4 Released", "url": "https://example.com/v4"}]
 
     monkeypatch.setattr(
-        "free_claude_code.api.web_tools.outbound._run_web_search", fake_search
+        "my_claude_code.api.web_tools.outbound._run_web_search", fake_search
     )
     request = MessagesRequest(
         model="claude-haiku-4-5-20251001",
@@ -459,10 +459,10 @@ async def test_disabled_web_search_streams_clear_error_without_outbound(monkeypa
     runtime_provider = AsyncMock()
     legacy = AsyncMock()
     monkeypatch.setattr(
-        "free_claude_code.api.web_tools.outbound.runtime_provider", runtime_provider
+        "my_claude_code.api.web_tools.outbound.runtime_provider", runtime_provider
     )
     monkeypatch.setattr(
-        "free_claude_code.api.web_tools.outbound._legacy_web_search_scrape", legacy
+        "my_claude_code.api.web_tools.outbound._legacy_web_search_scrape", legacy
     )
     request = MessagesRequest(
         model="claude-haiku-4-5-20251001",
@@ -510,7 +510,7 @@ async def test_service_streams_forced_web_search_by_default(monkeypatch):
         return [{"title": "DeepSeek V4 Released", "url": "https://example.com/v4"}]
 
     monkeypatch.setattr(
-        "free_claude_code.api.web_tools.outbound._run_web_search", fake_search
+        "my_claude_code.api.web_tools.outbound._run_web_search", fake_search
     )
     settings = Settings.model_validate({"ENABLE_WEB_SERVER_TOOLS": True})
     provider_resolver = MagicMock()
@@ -546,7 +546,7 @@ async def test_service_aggregates_forced_web_search_when_stream_false(monkeypatc
         return [{"title": "DeepSeek V4 Released", "url": "https://example.com/v4"}]
 
     monkeypatch.setattr(
-        "free_claude_code.api.web_tools.outbound._run_web_search", fake_search
+        "my_claude_code.api.web_tools.outbound._run_web_search", fake_search
     )
     settings = Settings.model_validate({"ENABLE_WEB_SERVER_TOOLS": True})
     provider_resolver = MagicMock()
@@ -595,7 +595,7 @@ async def test_forced_web_fetch_ignores_stale_url_from_prior_user_turns(monkeypa
         }
 
     monkeypatch.setattr(
-        "free_claude_code.api.web_tools.outbound._run_web_fetch", fake_fetch
+        "my_claude_code.api.web_tools.outbound._run_web_fetch", fake_fetch
     )
     request = MessagesRequest(
         model="claude-haiku-4-5-20251001",
@@ -637,7 +637,7 @@ async def test_service_aggregates_forced_web_fetch_when_stream_false(monkeypatch
         }
 
     monkeypatch.setattr(
-        "free_claude_code.api.web_tools.outbound._run_web_fetch", fake_fetch
+        "my_claude_code.api.web_tools.outbound._run_web_fetch", fake_fetch
     )
     settings = Settings.model_validate({"ENABLE_WEB_SERVER_TOOLS": True})
     provider_resolver = MagicMock()
@@ -683,7 +683,7 @@ async def test_streams_web_fetch_server_tool_result(monkeypatch):
         }
 
     monkeypatch.setattr(
-        "free_claude_code.api.web_tools.outbound._run_web_fetch", fake_fetch
+        "my_claude_code.api.web_tools.outbound._run_web_fetch", fake_fetch
     )
     request = MessagesRequest(
         model="claude-haiku-4-5-20251001",
@@ -738,7 +738,7 @@ async def test_streams_web_fetch_error_summary_generic_by_default(monkeypatch):
     async def boom(_url: str, _egress: WebFetchEgressPolicy) -> dict[str, str]:
         raise ValueError(secret)
 
-    monkeypatch.setattr("free_claude_code.api.web_tools.outbound._run_web_fetch", boom)
+    monkeypatch.setattr("my_claude_code.api.web_tools.outbound._run_web_fetch", boom)
     request = MessagesRequest(
         model="claude-haiku-4-5-20251001",
         max_tokens=100,
@@ -752,7 +752,7 @@ async def test_streams_web_fetch_error_summary_generic_by_default(monkeypatch):
         tool_choice={"type": "tool", "name": "web_fetch"},
     )
 
-    with patch("free_claude_code.api.web_tools.outbound.logger.warning") as log_warn:
+    with patch("my_claude_code.api.web_tools.outbound.logger.warning") as log_warn:
         raw = "".join(
             [
                 event
@@ -796,7 +796,7 @@ async def test_streams_web_fetch_error_summary_verbose_includes_exception_class(
     async def boom(_url: str, _egress: WebFetchEgressPolicy) -> dict[str, str]:
         raise OSError(5, "oops")
 
-    monkeypatch.setattr("free_claude_code.api.web_tools.outbound._run_web_fetch", boom)
+    monkeypatch.setattr("my_claude_code.api.web_tools.outbound._run_web_fetch", boom)
     request = MessagesRequest(
         model="claude-haiku-4-5-20251001",
         max_tokens=100,
@@ -876,10 +876,10 @@ async def test_run_web_search_routes_through_configured_provider(monkeypatch):
     runtime_provider = AsyncMock(return_value=provider)
     search_with_logging = AsyncMock(return_value=_web_search_response("One", "Two"))
     monkeypatch.setattr(
-        "free_claude_code.api.web_tools.outbound.runtime_provider", runtime_provider
+        "my_claude_code.api.web_tools.outbound.runtime_provider", runtime_provider
     )
     monkeypatch.setattr(
-        "free_claude_code.api.web_tools.outbound.search_with_logging",
+        "my_claude_code.api.web_tools.outbound.search_with_logging",
         search_with_logging,
     )
 
@@ -941,11 +941,11 @@ async def test_run_web_search_falls_back_to_ddgs_after_provider_error(monkeypatc
         ]
     )
     monkeypatch.setattr(
-        "free_claude_code.api.web_tools.outbound.runtime_provider",
+        "my_claude_code.api.web_tools.outbound.runtime_provider",
         fake_runtime_provider,
     )
     monkeypatch.setattr(
-        "free_claude_code.api.web_tools.outbound.search_with_logging",
+        "my_claude_code.api.web_tools.outbound.search_with_logging",
         search_with_logging,
     )
 
@@ -976,15 +976,15 @@ async def test_fallback_success_emits_one_correlated_route(monkeypatch):
     )
     routes: list[SearchRouteOutcome] = []
     monkeypatch.setattr(
-        "free_claude_code.api.web_tools.outbound.runtime_provider",
+        "my_claude_code.api.web_tools.outbound.runtime_provider",
         AsyncMock(return_value=MagicMock()),
     )
     monkeypatch.setattr(
-        "free_claude_code.api.web_tools.outbound.search_with_logging",
+        "my_claude_code.api.web_tools.outbound.search_with_logging",
         search_with_logging,
     )
     monkeypatch.setattr(
-        "free_claude_code.api.web_tools.outbound.emit_route_outcome", routes.append
+        "my_claude_code.api.web_tools.outbound.emit_route_outcome", routes.append
     )
 
     await _run_web_search("test query", settings)
@@ -1021,15 +1021,15 @@ async def test_run_web_search_falls_back_to_legacy_scrape_when_providers_fail(
     search_with_logging = AsyncMock(side_effect=WebSearchUpstreamError("exa", "boom"))
     legacy = AsyncMock(return_value=[{"title": "Legacy", "url": "https://legacy.test"}])
     monkeypatch.setattr(
-        "free_claude_code.api.web_tools.outbound.runtime_provider",
+        "my_claude_code.api.web_tools.outbound.runtime_provider",
         fake_runtime_provider,
     )
     monkeypatch.setattr(
-        "free_claude_code.api.web_tools.outbound.search_with_logging",
+        "my_claude_code.api.web_tools.outbound.search_with_logging",
         search_with_logging,
     )
     monkeypatch.setattr(
-        "free_claude_code.api.web_tools.outbound._legacy_web_search_scrape", legacy
+        "my_claude_code.api.web_tools.outbound._legacy_web_search_scrape", legacy
     )
 
     results = await _run_web_search("test query", settings)
@@ -1051,14 +1051,14 @@ async def test_legacy_success_emits_terminal_attempt_and_route(monkeypatch):
     attempts: list[SearchOutcome] = []
     routes: list[SearchRouteOutcome] = []
     monkeypatch.setattr(
-        "free_claude_code.api.web_tools.outbound._legacy_web_search_scrape",
+        "my_claude_code.api.web_tools.outbound._legacy_web_search_scrape",
         AsyncMock(return_value=[{"title": "Legacy", "url": "https://legacy.test"}]),
     )
     monkeypatch.setattr(
-        "free_claude_code.api.web_tools.outbound.emit_search_outcome", attempts.append
+        "my_claude_code.api.web_tools.outbound.emit_search_outcome", attempts.append
     )
     monkeypatch.setattr(
-        "free_claude_code.api.web_tools.outbound.emit_route_outcome", routes.append
+        "my_claude_code.api.web_tools.outbound.emit_route_outcome", routes.append
     )
 
     results = await _run_web_search("test query", settings)
@@ -1115,22 +1115,22 @@ async def test_legacy_terminal_failure_emits_correlated_error_route(monkeypatch)
     attempts: list[SearchOutcome] = []
     routes: list[SearchRouteOutcome] = []
     monkeypatch.setattr(
-        "free_claude_code.api.web_tools.outbound.runtime_provider",
+        "my_claude_code.api.web_tools.outbound.runtime_provider",
         AsyncMock(return_value=MagicMock()),
     )
     monkeypatch.setattr(
-        "free_claude_code.api.web_tools.outbound.search_with_logging",
+        "my_claude_code.api.web_tools.outbound.search_with_logging",
         AsyncMock(side_effect=WebSearchUpstreamError("provider", "failed")),
     )
     monkeypatch.setattr(
-        "free_claude_code.api.web_tools.outbound._legacy_web_search_scrape",
+        "my_claude_code.api.web_tools.outbound._legacy_web_search_scrape",
         AsyncMock(side_effect=httpx.ConnectError("legacy unavailable " * 100)),
     )
     monkeypatch.setattr(
-        "free_claude_code.api.web_tools.outbound.emit_search_outcome", attempts.append
+        "my_claude_code.api.web_tools.outbound.emit_search_outcome", attempts.append
     )
     monkeypatch.setattr(
-        "free_claude_code.api.web_tools.outbound.emit_route_outcome", routes.append
+        "my_claude_code.api.web_tools.outbound.emit_route_outcome", routes.append
     )
 
     with pytest.raises(httpx.ConnectError, match="legacy unavailable"):
@@ -1182,15 +1182,15 @@ async def test_explicit_provider_is_strict_under_default_auto_policy(monkeypatch
     search_with_logging = AsyncMock(side_effect=WebSearchUpstreamError("exa", "boom"))
     legacy = AsyncMock()
     monkeypatch.setattr(
-        "free_claude_code.api.web_tools.outbound.runtime_provider",
+        "my_claude_code.api.web_tools.outbound.runtime_provider",
         fake_runtime_provider,
     )
     monkeypatch.setattr(
-        "free_claude_code.api.web_tools.outbound.search_with_logging",
+        "my_claude_code.api.web_tools.outbound.search_with_logging",
         search_with_logging,
     )
     monkeypatch.setattr(
-        "free_claude_code.api.web_tools.outbound._legacy_web_search_scrape", legacy
+        "my_claude_code.api.web_tools.outbound._legacy_web_search_scrape", legacy
     )
 
     with pytest.raises(WebSearchUpstreamError, match="exa: boom"):
@@ -1210,7 +1210,7 @@ async def test_explicit_missing_credentials_surfaces_config_error(monkeypatch):
     )
     legacy = AsyncMock()
     monkeypatch.setattr(
-        "free_claude_code.api.web_tools.outbound._legacy_web_search_scrape", legacy
+        "my_claude_code.api.web_tools.outbound._legacy_web_search_scrape", legacy
     )
 
     with pytest.raises(WebSearchConfigError, match="EXA_API_KEY"):
@@ -1242,15 +1242,15 @@ async def test_explicit_ddgs_policy_stops_after_ddgs_failure(monkeypatch):
     )
     legacy = AsyncMock()
     monkeypatch.setattr(
-        "free_claude_code.api.web_tools.outbound.runtime_provider",
+        "my_claude_code.api.web_tools.outbound.runtime_provider",
         fake_runtime_provider,
     )
     monkeypatch.setattr(
-        "free_claude_code.api.web_tools.outbound.search_with_logging",
+        "my_claude_code.api.web_tools.outbound.search_with_logging",
         search_with_logging,
     )
     monkeypatch.setattr(
-        "free_claude_code.api.web_tools.outbound._legacy_web_search_scrape", legacy
+        "my_claude_code.api.web_tools.outbound._legacy_web_search_scrape", legacy
     )
 
     with pytest.raises(WebSearchUpstreamError, match="ddgs: fallback failed"):
@@ -1280,15 +1280,15 @@ async def test_explicit_legacy_policy_runs_complete_fallback_chain(monkeypatch):
     )
     legacy = AsyncMock(return_value=[{"title": "Legacy", "url": "https://legacy.test"}])
     monkeypatch.setattr(
-        "free_claude_code.api.web_tools.outbound.runtime_provider",
+        "my_claude_code.api.web_tools.outbound.runtime_provider",
         fake_runtime_provider,
     )
     monkeypatch.setattr(
-        "free_claude_code.api.web_tools.outbound.search_with_logging",
+        "my_claude_code.api.web_tools.outbound.search_with_logging",
         search_with_logging,
     )
     monkeypatch.setattr(
-        "free_claude_code.api.web_tools.outbound._legacy_web_search_scrape", legacy
+        "my_claude_code.api.web_tools.outbound._legacy_web_search_scrape", legacy
     )
 
     results = await _run_web_search("test query", settings)
@@ -1316,15 +1316,15 @@ async def test_run_web_search_ddgs_failure_skips_second_ddgs_attempt(monkeypatch
     search_with_logging = AsyncMock(side_effect=WebSearchUpstreamError("ddgs", "boom"))
     legacy = AsyncMock(return_value=[])
     monkeypatch.setattr(
-        "free_claude_code.api.web_tools.outbound.runtime_provider",
+        "my_claude_code.api.web_tools.outbound.runtime_provider",
         fake_runtime_provider,
     )
     monkeypatch.setattr(
-        "free_claude_code.api.web_tools.outbound.search_with_logging",
+        "my_claude_code.api.web_tools.outbound.search_with_logging",
         search_with_logging,
     )
     monkeypatch.setattr(
-        "free_claude_code.api.web_tools.outbound._legacy_web_search_scrape", legacy
+        "my_claude_code.api.web_tools.outbound._legacy_web_search_scrape", legacy
     )
 
     results = await _run_web_search("test query", settings)
@@ -1340,10 +1340,10 @@ async def test_run_web_search_disabled_rejects_without_outbound_search(monkeypat
     runtime_provider = AsyncMock()
     legacy = AsyncMock()
     monkeypatch.setattr(
-        "free_claude_code.api.web_tools.outbound.runtime_provider", runtime_provider
+        "my_claude_code.api.web_tools.outbound.runtime_provider", runtime_provider
     )
     monkeypatch.setattr(
-        "free_claude_code.api.web_tools.outbound._legacy_web_search_scrape", legacy
+        "my_claude_code.api.web_tools.outbound._legacy_web_search_scrape", legacy
     )
 
     with pytest.raises(WebSearchConfigError, match="WEB_SEARCH_PROVIDER=disabled"):
@@ -1381,10 +1381,10 @@ async def test_run_web_search_off_uses_legacy_scrape_only(monkeypatch):
     runtime_provider = AsyncMock()
     legacy = AsyncMock(return_value=[{"title": "Legacy", "url": "https://legacy.test"}])
     monkeypatch.setattr(
-        "free_claude_code.api.web_tools.outbound.runtime_provider", runtime_provider
+        "my_claude_code.api.web_tools.outbound.runtime_provider", runtime_provider
     )
     monkeypatch.setattr(
-        "free_claude_code.api.web_tools.outbound._legacy_web_search_scrape", legacy
+        "my_claude_code.api.web_tools.outbound._legacy_web_search_scrape", legacy
     )
 
     results = await _run_web_search("test query", settings)
@@ -1409,10 +1409,10 @@ async def test_run_web_search_builds_settings_when_not_passed(monkeypatch):
     runtime_provider = AsyncMock(return_value=provider)
     search_with_logging = AsyncMock(return_value=_web_search_response("Env"))
     monkeypatch.setattr(
-        "free_claude_code.api.web_tools.outbound.runtime_provider", runtime_provider
+        "my_claude_code.api.web_tools.outbound.runtime_provider", runtime_provider
     )
     monkeypatch.setattr(
-        "free_claude_code.api.web_tools.outbound.search_with_logging",
+        "my_claude_code.api.web_tools.outbound.search_with_logging",
         search_with_logging,
     )
 
@@ -1649,7 +1649,7 @@ async def test_stream_emits_page_age_and_rich_digest(monkeypatch):
 
     monkeypatch.setitem(Settings.model_config, "env_file", ())
     monkeypatch.setattr(
-        "free_claude_code.api.web_tools.outbound._run_web_search", fake_search
+        "my_claude_code.api.web_tools.outbound._run_web_search", fake_search
     )
     request = MessagesRequest(
         model="claude-haiku-4-5-20251001",
@@ -1711,7 +1711,7 @@ async def test_stream_digest_honors_chars_and_answer_env(monkeypatch):
     monkeypatch.setenv("WEBSEARCH_DIGEST_CHARS", "10")
     monkeypatch.setenv("WEBSEARCH_DIGEST_ANSWER", "false")
     monkeypatch.setattr(
-        "free_claude_code.api.web_tools.outbound._run_web_search", fake_search
+        "my_claude_code.api.web_tools.outbound._run_web_search", fake_search
     )
     request = MessagesRequest(
         model="claude-haiku-4-5-20251001",
@@ -1866,11 +1866,11 @@ async def test_run_web_search_forwards_domain_filters_to_provider(monkeypatch):
     settings = Settings.model_validate({"EXA_API_KEY": "k1-aaaa1111bbbb"})
     search_with_logging = AsyncMock(return_value=_web_search_response("One"))
     monkeypatch.setattr(
-        "free_claude_code.api.web_tools.outbound.runtime_provider",
+        "my_claude_code.api.web_tools.outbound.runtime_provider",
         AsyncMock(return_value=MagicMock()),
     )
     monkeypatch.setattr(
-        "free_claude_code.api.web_tools.outbound.search_with_logging",
+        "my_claude_code.api.web_tools.outbound.search_with_logging",
         search_with_logging,
     )
 

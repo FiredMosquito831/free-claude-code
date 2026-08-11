@@ -3,7 +3,7 @@
 import httpx
 import pytest
 
-from free_claude_code.providers.failure_policy import (
+from my_claude_code.providers.failure_policy import (
     DEFAULT_RATE_LIMIT_COOLDOWN_SECONDS,
     MAX_RATE_LIMIT_COOLDOWN_SECONDS,
     rate_limit_cooldown_seconds,
@@ -66,7 +66,7 @@ def test_an_exception_without_a_response_uses_the_default() -> None:
 
 def test_rate_limited_callback_receives_the_upstream_reset() -> None:
     """The classifier must pass the parsed value, not a hardcoded minute."""
-    from free_claude_code.providers.failure_policy import classify_provider_failure
+    from my_claude_code.providers.failure_policy import classify_provider_failure
 
     seen: list[float] = []
     failure = classify_provider_failure(

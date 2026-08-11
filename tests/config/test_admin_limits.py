@@ -2,14 +2,14 @@
 
 import pytest
 
-from free_claude_code.config.admin.manifest import FIELD_BY_KEY, FIELDS, SECTIONS
-from free_claude_code.config.admin.persistence import (
+from my_claude_code.config.admin.manifest import FIELD_BY_KEY, FIELDS, SECTIONS
+from my_claude_code.config.admin.persistence import (
     render_env_file,
     settings_env_aliases,
     target_values_with_updates,
     unmanaged_env_values,
 )
-from free_claude_code.config.settings import Settings
+from my_claude_code.config.settings import Settings
 
 LIMIT_KEYS = (
     "FALLBACK_FIRST_TOKEN_TIMEOUT",

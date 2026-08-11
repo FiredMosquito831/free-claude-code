@@ -4,8 +4,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from free_claude_code.config.provider_catalog import GROQ_DEFAULT_BASE
-from free_claude_code.providers.base import ProviderConfig
+from my_claude_code.config.provider_catalog import GROQ_DEFAULT_BASE
+from my_claude_code.providers.base import ProviderConfig
 from tests.providers.request_factory import make_messages_request
 from tests.providers.support import passthrough_rate_limiter, profiled_provider
 
@@ -34,7 +34,7 @@ def groq_provider(groq_config):
 def test_init(groq_config):
     """Test provider initialization."""
     with patch(
-        "free_claude_code.providers.openai_chat.provider.AsyncOpenAI"
+        "my_claude_code.providers.openai_chat.provider.AsyncOpenAI"
     ) as mock_openai:
         provider = profiled_provider(
             "groq", groq_config, rate_limiter=passthrough_rate_limiter()
@@ -78,7 +78,7 @@ def test_build_request_body_global_disable_blocks_reasoning_mapping():
 
 def test_build_request_body_sanitizes_and_remaps_via_mock_converter(groq_provider):
     with patch(
-        "free_claude_code.providers.openai_chat.request_policy.build_base_request_body"
+        "my_claude_code.providers.openai_chat.request_policy.build_base_request_body"
     ) as mock_convert:
         mock_convert.return_value = {
             "model": "llama-3.3-70b-versatile",
@@ -111,7 +111,7 @@ def test_build_request_body_sanitizes_and_remaps_via_mock_converter(groq_provide
 
 def test_build_request_body_prefers_existing_max_completion_tokens(groq_provider):
     with patch(
-        "free_claude_code.providers.openai_chat.request_policy.build_base_request_body"
+        "my_claude_code.providers.openai_chat.request_policy.build_base_request_body"
     ) as mock_convert:
         mock_convert.return_value = {
             "model": "llama-3.3-70b-versatile",

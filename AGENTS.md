@@ -30,7 +30,7 @@
 
 ## ARCHITECTURE PRINCIPLES
 
-- **Shared utilities**: Put shared Anthropic protocol logic in neutral `src/free_claude_code/core/anthropic/` modules. Do not have one provider import from another provider's utils.
+- **Shared utilities**: Put shared Anthropic protocol logic in neutral `src/my_claude_code/core/anthropic/` modules. Do not have one provider import from another provider's utils.
 - **Failure ownership**: Keep canonical failure semantics and redaction SDK-free in `core/`; providers alone classify SDK/HTTP failures and own retries; protocol/API adapters alone choose wire error types and commit-boundary serialization.
 - **DRY**: Extract shared base classes to eliminate duplication. Prefer composition over copy-paste.
 - **Encapsulation**: Use accessor methods for internal state (e.g. `set_current_task()`), not direct `_attribute` assignment from outside.
@@ -63,8 +63,8 @@ Every commit on `main` that changes a **production file** must include a semver 
 
 These paths count as production (runtime, packaging, or install surface):
 
-- `src/free_claude_code/api/`, `src/free_claude_code/cli/`, `src/free_claude_code/config/`, `src/free_claude_code/core/`, `src/free_claude_code/messaging/`, `src/free_claude_code/providers/`
-- `src/free_claude_code/application/`
+- `src/my_claude_code/api/`, `src/my_claude_code/cli/`, `src/my_claude_code/config/`, `src/my_claude_code/core/`, `src/my_claude_code/messaging/`, `src/my_claude_code/providers/`
+- `src/my_claude_code/application/`
 - `.env.example`
 - `pyproject.toml` (dependencies, scripts, packaging)
 - `scripts/install.sh`, `scripts/install.ps1`, `scripts/uninstall.sh`, `scripts/uninstall.ps1`, `scripts/ci.sh`, `scripts/ci.ps1`

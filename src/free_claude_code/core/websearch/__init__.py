@@ -1,8 +1,3 @@
-"""Neutral web search contracts (no transport or config dependencies)."""
+"""Compatibility re-export of ``my_claude_code.core.websearch``."""
 
-from .models import WebSearchResponse, WebSearchResultItem
-
-__all__ = [
-    "WebSearchResponse",
-    "WebSearchResultItem",
-]
+from my_claude_code.core.websearch import *  # noqa: F403

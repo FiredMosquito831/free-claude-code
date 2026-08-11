@@ -1,3 +1,3 @@
-"""Markdown rendering utilities for messaging platforms."""
+"""Compatibility re-export of ``my_claude_code.messaging.rendering``."""
 
-__all__: list[str] = []
+from my_claude_code.messaging.rendering import *  # noqa: F403

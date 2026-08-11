@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from free_claude_code.core.request_log import (
+from my_claude_code.core.request_log import (
     RequestRecord,
     get_request_log_store,
 )
@@ -205,7 +205,7 @@ def test_pulse_endpoint_rejects_invalid_status(client, seeded_store) -> None:
 
 def test_pulse_endpoint_disabled_store_shape(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("REQUEST_LOG_ENABLED", "false")
-    from free_claude_code.config.settings import Settings
+    from my_claude_code.config.settings import Settings
     from tests.api.support import create_test_app as make_app
 
     app = make_app(Settings())
@@ -255,7 +255,7 @@ def test_clear_requests(client, seeded_store) -> None:
 
 def test_request_log_disabled(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("REQUEST_LOG_ENABLED", "false")
-    from free_claude_code.config.settings import Settings
+    from my_claude_code.config.settings import Settings
     from tests.api.support import create_test_app as make_app
 
     app = make_app(Settings())
@@ -280,7 +280,7 @@ def test_admin_requests_loopback_guard(seeded_store) -> None:
 def test_admin_serves_only_bundled_guide_images(tmp_path) -> None:
     """The image route matches shipped names; it must not join paths."""
 
-    from free_claude_code.api import admin_routes as ar
+    from my_claude_code.api import admin_routes as ar
 
     names = ar._bundled_image_names()
     assert names, "guide screenshots should ship with the package"
@@ -338,7 +338,7 @@ def test_clearing_the_log_also_clears_all_time(client, seeded_store) -> None:
 
 def test_lifetime_endpoint_disabled_store_shape(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("REQUEST_LOG_ENABLED", "false")
-    from free_claude_code.config.settings import Settings
+    from my_claude_code.config.settings import Settings
     from tests.api.support import create_test_app as make_app
 
     disabled = TestClient(make_app(Settings()), client=("127.0.0.1", 50000))

@@ -10,19 +10,19 @@ import pytest
 from fastapi.responses import JSONResponse, StreamingResponse
 from starlette.types import Message, Scope
 
-from free_claude_code.api.request_ids import RequestCorrelationMiddleware
-from free_claude_code.api.response_streams import (
+from my_claude_code.api.request_ids import RequestCorrelationMiddleware
+from my_claude_code.api.response_streams import (
     ManagedStreamingResponse,
     anthropic_sse_streaming_response,
     bind_response_lifetime,
     terminal_execution_error_response,
 )
-from free_claude_code.core.anthropic import (
+from my_claude_code.core.anthropic import (
     anthropic_error_payload,
     anthropic_failure_payload,
 )
-from free_claude_code.core.anthropic.stream_contracts import parse_sse_text
-from free_claude_code.core.failures import ExecutionFailure, FailureKind
+from my_claude_code.core.anthropic.stream_contracts import parse_sse_text
+from my_claude_code.core.failures import ExecutionFailure, FailureKind
 
 
 async def _body_chunks(chunks: list[str]) -> AsyncGenerator[str]:
@@ -595,8 +595,8 @@ async def test_cleanup_failures_are_trace_only_and_do_not_replace_success() -> N
     await bind_response_lifetime(response, release)
 
     with (
-        patch("free_claude_code.core.trace.trace_event") as close_trace,
-        patch("free_claude_code.api.response_streams.trace_event") as release_trace,
+        patch("my_claude_code.core.trace.trace_event") as close_trace,
+        patch("my_claude_code.api.response_streams.trace_event") as release_trace,
     ):
         messages = await _serve(response)
 

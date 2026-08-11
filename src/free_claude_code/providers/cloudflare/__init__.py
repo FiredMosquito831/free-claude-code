@@ -1,8 +1,3 @@
-"""Cloudflare AI REST provider package."""
+"""Compatibility re-export of ``my_claude_code.providers.cloudflare``."""
 
-from .client import CloudflareProvider, cloudflare_ai_base_url
-
-__all__ = (
-    "CloudflareProvider",
-    "cloudflare_ai_base_url",
-)
+from my_claude_code.providers.cloudflare import *  # noqa: F403

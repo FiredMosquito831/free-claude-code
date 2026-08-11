@@ -6,25 +6,25 @@ import httpx
 import openai
 import pytest
 
-from free_claude_code.config.admin.manifest import FIELD_BY_KEY
-from free_claude_code.config.credentials import parse_credential_keys
-from free_claude_code.config.provider_catalog import PROVIDER_CATALOG
-from free_claude_code.config.settings import Settings
-from free_claude_code.core.anthropic.models import Message, MessagesRequest
-from free_claude_code.core.failures import ExecutionFailure
-from free_claude_code.core.reasoning import DEFAULT_REASONING_POLICY, ReasoningPolicy
-from free_claude_code.providers.base import BaseProvider, ProviderConfig
-from free_claude_code.providers.credential_rotation import (
+from my_claude_code.config.admin.manifest import FIELD_BY_KEY
+from my_claude_code.config.credentials import parse_credential_keys
+from my_claude_code.config.provider_catalog import PROVIDER_CATALOG
+from my_claude_code.config.settings import Settings
+from my_claude_code.core.anthropic.models import Message, MessagesRequest
+from my_claude_code.core.failures import ExecutionFailure
+from my_claude_code.core.reasoning import DEFAULT_REASONING_POLICY, ReasoningPolicy
+from my_claude_code.providers.base import BaseProvider, ProviderConfig
+from my_claude_code.providers.credential_rotation import (
     CredentialRotationState,
     error_justifies_rotation,
 )
-from free_claude_code.providers.failure_policy import classify_provider_failure
-from free_claude_code.providers.http import maybe_await_aclose
-from free_claude_code.providers.runtime.config import (
+from my_claude_code.providers.failure_policy import classify_provider_failure
+from my_claude_code.providers.http import maybe_await_aclose
+from my_claude_code.providers.runtime.config import (
     build_provider_config,
     credential_rotation_policy,
 )
-from free_claude_code.providers.runtime.rotating import RotatingProvider
+from my_claude_code.providers.runtime.rotating import RotatingProvider
 
 
 class _RetryableError(Exception):
@@ -455,7 +455,7 @@ async def test_key_health_reports_index_and_masked_label():
 
 @pytest.mark.asyncio
 async def test_rotating_provider_records_the_credential_it_used():
-    from free_claude_code.core.credential_attribution import install_attribution
+    from my_claude_code.core.credential_attribution import install_attribution
 
     first = _FakeProvider(fail_before_first=_RetryableError())
     second = _FakeProvider(chunks=("ok",))

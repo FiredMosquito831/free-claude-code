@@ -3,16 +3,16 @@ from unittest.mock import MagicMock, patch
 import pytest
 from fastapi import HTTPException, Request
 
-from free_claude_code.api.dependencies import (
+from my_claude_code.api.dependencies import (
     get_services,
     get_settings,
     require_proxy_auth,
     resolve_provider,
 )
-from free_claude_code.api.ports import ApiServices
-from free_claude_code.application.errors import ApplicationUnavailableError
-from free_claude_code.application.ports import RequestRuntimeLease
-from free_claude_code.config.settings import Settings
+from my_claude_code.api.ports import ApiServices
+from my_claude_code.application.errors import ApplicationUnavailableError
+from my_claude_code.application.ports import RequestRuntimeLease
+from my_claude_code.config.settings import Settings
 from tests.api.support import create_test_app
 
 
@@ -66,7 +66,7 @@ def test_resolve_provider_uses_retained_lease_and_logs_first_initialization() ->
     provider = MagicMock()
     lease = _lease(provider=provider)
 
-    with patch("free_claude_code.api.dependencies.logger.info") as log_info:
+    with patch("my_claude_code.api.dependencies.logger.info") as log_info:
         result = resolve_provider("nvidia_nim", lease=lease)
 
     assert result is provider
@@ -78,7 +78,7 @@ def test_resolve_provider_skips_initialization_log_for_cached_provider() -> None
     lease = _lease()
     lease.is_provider_cached.return_value = True
 
-    with patch("free_claude_code.api.dependencies.logger.info") as log_info:
+    with patch("my_claude_code.api.dependencies.logger.info") as log_info:
         resolve_provider("nvidia_nim", lease=lease)
 
     log_info.assert_not_called()

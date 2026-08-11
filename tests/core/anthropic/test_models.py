@@ -1,11 +1,11 @@
 import pytest
 from pydantic import ValidationError
 
-from free_claude_code.core.anthropic.conversion import (
+from my_claude_code.core.anthropic.conversion import (
     OpenAIConversionError,
     build_base_request_body,
 )
-from free_claude_code.core.anthropic.models import (
+from my_claude_code.core.anthropic.models import (
     ContentBlockDocument,
     ContentBlockWebFetchToolResult,
     Message,

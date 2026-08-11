@@ -4,14 +4,14 @@ from pathlib import Path
 
 import pytest
 
-from free_claude_code.config.admin.manifest import FIELD_BY_KEY
-from free_claude_code.config.onboarding import (
+from my_claude_code.config.admin.manifest import FIELD_BY_KEY
+from my_claude_code.config.onboarding import (
     OnboardingError,
     build_state,
     load_persisted,
     save_persisted,
 )
-from free_claude_code.config.paths import onboarding_state_path
+from my_claude_code.config.paths import onboarding_state_path
 
 # Dashboard markup the Get Started buttons scroll to and highlight; targets
 # are asserted against this file so a renamed id fails the test instead of
@@ -19,7 +19,7 @@ from free_claude_code.config.paths import onboarding_state_path
 ADMIN_STATIC_DIR = (
     Path(__file__).resolve().parents[2]
     / "src"
-    / "free_claude_code"
+    / "my_claude_code"
     / "api"
     / "admin_static"
 )
@@ -226,7 +226,7 @@ class TestFallbackModelStep:
 
     def _state(self, monkeypatch, values):
         monkeypatch.setattr(
-            "free_claude_code.config.onboarding.load_value_state",
+            "my_claude_code.config.onboarding.load_value_state",
             lambda: {
                 key: {"value": value, "source": "template"}
                 for key, value in values.items()

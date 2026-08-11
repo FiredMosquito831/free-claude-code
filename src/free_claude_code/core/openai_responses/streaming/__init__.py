@@ -1,5 +1,3 @@
-"""OpenAI Responses streaming assembly internals."""
+"""Compatibility re-export of ``my_claude_code.core.openai_responses.streaming``."""
 
-from .assembler import ResponsesStreamAssembler
-
-__all__ = ["ResponsesStreamAssembler"]
+from my_claude_code.core.openai_responses.streaming import *  # noqa: F403

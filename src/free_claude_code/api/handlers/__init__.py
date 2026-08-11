@@ -1,7 +1,3 @@
-"""Product-flow handlers for public API routes."""
+"""Compatibility re-export of ``my_claude_code.api.handlers``."""
 
-from .messages import MessagesHandler
-from .responses import ResponsesHandler
-from .token_count import TokenCountHandler
-
-__all__ = ["MessagesHandler", "ResponsesHandler", "TokenCountHandler"]
+from my_claude_code.api.handlers import *  # noqa: F403

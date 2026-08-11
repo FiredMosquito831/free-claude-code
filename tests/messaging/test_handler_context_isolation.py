@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from free_claude_code.messaging.workflow import MessagingWorkflow
+from my_claude_code.messaging.workflow import MessagingWorkflow
 
 
 async def _wait_for_idle(handler: MessagingWorkflow) -> None:

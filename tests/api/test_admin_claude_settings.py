@@ -5,9 +5,9 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-from free_claude_code.config.proxy_auth import proxy_auth_token
-from free_claude_code.config.server_urls import local_proxy_root_url
-from free_claude_code.config.settings import Settings
+from my_claude_code.config.proxy_auth import proxy_auth_token
+from my_claude_code.config.server_urls import local_proxy_root_url
+from my_claude_code.config.settings import Settings
 from tests.api.support import create_test_app
 
 
@@ -236,7 +236,7 @@ def test_overrides_serialised_as_objects_and_never_contain_the_auth_token(
         encoding="utf-8",
     )
     monkeypatch.setattr(
-        "free_claude_code.config.claude_settings.claude_managed_settings_paths",
+        "my_claude_code.config.claude_settings.claude_managed_settings_paths",
         lambda: [managed_file],
     )
 

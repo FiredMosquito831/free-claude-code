@@ -6,22 +6,22 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from free_claude_code.application.execution import (
+from my_claude_code.application.execution import (
     ProviderExecutor,
     RouteExecutionPolicy,
 )
-from free_claude_code.application.ports import ProviderPort
-from free_claude_code.application.route_health import RouteHealthRegistry
-from free_claude_code.application.routing import (
+from my_claude_code.application.ports import ProviderPort
+from my_claude_code.application.route_health import RouteHealthRegistry
+from my_claude_code.application.routing import (
     ResolvedModel,
     RoutedMessagesPlan,
     RoutedMessagesRequest,
 )
-from free_claude_code.config.reasoning import ReasoningPreference
-from free_claude_code.core.anthropic.models import Message, MessagesRequest
-from free_claude_code.core.async_iterators import AsyncCloseable
-from free_claude_code.core.failures import ExecutionFailure, FailureKind
-from free_claude_code.core.reasoning import ReasoningPolicy
+from my_claude_code.config.reasoning import ReasoningPreference
+from my_claude_code.core.anthropic.models import Message, MessagesRequest
+from my_claude_code.core.async_iterators import AsyncCloseable
+from my_claude_code.core.failures import ExecutionFailure, FailureKind
+from my_claude_code.core.reasoning import ReasoningPolicy
 
 
 class FakeProvider:

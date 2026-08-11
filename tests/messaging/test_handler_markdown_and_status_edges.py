@@ -3,13 +3,13 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from free_claude_code.messaging.command_context import StopOutcome
-from free_claude_code.messaging.models import IncomingMessage, MessageScope
-from free_claude_code.messaging.node_event_pipeline import process_parsed_cli_event
-from free_claude_code.messaging.rendering.telegram_markdown import (
+from my_claude_code.messaging.command_context import StopOutcome
+from my_claude_code.messaging.models import IncomingMessage, MessageScope
+from my_claude_code.messaging.node_event_pipeline import process_parsed_cli_event
+from my_claude_code.messaging.rendering.telegram_markdown import (
     render_markdown_to_mdv2,
 )
-from free_claude_code.messaging.trees import (
+from my_claude_code.messaging.trees import (
     CancellationReason,
     CancellationResult,
     CancellationUiOwner,
@@ -23,8 +23,8 @@ from free_claude_code.messaging.trees import (
     TreeIdentity,
     TreeSnapshot,
 )
-from free_claude_code.messaging.trees.transitions import CancellationEffect
-from free_claude_code.messaging.workflow import MessagingWorkflow
+from my_claude_code.messaging.trees.transitions import CancellationEffect
+from my_claude_code.messaging.workflow import MessagingWorkflow
 
 _SCOPE = MessageScope(platform="telegram", chat_id="c")
 

@@ -9,9 +9,9 @@ so these tests pin the four (endpoint, credential) pairs against each other.
 
 import pytest
 
-from free_claude_code.config.provider_catalog import PROVIDER_CATALOG
-from free_claude_code.providers.openai_chat.profiles import OPENAI_CHAT_PROFILES
-from free_claude_code.providers.openai_chat.reasoning import NoReasoning
+from my_claude_code.config.provider_catalog import PROVIDER_CATALOG
+from my_claude_code.providers.openai_chat.profiles import OPENAI_CHAT_PROFILES
+from my_claude_code.providers.openai_chat.reasoning import NoReasoning
 
 ALIBABA_PROVIDER_IDS = (
     "alibaba_coding",

@@ -416,7 +416,7 @@ FEATURE_INVENTORY: tuple[FeatureCoverage, ...] = (
         ("tests/cli/test_entrypoints.py", "tests/core/test_version.py"),
         (
             "test_fcc_init_scaffolds_user_config",
-            "test_free_claude_code_entrypoint_starts_server",
+            "test_my_claude_code_entrypoint_starts_server",
         ),
         (
             "test_entrypoint_init_e2e",

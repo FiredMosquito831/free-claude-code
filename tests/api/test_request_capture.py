@@ -7,19 +7,19 @@ from typing import Any
 
 import pytest
 
-from free_claude_code.api.request_capture import (
+from my_claude_code.api.request_capture import (
     RequestCapture,
     build_capture,
     extract_input_text,
     extract_request_params,
 )
-from free_claude_code.api.response_streams import ManagedStreamingResponse
-from free_claude_code.application.routing import ModelRouter
-from free_claude_code.config.settings import Settings
-from free_claude_code.core.anthropic.models import Message, MessagesRequest
-from free_claude_code.core.async_iterators import AsyncCloseable
-from free_claude_code.core.failures import ExecutionFailure, FailureKind
-from free_claude_code.core.request_log import (
+from my_claude_code.api.response_streams import ManagedStreamingResponse
+from my_claude_code.application.routing import ModelRouter
+from my_claude_code.config.settings import Settings
+from my_claude_code.core.anthropic.models import Message, MessagesRequest
+from my_claude_code.core.async_iterators import AsyncCloseable
+from my_claude_code.core.failures import ExecutionFailure, FailureKind
+from my_claude_code.core.request_log import (
     RequestLogStore,
     RequestRecord,
     get_request_log_store,
@@ -379,7 +379,7 @@ class _FakeProvider:
 
 @pytest.mark.asyncio
 async def test_messages_handler_end_to_end_capture() -> None:
-    from free_claude_code.api.handlers import MessagesHandler
+    from my_claude_code.api.handlers import MessagesHandler
 
     events = _events(
         (
@@ -449,7 +449,7 @@ class _RotatingFakeProvider(_FakeProvider):
         request_id: str | None = None,
         reasoning,
     ) -> AsyncIterator[str]:
-        from free_claude_code.core.credential_attribution import record_credential
+        from my_claude_code.core.credential_attribution import record_credential
 
         record_credential(self._index, self._label)
         for event in self.events:
@@ -464,7 +464,7 @@ async def test_capture_records_the_credential_across_the_streaming_response() ->
     provider writes into it while the response streams (potentially in another
     task), and finalize reads it back.
     """
-    from free_claude_code.api.handlers import MessagesHandler
+    from my_claude_code.api.handlers import MessagesHandler
 
     events = _events(
         (

@@ -4,14 +4,14 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from free_claude_code.api.command_utils import extract_command_prefix
-from free_claude_code.api.detection import (
+from my_claude_code.api.command_utils import extract_command_prefix
+from my_claude_code.api.detection import (
     is_prefix_detection_request,
     is_quota_check_request,
     is_title_generation_request,
 )
-from free_claude_code.core.anthropic import get_token_count
-from free_claude_code.core.anthropic.models import (
+from my_claude_code.core.anthropic import get_token_count
+from my_claude_code.core.anthropic.models import (
     Message,
     MessagesRequest,
     SystemContent,

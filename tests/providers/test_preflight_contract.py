@@ -4,10 +4,10 @@ from collections.abc import AsyncIterator
 
 import pytest
 
-from free_claude_code.core.anthropic.models import Message, MessagesRequest
-from free_claude_code.core.reasoning import DEFAULT_REASONING_POLICY, ReasoningPolicy
-from free_claude_code.providers.base import BaseProvider, ProviderConfig
-from free_claude_code.providers.openai_chat import OpenAIChatProvider
+from my_claude_code.core.anthropic.models import Message, MessagesRequest
+from my_claude_code.core.reasoning import DEFAULT_REASONING_POLICY, ReasoningPolicy
+from my_claude_code.providers.base import BaseProvider, ProviderConfig
+from my_claude_code.providers.openai_chat import OpenAIChatProvider
 
 
 class RecordingOpenAIProvider(OpenAIChatProvider):

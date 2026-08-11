@@ -4,10 +4,10 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from free_claude_code.config.provider_catalog import GEMINI_DEFAULT_BASE
-from free_claude_code.providers.base import ProviderConfig
-from free_claude_code.providers.gemini import GeminiProvider
-from free_claude_code.providers.gemini.quirks import (
+from my_claude_code.config.provider_catalog import GEMINI_DEFAULT_BASE
+from my_claude_code.providers.base import ProviderConfig
+from my_claude_code.providers.gemini import GeminiProvider
+from my_claude_code.providers.gemini.quirks import (
     GEMINI_SKIP_THOUGHT_SIGNATURE_VALIDATOR,
 )
 from tests.providers.request_factory import make_messages_request
@@ -44,7 +44,7 @@ def gemini_provider(gemini_config):
 def test_init(gemini_config):
     """Test provider initialization."""
     with patch(
-        "free_claude_code.providers.openai_chat.provider.AsyncOpenAI"
+        "my_claude_code.providers.openai_chat.provider.AsyncOpenAI"
     ) as mock_openai:
         provider = GeminiProvider(
             gemini_config, rate_limiter=passthrough_rate_limiter()

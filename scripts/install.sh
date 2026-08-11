@@ -429,7 +429,7 @@ package_spec() {
     fi
 }
 
-install_free_claude_code() {
+install_my_claude_code() {
     resolve_release
     download_verified_release_wheel
     package_url="file://$release_wheel_path"
@@ -442,7 +442,7 @@ install_free_claude_code() {
     fi
 }
 
-configure_and_verify_free_claude_code() {
+configure_and_verify_my_claude_code() {
     run uv tool update-shell
 
     if [ "$dry_run" -eq 1 ]; then
@@ -494,10 +494,10 @@ step "Ensuring uv $MIN_UV_VERSION or newer is installed"
 ensure_uv
 
 step "Installing or updating Free Claude Code"
-install_free_claude_code
+install_my_claude_code
 
-step "Configuring PATH and verifying Free Claude Code"
-configure_and_verify_free_claude_code
+step "Configuring PATH and verifying My Claude Code"
+configure_and_verify_my_claude_code
 
 if [ "$dry_run" -eq 1 ]; then
     printf '\nDry run complete. No changes were made.\n'

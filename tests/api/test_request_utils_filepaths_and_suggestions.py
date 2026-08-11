@@ -2,12 +2,12 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from free_claude_code.api.command_utils import extract_filepaths_from_command
-from free_claude_code.api.detection import (
+from my_claude_code.api.command_utils import extract_filepaths_from_command
+from my_claude_code.api.detection import (
     is_filepath_extraction_request,
     is_suggestion_mode_request,
 )
-from free_claude_code.core.anthropic.models import Message, MessagesRequest
+from my_claude_code.core.anthropic.models import Message, MessagesRequest
 
 
 def _mk_req(messages, tools=None, system=None):

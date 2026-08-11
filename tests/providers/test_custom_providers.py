@@ -4,26 +4,26 @@ from unittest.mock import patch
 
 import pytest
 
-from free_claude_code.application.routing import ModelRouter
-from free_claude_code.config.provider_registry import (
+from my_claude_code.application.routing import ModelRouter
+from my_claude_code.config.provider_registry import (
     ProviderRegistry,
     get_provider_registry,
 )
-from free_claude_code.config.settings import Settings
-from free_claude_code.providers.base import ProviderConfig
-from free_claude_code.providers.openai_chat import (
+from my_claude_code.config.settings import Settings
+from my_claude_code.providers.base import ProviderConfig
+from my_claude_code.providers.openai_chat import (
     GENERIC_OPENAI_PROFILE,
     OpenAIChatProvider,
     create_openai_chat_provider,
 )
-from free_claude_code.providers.runtime.config import build_provider_config
-from free_claude_code.providers.runtime.discovery import (
+from my_claude_code.providers.runtime.config import build_provider_config
+from my_claude_code.providers.runtime.discovery import (
     model_cache_provider_ids_for_settings,
     model_list_provider_ids_for_settings,
 )
-from free_claude_code.providers.runtime.factory import create_provider
-from free_claude_code.providers.runtime.model_cache import ProviderModelCache
-from free_claude_code.providers.runtime.rotating import RotatingProvider
+from my_claude_code.providers.runtime.factory import create_provider
+from my_claude_code.providers.runtime.model_cache import ProviderModelCache
+from my_claude_code.providers.runtime.rotating import RotatingProvider
 from tests.providers.support import passthrough_rate_limiter
 
 
@@ -43,7 +43,7 @@ def custom_registry(tmp_path) -> ProviderRegistry:
 @pytest.fixture(autouse=True)
 def _patch_registry_singleton(monkeypatch, custom_registry):
     monkeypatch.setattr(
-        "free_claude_code.config.provider_registry._registry", custom_registry
+        "my_claude_code.config.provider_registry._registry", custom_registry
     )
 
 
@@ -109,7 +109,7 @@ def test_build_provider_config_reads_registry_entry(make_settings) -> None:
 
 
 def test_factory_builds_dynamic_provider_with_generic_profile(make_settings) -> None:
-    with patch("free_claude_code.providers.openai_chat.provider.AsyncOpenAI"):
+    with patch("my_claude_code.providers.openai_chat.provider.AsyncOpenAI"):
         provider = create_provider("custom_acme_ai", make_settings())
 
     assert isinstance(provider, RotatingProvider)
@@ -125,7 +125,7 @@ def test_factory_single_key_dynamic_provider_is_not_rotated(
     custom_registry: ProviderRegistry, make_settings
 ) -> None:
     custom_registry.update("custom_acme_ai", api_keys=("sk-only",))
-    with patch("free_claude_code.providers.openai_chat.provider.AsyncOpenAI"):
+    with patch("my_claude_code.providers.openai_chat.provider.AsyncOpenAI"):
         provider = create_provider("custom_acme_ai", make_settings())
 
     assert isinstance(provider, OpenAIChatProvider)
@@ -133,7 +133,7 @@ def test_factory_single_key_dynamic_provider_is_not_rotated(
 
 
 def test_factory_unknown_provider_error_lists_custom_ids(make_settings) -> None:
-    from free_claude_code.application.errors import UnknownProviderError
+    from my_claude_code.application.errors import UnknownProviderError
 
     with pytest.raises(UnknownProviderError, match="custom_acme_ai"):
         create_provider("custom_missing", make_settings())
@@ -167,7 +167,7 @@ def test_model_cache_accepts_custom_provider_ids() -> None:
 
 
 def test_model_cache_propagates_enriched_metadata() -> None:
-    from free_claude_code.application.model_metadata import ProviderModelInfo
+    from my_claude_code.application.model_metadata import ProviderModelInfo
 
     cache = ProviderModelCache()
     cache.cache_model_infos(
@@ -196,7 +196,7 @@ def test_generic_profile_builds_plain_openai_body() -> None:
         api_key="sk-x",
         base_url="https://api.acme.test/v1",
     )
-    with patch("free_claude_code.providers.openai_chat.provider.AsyncOpenAI"):
+    with patch("my_claude_code.providers.openai_chat.provider.AsyncOpenAI"):
         provider = create_openai_chat_provider(
             "custom_acme_ai",
             config,

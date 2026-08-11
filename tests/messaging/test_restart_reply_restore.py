@@ -4,12 +4,12 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from free_claude_code.messaging.models import IncomingMessage, MessageScope
-from free_claude_code.messaging.session import SessionStore
-from free_claude_code.messaging.trees import TreeIdentity
-from free_claude_code.messaging.trees.node import MessageNode, MessageState
-from free_claude_code.messaging.trees.runtime import MessageTree
-from free_claude_code.messaging.workflow import MessagingWorkflow
+from my_claude_code.messaging.models import IncomingMessage, MessageScope
+from my_claude_code.messaging.session import SessionStore
+from my_claude_code.messaging.trees import TreeIdentity
+from my_claude_code.messaging.trees.node import MessageNode, MessageState
+from my_claude_code.messaging.trees.runtime import MessageTree
+from my_claude_code.messaging.workflow import MessagingWorkflow
 
 TELEGRAM_CHAT_1 = MessageScope(platform="telegram", chat_id="chat_1")
 

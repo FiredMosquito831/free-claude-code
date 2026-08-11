@@ -2,7 +2,7 @@
 
 from copy import deepcopy
 
-from free_claude_code.providers.nvidia_nim.retry import (
+from my_claude_code.providers.nvidia_nim.retry import (
     clone_body_without_reasoning_budget,
 )
 

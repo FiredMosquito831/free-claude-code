@@ -8,12 +8,12 @@ import httpx
 import openai
 import pytest
 
-from free_claude_code.core.diagnostics import (
+from my_claude_code.core.diagnostics import (
     ERROR_DETAIL_DISPLAY_CAP_BYTES,
     attach_upstream_error_body,
 )
-from free_claude_code.core.failures import ExecutionFailure, FailureKind
-from free_claude_code.providers.failure_policy import classify_provider_failure
+from my_claude_code.core.failures import ExecutionFailure, FailureKind
+from my_claude_code.providers.failure_policy import classify_provider_failure
 
 
 def _openai_status_error(

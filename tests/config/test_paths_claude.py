@@ -1,7 +1,7 @@
 import sys
 from pathlib import Path
 
-from free_claude_code.config import paths
+from my_claude_code.config import paths
 
 
 def test_is_wsl_false_when_osrelease_missing(monkeypatch, tmp_path: Path) -> None:

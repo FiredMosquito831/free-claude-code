@@ -2,8 +2,8 @@
 
 import pytest
 
-from free_claude_code.core.rate_limit import MAX_RATE_LIMIT_COOLDOWN_SECONDS
-from free_claude_code.websearch.rotation import (
+from my_claude_code.core.rate_limit import MAX_RATE_LIMIT_COOLDOWN_SECONDS
+from my_claude_code.websearch.rotation import (
     CIRCUIT_OPEN_SECONDS,
     LOCKOUT_BASE_SECONDS,
     RATE_LIMIT_COOLDOWN_SECONDS,

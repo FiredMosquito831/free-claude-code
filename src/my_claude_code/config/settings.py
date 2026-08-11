@@ -1,0 +1,885 @@
+"""Flat application settings schema loaded by Pydantic Settings."""
+
+from functools import lru_cache
+from typing import Any
+
+from loguru import logger
+from pydantic import Field, field_validator, model_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+from .constants import (
+    CHATGPT_OAUTH_MANAGED_CREDENTIAL_REFERENCE,
+    CREDENTIAL_CIRCUIT_THRESHOLD_DEFAULT,
+    FALLBACK_EJECT_AFTER_FAILURES_DEFAULT,
+    FALLBACK_EJECT_SECONDS_DEFAULT,
+    FALLBACK_FIRST_TOKEN_TIMEOUT_DEFAULT,
+    FALLBACK_TOTAL_TIMEOUT_DEFAULT,
+    HTTP_CONNECT_TIMEOUT_DEFAULT,
+    PROVIDER_RETRY_ATTEMPTS_DEFAULT,
+    RATE_LIMIT_COOLDOWN_SECONDS_DEFAULT,
+    REQUEST_LOG_COMPRESSION_LEVEL_DEFAULT,
+    REQUEST_LOG_QUEUE_MAX_SIZE_DEFAULT,
+    REQUEST_LOG_TEXT_MAX_CHARS_DEFAULT,
+    SERVER_GRACEFUL_SHUTDOWN_SECONDS_DEFAULT,
+    STREAM_COMMIT_HOLDBACK_SECONDS_DEFAULT,
+    STREAM_EARLY_RETRY_ATTEMPTS_DEFAULT,
+    STREAM_MIDSTREAM_RECOVERY_ATTEMPTS_DEFAULT,
+)
+from .env_files import (
+    ANTHROPIC_AUTH_TOKEN_ENV,
+    env_file_override,
+    settings_env_files,
+)
+from .limits import LIMIT_RANGES
+from .model_refs import format_model_ref_list, parse_model_ref_list
+from .nim import NimSettings
+from .paths import chatgpt_oauth_auth_path
+from .provider_registry import get_provider_registry
+from .reasoning import ReasoningPreference
+from .websearch_catalog import SUPPORTED_WEBSEARCH_PROVIDER_IDS
+
+
+def _require_provider_prefixed_model_ref(model_ref: str) -> None:
+    """Raise when a model ref is not a `provider/model` for a known provider."""
+
+    supported_ids = get_provider_registry().supported_ids()
+    if "/" not in model_ref:
+        raise ValueError(
+            f"Model must be prefixed with provider type. "
+            f"Valid providers: {', '.join(supported_ids)}. "
+            f"Format: provider_type/model/name"
+        )
+    provider = model_ref.split("/", 1)[0]
+    if provider not in supported_ids:
+        supported = ", ".join(f"'{p}'" for p in supported_ids)
+        raise ValueError(f"Invalid provider: '{provider}'. Supported: {supported}")
+
+
+class Settings(BaseSettings):
+    """Application settings loaded from environment variables."""
+
+    # ==================== OpenRouter Config ====================
+    open_router_api_key: str = Field(default="", validation_alias="OPENROUTER_API_KEY")
+
+    # ==================== Mistral La Plateforme ====================
+    mistral_api_key: str = Field(default="", validation_alias="MISTRAL_API_KEY")
+
+    # ==================== Mistral Codestral (codestral.mistral.ai) ====================
+    codestral_api_key: str = Field(default="", validation_alias="CODESTRAL_API_KEY")
+
+    # ==================== DeepSeek Config ====================
+    deepseek_api_key: str = Field(default="", validation_alias="DEEPSEEK_API_KEY")
+
+    # ==================== Kimi Config ====================
+    kimi_api_key: str = Field(default="", validation_alias="KIMI_API_KEY")
+
+    # ==================== Kimi For Coding Config ====================
+    kimi_coding_api_key: str = Field(default="", validation_alias="KIMI_CODING_API_KEY")
+
+    # ==================== ChatGPT OAuth (experimental) Config ====================
+    chatgpt_oauth_access_token: str = Field(
+        default="", validation_alias="CHATGPT_OAUTH_ACCESS_TOKEN"
+    )
+    chatgpt_oauth_account_id: str = Field(
+        default="", validation_alias="CHATGPT_OAUTH_ACCOUNT_ID"
+    )
+    chatgpt_oauth_base_url: str = Field(
+        default="", validation_alias="CHATGPT_OAUTH_BASE_URL"
+    )
+
+    # ==================== Wafer Config ====================
+    wafer_api_key: str = Field(default="", validation_alias="WAFER_API_KEY")
+
+    # ==================== MiniMax Config ====================
+    minimax_api_key: str = Field(default="", validation_alias="MINIMAX_API_KEY")
+
+    # ==================== OpenCode Zen / OpenCode Go ====================
+    # Same key from opencode.ai/auth; zen uses prefix ``opencode/``, Go uses ``opencode_go/``.
+    opencode_api_key: str = Field(default="", validation_alias="OPENCODE_API_KEY")
+
+    # ==================== Vercel AI Gateway ====================
+    vercel_ai_gateway_api_key: str = Field(
+        default="", validation_alias="AI_GATEWAY_API_KEY"
+    )
+
+    # ==================== Hugging Face Inference Providers ====================
+    huggingface_api_key: str = Field(default="", validation_alias="HUGGINGFACE_API_KEY")
+
+    # ==================== Cohere Compatibility API ====================
+    cohere_api_key: str = Field(default="", validation_alias="COHERE_API_KEY")
+
+    # ==================== GitHub Models ====================
+    github_models_token: str = Field(default="", validation_alias="GITHUB_MODELS_TOKEN")
+
+    # ==================== SambaNova Cloud ====================
+    sambanova_api_key: str = Field(default="", validation_alias="SAMBANOVA_API_KEY")
+
+    # ==================== Z.ai Config ====================
+    zai_api_key: str = Field(default="", validation_alias="ZAI_API_KEY")
+
+    # ==================== Fireworks AI Config ====================
+    fireworks_api_key: str = Field(default="", validation_alias="FIREWORKS_API_KEY")
+
+    # ==================== Novita AI Config ====================
+    novita_api_key: str = Field(default="", validation_alias="NOVITA_API_KEY")
+
+    # ==================== Nous Portal Config ====================
+    nous_api_key: str = Field(default="", validation_alias="NOUS_API_KEY")
+
+    # ==================== Kilo AI Gateway Config ====================
+    kilo_api_key: str = Field(default="", validation_alias="KILO_API_KEY")
+
+    # ==================== Command Code Provider API ====================
+    commandcode_api_key: str = Field(default="", validation_alias="COMMANDCODE_API_KEY")
+
+    # ==================== Cline Config ====================
+    cline_api_key: str = Field(default="", validation_alias="CLINE_API_KEY")
+
+    # ==================== Alibaba Cloud Model Studio Config ====================
+    # Four separate providers because both the plan and the region change the
+    # credential: a Coding Plan key is ``sk-sp-`` prefixed and rejected by the
+    # pay-per-token endpoints, and a key issued in one region is not valid in
+    # the other. Base URLs are overridable for workspace-scoped or US regions.
+    alibaba_api_key: str = Field(default="", validation_alias="ALIBABA_API_KEY")
+    alibaba_base_url: str = Field(default="", validation_alias="ALIBABA_BASE_URL")
+    alibaba_cn_api_key: str = Field(default="", validation_alias="ALIBABA_CN_API_KEY")
+    alibaba_cn_base_url: str = Field(default="", validation_alias="ALIBABA_CN_BASE_URL")
+    alibaba_coding_api_key: str = Field(
+        default="", validation_alias="ALIBABA_CODING_API_KEY"
+    )
+    alibaba_coding_base_url: str = Field(
+        default="", validation_alias="ALIBABA_CODING_BASE_URL"
+    )
+    alibaba_coding_cn_api_key: str = Field(
+        default="", validation_alias="ALIBABA_CODING_CN_API_KEY"
+    )
+    alibaba_coding_cn_base_url: str = Field(
+        default="", validation_alias="ALIBABA_CODING_CN_BASE_URL"
+    )
+
+    # ==================== Cloudflare Workers AI Config ====================
+    cloudflare_api_token: str = Field(
+        default="", validation_alias="CLOUDFLARE_API_TOKEN"
+    )
+    cloudflare_account_id: str = Field(
+        default="", validation_alias="CLOUDFLARE_ACCOUNT_ID"
+    )
+
+    # ==================== Google Gemini (Google AI Studio) ====================
+    gemini_api_key: str = Field(default="", validation_alias="GEMINI_API_KEY")
+
+    # ==================== Groq (OpenAI-compatible) ====================
+    groq_api_key: str = Field(default="", validation_alias="GROQ_API_KEY")
+
+    # ==================== Cerebras Inference (OpenAI-compatible) ====================
+    cerebras_api_key: str = Field(default="", validation_alias="CEREBRAS_API_KEY")
+
+    # ==================== Ollama Cloud ====================
+    ollama_api_key: str = Field(default="", validation_alias="OLLAMA_API_KEY")
+
+    # ==================== Azure OpenAI (v1 API) ====================
+    # The endpoint is per-resource, so there is no default base URL to ship:
+    # AZURE_OPENAI_BASE_URL must name your own resource. ``model`` is the
+    # deployment name you chose in Azure, not the underlying model name.
+    azure_openai_api_key: str = Field(
+        default="", validation_alias="AZURE_OPENAI_API_KEY"
+    )
+    azure_openai_base_url: str = Field(
+        default="", validation_alias="AZURE_OPENAI_BASE_URL"
+    )
+
+    # ==================== Messaging Platform Selection ====================
+    # Valid: "telegram" | "discord" | "none"
+    messaging_platform: str = Field(
+        default="discord", validation_alias="MESSAGING_PLATFORM"
+    )
+    messaging_rate_limit: int = Field(
+        default=1, validation_alias="MESSAGING_RATE_LIMIT"
+    )
+    messaging_rate_window: float = Field(
+        default=1.0, validation_alias="MESSAGING_RATE_WINDOW"
+    )
+
+    # ==================== NVIDIA NIM Config ====================
+    nvidia_nim_api_key: str = ""
+
+    # ==================== LM Studio Config ====================
+    lm_studio_base_url: str = Field(
+        default="http://localhost:1234/v1",
+        validation_alias="LM_STUDIO_BASE_URL",
+    )
+
+    # ==================== Llama.cpp Config ====================
+    llamacpp_base_url: str = Field(
+        default="http://localhost:8080/v1",
+        validation_alias="LLAMACPP_BASE_URL",
+    )
+
+    # ==================== Ollama Config ====================
+    ollama_base_url: str = Field(
+        default="http://localhost:11434",
+        validation_alias="OLLAMA_BASE_URL",
+    )
+
+    # ==================== Model ====================
+    # All Claude model requests are mapped to this single model (fallback)
+    # Format: provider_type/model/name
+    model: str = "nvidia_nim/nvidia/nemotron-3-super-120b-a12b"
+
+    # Per-model overrides (optional, falls back to MODEL)
+    # Each can use a different provider
+    model_fable: str | None = Field(default=None, validation_alias="MODEL_FABLE")
+    model_opus: str | None = Field(default=None, validation_alias="MODEL_OPUS")
+    model_sonnet: str | None = Field(default=None, validation_alias="MODEL_SONNET")
+    model_haiku: str | None = Field(default=None, validation_alias="MODEL_HAIKU")
+
+    # Ordered fallback chains, comma-separated `provider/model` refs. A route
+    # uses its own chain when it has its own primary override, otherwise the
+    # root MODEL chain; the two are never merged, so what a route will try is
+    # exactly the primary plus the chain sitting next to it.
+    model_fallbacks: str | None = Field(
+        default=None, validation_alias="MODEL_FALLBACKS"
+    )
+    model_fable_fallbacks: str | None = Field(
+        default=None, validation_alias="MODEL_FABLE_FALLBACKS"
+    )
+    model_opus_fallbacks: str | None = Field(
+        default=None, validation_alias="MODEL_OPUS_FALLBACKS"
+    )
+    model_sonnet_fallbacks: str | None = Field(
+        default=None, validation_alias="MODEL_SONNET_FALLBACKS"
+    )
+    model_haiku_fallbacks: str | None = Field(
+        default=None, validation_alias="MODEL_HAIKU_FALLBACKS"
+    )
+
+    # Vision adapter: serves requests carrying images when the model a route
+    # resolved to is known not to accept them.
+    model_vision: str | None = Field(default=None, validation_alias="MODEL_VISION")
+    # The adapter is a route like any other, so it gets the same safety net:
+    # one unreachable vision model must not lose every image on the machine.
+    model_vision_fallbacks: str | None = Field(
+        default=None, validation_alias="MODEL_VISION_FALLBACKS"
+    )
+
+    # ==================== Fallback timing ====================
+    # A chain can only rescue a request while nothing has been sent to the
+    # client, so a stalled model has to be declared stalled inside that window.
+    # Without a deadline the only thing that ends a silent attempt is the
+    # transport read timeout, minutes later and long past any use.
+    #
+    # Seconds to wait for a model's first output before giving the next model
+    # on the chain a turn. Nothing has been streamed yet, so this is invisible
+    # to the client. 0 disables it.
+    fallback_first_token_timeout: float = Field(
+        default=FALLBACK_FIRST_TOKEN_TIMEOUT_DEFAULT,
+        validation_alias="FALLBACK_FIRST_TOKEN_TIMEOUT",
+    )
+    # Whole-request budget covering every attempt, retry and recovery. This is
+    # the backstop for a stream that already committed and then stalled: no
+    # chain can replace it, but it should still end. 0 disables it.
+    fallback_total_timeout: float = Field(
+        default=FALLBACK_TOTAL_TIMEOUT_DEFAULT,
+        validation_alias="FALLBACK_TOTAL_TIMEOUT",
+    )
+    # Consecutive failures before a provider/model is skipped by routing, and
+    # how long it stays skipped. Without this every request re-pays a dead
+    # model's timeout on its way to a healthy fallback. 0 disables ejection.
+    fallback_eject_after_failures: int = Field(
+        default=FALLBACK_EJECT_AFTER_FAILURES_DEFAULT,
+        validation_alias="FALLBACK_EJECT_AFTER_FAILURES",
+    )
+    fallback_eject_seconds: float = Field(
+        default=FALLBACK_EJECT_SECONDS_DEFAULT,
+        validation_alias="FALLBACK_EJECT_SECONDS",
+    )
+
+    # How many times one model is retried on a 429 or 5xx before the chain
+    # moves on. Each retry waits longer than the last, so this is the delay a
+    # healthy fallback waits behind.
+    provider_retry_attempts: int = Field(
+        default=PROVIDER_RETRY_ATTEMPTS_DEFAULT,
+        validation_alias="PROVIDER_RETRY_ATTEMPTS",
+    )
+    # Retries inside one provider before the failure reaches routing at all.
+    stream_early_retry_attempts: int = Field(
+        default=STREAM_EARLY_RETRY_ATTEMPTS_DEFAULT,
+        validation_alias="STREAM_EARLY_RETRY_ATTEMPTS",
+    )
+    # After output has started and the connection drops, how many times the same
+    # model is asked to finish. No chain can help here, so this bounds how long
+    # a dying stream may hold a request.
+    stream_midstream_recovery_attempts: int = Field(
+        default=STREAM_MIDSTREAM_RECOVERY_ATTEMPTS_DEFAULT,
+        validation_alias="STREAM_MIDSTREAM_RECOVERY_ATTEMPTS",
+    )
+    # How long the first output is held before it commits. Raising it widens the
+    # window in which a failure can still fall back invisibly, at the cost of
+    # exactly that much time-to-first-token. 0 commits immediately, which
+    # disables invisible recovery entirely.
+    stream_commit_holdback_seconds: float = Field(
+        default=STREAM_COMMIT_HOLDBACK_SECONDS_DEFAULT,
+        validation_alias="STREAM_COMMIT_HOLDBACK_SECONDS",
+    )
+    # Applied only when a rate-limited provider sends no Retry-After header.
+    rate_limit_cooldown_seconds: float = Field(
+        default=RATE_LIMIT_COOLDOWN_SECONDS_DEFAULT,
+        validation_alias="RATE_LIMIT_COOLDOWN_SECONDS",
+    )
+    # Consecutive failures before one credential is benched by rotation.
+    credential_circuit_threshold: int = Field(
+        default=CREDENTIAL_CIRCUIT_THRESHOLD_DEFAULT,
+        validation_alias="CREDENTIAL_CIRCUIT_THRESHOLD",
+    )
+    # Longest text stored per field; longer text is truncated, which also bounds
+    # what content search can ever find.
+    request_log_text_max_chars: int = Field(
+        default=REQUEST_LOG_TEXT_MAX_CHARS_DEFAULT,
+        validation_alias="REQUEST_LOG_TEXT_MAX_CHARS",
+    )
+    # zstd level for stored bodies. Measured on a real log, level 19 was 4.9%
+    # smaller than 9 at a ninth of the speed.
+    request_log_compression_level: int = Field(
+        default=REQUEST_LOG_COMPRESSION_LEVEL_DEFAULT,
+        validation_alias="REQUEST_LOG_COMPRESSION_LEVEL",
+    )
+    # Pending writes held in memory. When this fills, records are dropped.
+    request_log_queue_max_size: int = Field(
+        default=REQUEST_LOG_QUEUE_MAX_SIZE_DEFAULT,
+        validation_alias="REQUEST_LOG_QUEUE_MAX_SIZE",
+    )
+
+    # ==================== Per-Provider Proxy ====================
+    nvidia_nim_proxy: str = Field(default="", validation_alias="NVIDIA_NIM_PROXY")
+    open_router_proxy: str = Field(default="", validation_alias="OPENROUTER_PROXY")
+    mistral_proxy: str = Field(default="", validation_alias="MISTRAL_PROXY")
+    codestral_proxy: str = Field(default="", validation_alias="CODESTRAL_PROXY")
+    lmstudio_proxy: str = Field(default="", validation_alias="LMSTUDIO_PROXY")
+    llamacpp_proxy: str = Field(default="", validation_alias="LLAMACPP_PROXY")
+    kimi_proxy: str = Field(default="", validation_alias="KIMI_PROXY")
+    kimi_coding_proxy: str = Field(default="", validation_alias="KIMI_CODING_PROXY")
+    chatgpt_oauth_proxy: str = Field(default="", validation_alias="CHATGPT_OAUTH_PROXY")
+    wafer_proxy: str = Field(default="", validation_alias="WAFER_PROXY")
+    minimax_proxy: str = Field(default="", validation_alias="MINIMAX_PROXY")
+    opencode_proxy: str = Field(default="", validation_alias="OPENCODE_PROXY")
+    opencode_go_proxy: str = Field(default="", validation_alias="OPENCODE_GO_PROXY")
+    vercel_ai_gateway_proxy: str = Field(
+        default="", validation_alias="VERCEL_AI_GATEWAY_PROXY"
+    )
+    huggingface_proxy: str = Field(default="", validation_alias="HUGGINGFACE_PROXY")
+    cohere_proxy: str = Field(default="", validation_alias="COHERE_PROXY")
+    github_models_proxy: str = Field(default="", validation_alias="GITHUB_MODELS_PROXY")
+    sambanova_proxy: str = Field(default="", validation_alias="SAMBANOVA_PROXY")
+    zai_proxy: str = Field(default="", validation_alias="ZAI_PROXY")
+    fireworks_proxy: str = Field(default="", validation_alias="FIREWORKS_PROXY")
+    novita_proxy: str = Field(default="", validation_alias="NOVITA_PROXY")
+    nous_proxy: str = Field(default="", validation_alias="NOUS_PROXY")
+    kilo_proxy: str = Field(default="", validation_alias="KILO_PROXY")
+    commandcode_proxy: str = Field(default="", validation_alias="COMMANDCODE_PROXY")
+    cline_proxy: str = Field(default="", validation_alias="CLINE_PROXY")
+    alibaba_proxy: str = Field(default="", validation_alias="ALIBABA_PROXY")
+    alibaba_cn_proxy: str = Field(default="", validation_alias="ALIBABA_CN_PROXY")
+    alibaba_coding_proxy: str = Field(
+        default="", validation_alias="ALIBABA_CODING_PROXY"
+    )
+    alibaba_coding_cn_proxy: str = Field(
+        default="", validation_alias="ALIBABA_CODING_CN_PROXY"
+    )
+    cloudflare_proxy: str = Field(default="", validation_alias="CLOUDFLARE_PROXY")
+    deepseek_proxy: str = Field(default="", validation_alias="DEEPSEEK_PROXY")
+    azure_openai_proxy: str = Field(default="", validation_alias="AZURE_OPENAI_PROXY")
+    gemini_proxy: str = Field(default="", validation_alias="GEMINI_PROXY")
+    groq_proxy: str = Field(default="", validation_alias="GROQ_PROXY")
+    cerebras_proxy: str = Field(default="", validation_alias="CEREBRAS_PROXY")
+    ollama_cloud_proxy: str = Field(default="", validation_alias="OLLAMA_CLOUD_PROXY")
+
+    # ==================== Provider Rate Limiting ====================
+    provider_rate_limit: int = Field(default=40, validation_alias="PROVIDER_RATE_LIMIT")
+    provider_rate_window: int = Field(
+        default=60, validation_alias="PROVIDER_RATE_WINDOW"
+    )
+    provider_max_concurrency: int = Field(
+        default=5, validation_alias="PROVIDER_MAX_CONCURRENCY"
+    )
+    reasoning_policy: ReasoningPreference = Field(
+        default=ReasoningPreference.CLIENT,
+        validation_alias="REASONING_POLICY",
+    )
+    reasoning_fable: ReasoningPreference = Field(
+        default=ReasoningPreference.INHERIT,
+        validation_alias="REASONING_FABLE",
+    )
+    reasoning_opus: ReasoningPreference = Field(
+        default=ReasoningPreference.INHERIT,
+        validation_alias="REASONING_OPUS",
+    )
+    reasoning_sonnet: ReasoningPreference = Field(
+        default=ReasoningPreference.INHERIT,
+        validation_alias="REASONING_SONNET",
+    )
+    reasoning_haiku: ReasoningPreference = Field(
+        default=ReasoningPreference.INHERIT,
+        validation_alias="REASONING_HAIKU",
+    )
+
+    # ==================== HTTP Client Timeouts ====================
+    http_read_timeout: float = Field(
+        default=120.0, validation_alias="HTTP_READ_TIMEOUT"
+    )
+    http_write_timeout: float = Field(
+        default=10.0, validation_alias="HTTP_WRITE_TIMEOUT"
+    )
+    http_connect_timeout: float = Field(
+        default=HTTP_CONNECT_TIMEOUT_DEFAULT,
+        validation_alias="HTTP_CONNECT_TIMEOUT",
+    )
+
+    # ==================== Fast Prefix Detection ====================
+    fast_prefix_detection: bool = True
+
+    # ==================== Optimizations ====================
+    enable_network_probe_mock: bool = True
+    enable_title_generation_skip: bool = True
+    enable_suggestion_mode_skip: bool = True
+    enable_filepath_extraction_mock: bool = True
+
+    # ==================== Local web server tools (web_search / web_fetch) ====================
+    # Off by default: these tools perform outbound HTTP from the proxy (SSRF risk).
+    enable_web_server_tools: bool = Field(
+        default=False, validation_alias="ENABLE_WEB_SERVER_TOOLS"
+    )
+    # Comma-separated URL schemes allowed for web_fetch (default: http,https).
+    web_fetch_allowed_schemes: str = Field(
+        default="http,https", validation_alias="WEB_FETCH_ALLOWED_SCHEMES"
+    )
+    # When true, skip private/loopback/link-local IP blocking for web_fetch (lab only).
+    web_fetch_allow_private_networks: bool = Field(
+        default=False, validation_alias="WEB_FETCH_ALLOW_PRIVATE_NETWORKS"
+    )
+
+    # ==================== Web Search Providers ====================
+    # Backend for the proxy-fulfilled web_search server tool:
+    # "auto" (first configured catalog provider, else ddgs), "off" (legacy scrape),
+    # "disabled" (reject searches), or a provider id from config.websearch_catalog.
+    web_search_provider: str = Field(
+        default="auto", validation_alias="WEB_SEARCH_PROVIDER"
+    )
+    # "auto" keeps auto-selection resilient but treats an explicit provider as strict.
+    # Other values explicitly choose no fallback, DDGS only, or DDGS then legacy.
+    web_search_fallback_policy: str = Field(
+        default="auto", validation_alias="WEB_SEARCH_FALLBACK_POLICY"
+    )
+    # One optional credential per provider; comma-separate multiple keys for rotation.
+    ollama_search_api_key: str | None = Field(
+        default=None, validation_alias="OLLAMA_SEARCH_API_KEY"
+    )
+    exa_api_key: str | None = Field(default=None, validation_alias="EXA_API_KEY")
+    tavily_api_key: str | None = Field(default=None, validation_alias="TAVILY_API_KEY")
+    brave_search_api_key: str | None = Field(
+        default=None, validation_alias="BRAVE_SEARCH_API_KEY"
+    )
+    jina_api_key: str | None = Field(default=None, validation_alias="JINA_API_KEY")
+    serper_api_key: str | None = Field(default=None, validation_alias="SERPER_API_KEY")
+    firecrawl_api_key: str | None = Field(
+        default=None, validation_alias="FIRECRAWL_API_KEY"
+    )
+    linkup_api_key: str | None = Field(default=None, validation_alias="LINKUP_API_KEY")
+    perplexity_search_api_key: str | None = Field(
+        default=None, validation_alias="PERPLEXITY_SEARCH_API_KEY"
+    )
+    parallel_api_key: str | None = Field(
+        default=None, validation_alias="PARALLEL_API_KEY"
+    )
+    searchapi_api_key: str | None = Field(
+        default=None, validation_alias="SEARCHAPI_API_KEY"
+    )
+    serpapi_api_key: str | None = Field(
+        default=None, validation_alias="SERPAPI_API_KEY"
+    )
+    # Base URL of a self-hosted SearXNG instance (format=json must be enabled).
+    searxng_base_url: str | None = Field(
+        default=None, validation_alias="SEARXNG_BASE_URL"
+    )
+    # Web search usage analytics (SQLite under ~/.fcc/logs/).
+    websearch_log_enabled: bool = Field(
+        default=True, validation_alias="WEBSEARCH_LOG_ENABLED"
+    )
+    websearch_log_max_rows: int = Field(
+        default=50000, validation_alias="WEBSEARCH_LOG_MAX_ROWS"
+    )
+    # Persist complete normalized provider inputs/outputs for Admin drill-down.
+    # Disable for hashes/lengths only when searches may contain sensitive content.
+    websearch_log_capture_content: bool = Field(
+        default=True, validation_alias="WEBSEARCH_LOG_CAPTURE_CONTENT"
+    )
+    websearch_log_content_max_chars: int = Field(
+        default=50000,
+        ge=512,
+        validation_alias="WEBSEARCH_LOG_CONTENT_MAX_CHARS",
+    )
+    # Rich digest for the proxy-fulfilled web_search text block: per-result
+    # excerpt character cap and the optional provider answer lead.
+    websearch_digest_chars: int = Field(
+        default=600, validation_alias="WEBSEARCH_DIGEST_CHARS"
+    )
+    # Cap for the provider's extracted page text, which is far longer than a
+    # snippet and only present when an operator opts into it (EXA_CONTENTS,
+    # TAVILY_INCLUDE_RAW_CONTENT, FIRECRAWL_SCRAPE_FORMAT, ...). Separate from
+    # the snippet cap so turning content on is not trimmed back to snippet size.
+    websearch_digest_content_chars: int = Field(
+        default=2000, ge=0, validation_alias="WEBSEARCH_DIGEST_CONTENT_CHARS"
+    )
+    websearch_digest_answer: bool = Field(
+        default=True, validation_alias="WEBSEARCH_DIGEST_ANSWER"
+    )
+
+    # ==================== Debug / diagnostic logging (avoid sensitive content) ====================
+    # Minimum log level for the JSON file sink (DEBUG, INFO, WARNING, ERROR, CRITICAL).
+    log_level: str = Field(default="INFO", validation_alias="LOG_LEVEL")
+    # When false (default), API and SSE helpers log only metadata (counts, lengths, ids).
+    log_raw_api_payloads: bool = Field(
+        default=False, validation_alias="LOG_RAW_API_PAYLOADS"
+    )
+    log_raw_sse_events: bool = Field(
+        default=False, validation_alias="LOG_RAW_SSE_EVENTS"
+    )
+    # When false (default), unhandled exceptions log only type + route metadata (no message/traceback).
+    log_api_error_tracebacks: bool = Field(
+        default=False, validation_alias="LOG_API_ERROR_TRACEBACKS"
+    )
+    # When false (default), messaging logs omit text/transcription previews (metadata only).
+    log_raw_messaging_content: bool = Field(
+        default=False, validation_alias="LOG_RAW_MESSAGING_CONTENT"
+    )
+    # When true, log full Claude CLI stderr, non-JSON lines, and parser error text.
+    log_raw_cli_diagnostics: bool = Field(
+        default=False, validation_alias="LOG_RAW_CLI_DIAGNOSTICS"
+    )
+    # When true, log exception text / CLI error strings in messaging (may leak user content).
+    log_messaging_error_details: bool = Field(
+        default=False, validation_alias="LOG_MESSAGING_ERROR_DETAILS"
+    )
+    debug_platform_edits: bool = Field(
+        default=False, validation_alias="DEBUG_PLATFORM_EDITS"
+    )
+    debug_subagent_stack: bool = Field(
+        default=False, validation_alias="DEBUG_SUBAGENT_STACK"
+    )
+
+    # ==================== Request Analytics Log ====================
+    # Persistent per-request log (SQLite at ~/.fcc/logs/requests.db) feeding the
+    # admin Requests/Analytics tab. Writes are non-blocking (background writer).
+    request_log_enabled: bool = Field(
+        default=True, validation_alias="REQUEST_LOG_ENABLED"
+    )
+    # When false, store only body lengths + SHA-256 hashes instead of raw text.
+    request_log_capture_bodies: bool = Field(
+        default=True, validation_alias="REQUEST_LOG_CAPTURE_BODIES"
+    )
+    # Retention cap; oldest rows are pruned periodically past this many rows.
+    request_log_max_rows: int = Field(
+        default=50_000, validation_alias="REQUEST_LOG_MAX_ROWS"
+    )
+    # Store request/response text zstd-compressed in a side table instead of
+    # inline. Bodies are ~99% of the bytes, so this is roughly 9x less disk for
+    # the same retention. Rows written before it was enabled are still read.
+    request_log_compress_bodies: bool = Field(
+        default=True, validation_alias="REQUEST_LOG_COMPRESS_BODIES"
+    )
+
+    # ==================== NIM Settings ====================
+    nim: NimSettings = Field(default_factory=NimSettings)
+
+    # ==================== Voice Note Transcription ====================
+    voice_note_enabled: bool = Field(
+        default=True, validation_alias="VOICE_NOTE_ENABLED"
+    )
+    # Device: "cpu" | "cuda" | "nvidia_nim"
+    # - "cpu"/"cuda": local Whisper (requires voice_local extra: uv sync --extra voice_local)
+    # - "nvidia_nim": NVIDIA NIM Whisper API (requires voice extra: uv sync --extra voice)
+    whisper_device: str = Field(default="cpu", validation_alias="WHISPER_DEVICE")
+    # Whisper model ID or short name (for local Whisper) or NVIDIA NIM model (for nvidia_nim)
+    # Local Whisper: "tiny", "base", "small", "medium", "large-v2", "large-v3", "large-v3-turbo"
+    # NVIDIA NIM: "nvidia/parakeet-ctc-1.1b-asr", "openai/whisper-large-v3", etc.
+    whisper_model: str = Field(default="base", validation_alias="WHISPER_MODEL")
+    # ==================== Bot Wrapper Config ====================
+    telegram_bot_token: str | None = None
+    allowed_telegram_user_id: str | None = None
+    telegram_proxy_url: str = Field(default="", validation_alias="TELEGRAM_PROXY_URL")
+    discord_bot_token: str | None = Field(
+        default=None, validation_alias="DISCORD_BOT_TOKEN"
+    )
+    allowed_discord_channels: str | None = Field(
+        default=None, validation_alias="ALLOWED_DISCORD_CHANNELS"
+    )
+    allowed_dir: str = ""
+    max_message_log_entries_per_chat: int | None = Field(
+        default=None, validation_alias="MAX_MESSAGE_LOG_ENTRIES_PER_CHAT"
+    )
+
+    # ==================== Server ====================
+    host: str = "0.0.0.0"
+    port: int = 8082
+    open_admin_browser: bool = Field(default=True, validation_alias="FCC_OPEN_BROWSER")
+    # Optional proxy bearer token protecting public API endpoints.
+    # Set via env `ANTHROPIC_AUTH_TOKEN`. When empty, no auth is required.
+    anthropic_auth_token: str = Field(
+        default="", validation_alias="ANTHROPIC_AUTH_TOKEN"
+    )
+    # Seconds each server generation is given to finish in-flight requests during
+    # a RELOAD or REPLACE_PROCESS handoff before the supervisor force-drops them.
+    # A bounded, configurable field surfaced through the Limits manifest. The
+    # floor is 1s because uvicorn treats 0 as an immediate, no-drain shutdown
+    # rather than waiting indefinitely for in-flight work to drain.
+    server_graceful_shutdown_seconds: float = Field(
+        default=SERVER_GRACEFUL_SHUTDOWN_SECONDS_DEFAULT,
+        validation_alias="SERVER_GRACEFUL_SHUTDOWN_SECONDS",
+    )
+
+    # Handle empty strings for optional string fields
+    @field_validator(
+        "telegram_bot_token",
+        "allowed_telegram_user_id",
+        "discord_bot_token",
+        "allowed_discord_channels",
+        "model_fable",
+        "model_opus",
+        "model_sonnet",
+        "model_haiku",
+        "model_vision",
+        "model_fallbacks",
+        "model_fable_fallbacks",
+        "model_opus_fallbacks",
+        "model_sonnet_fallbacks",
+        "model_haiku_fallbacks",
+        "model_vision_fallbacks",
+        "ollama_search_api_key",
+        "exa_api_key",
+        "tavily_api_key",
+        "brave_search_api_key",
+        "jina_api_key",
+        "serper_api_key",
+        "firecrawl_api_key",
+        "linkup_api_key",
+        "perplexity_search_api_key",
+        "parallel_api_key",
+        "searchapi_api_key",
+        "serpapi_api_key",
+        "searxng_base_url",
+        mode="before",
+    )
+    @classmethod
+    def parse_optional_str(cls, v: Any) -> Any:
+        if v == "":
+            return None
+        return v
+
+    @field_validator("max_message_log_entries_per_chat", mode="before")
+    @classmethod
+    def parse_optional_log_cap(cls, v: Any) -> Any:
+        if v == "" or v is None:
+            return None
+        return v
+
+    @field_validator("log_level")
+    @classmethod
+    def validate_log_level(cls, v: str) -> str:
+        valid = {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}
+        upper = v.upper()
+        if upper not in valid:
+            raise ValueError(f"LOG_LEVEL must be one of {sorted(valid)}, got {v!r}")
+        return upper
+
+    @field_validator("reasoning_policy")
+    @classmethod
+    def validate_root_reasoning_policy(
+        cls, value: ReasoningPreference
+    ) -> ReasoningPreference:
+        if value is ReasoningPreference.INHERIT:
+            raise ValueError("REASONING_POLICY cannot inherit")
+        return value
+
+    @field_validator("whisper_device")
+    @classmethod
+    def validate_whisper_device(cls, v: str) -> str:
+        if v not in ("cpu", "cuda", "nvidia_nim"):
+            raise ValueError(
+                f"whisper_device must be 'cpu', 'cuda', or 'nvidia_nim', got {v!r}"
+            )
+        return v
+
+    @field_validator("messaging_platform")
+    @classmethod
+    def validate_messaging_platform(cls, v: str) -> str:
+        if v not in ("telegram", "discord", "none"):
+            raise ValueError(
+                f"messaging_platform must be 'telegram', 'discord', or 'none', got {v!r}"
+            )
+        return v
+
+    @field_validator("messaging_rate_limit")
+    @classmethod
+    def validate_messaging_rate_limit(cls, v: int) -> int:
+        if v <= 0:
+            raise ValueError("messaging_rate_limit must be > 0")
+        return v
+
+    @field_validator("messaging_rate_window")
+    @classmethod
+    def validate_messaging_rate_window(cls, v: float) -> float:
+        if v <= 0:
+            raise ValueError("messaging_rate_window must be > 0")
+        return float(v)
+
+    @field_validator("web_search_provider")
+    @classmethod
+    def validate_web_search_provider(cls, v: str) -> str:
+        value = v.strip().lower()
+        allowed = {"auto", "off", "disabled", *SUPPORTED_WEBSEARCH_PROVIDER_IDS}
+        if value not in allowed:
+            raise ValueError(
+                f"web_search_provider must be 'auto', 'off', 'disabled', or one of "
+                f"{SUPPORTED_WEBSEARCH_PROVIDER_IDS}, got {v!r}"
+            )
+        return value
+
+    @field_validator("web_search_fallback_policy")
+    @classmethod
+    def validate_web_search_fallback_policy(cls, v: str) -> str:
+        value = v.strip().lower()
+        allowed = ("auto", "none", "ddgs", "legacy")
+        if value not in allowed:
+            raise ValueError(
+                "web_search_fallback_policy must be 'auto', 'none', 'ddgs', "
+                f"or 'legacy', got {v!r}"
+            )
+        return value
+
+    @field_validator("web_fetch_allowed_schemes")
+    @classmethod
+    def validate_web_fetch_allowed_schemes(cls, v: str) -> str:
+        schemes = [part.strip().lower() for part in v.split(",") if part.strip()]
+        if not schemes:
+            raise ValueError("web_fetch_allowed_schemes must list at least one scheme")
+        for scheme in schemes:
+            if not scheme.isascii() or not scheme.isalpha():
+                raise ValueError(
+                    f"Invalid URL scheme in web_fetch_allowed_schemes: {scheme!r}"
+                )
+        return ",".join(schemes)
+
+    @field_validator(
+        "model",
+        "model_fable",
+        "model_opus",
+        "model_sonnet",
+        "model_haiku",
+        "model_vision",
+    )
+    @classmethod
+    def validate_model_format(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        _require_provider_prefixed_model_ref(v)
+        return v
+
+    @field_validator(
+        "model_fallbacks",
+        "model_fable_fallbacks",
+        "model_opus_fallbacks",
+        "model_sonnet_fallbacks",
+        "model_haiku_fallbacks",
+        "model_vision_fallbacks",
+    )
+    @classmethod
+    def validate_model_fallback_chain(cls, v: str | None) -> str | None:
+        """Validate every chain entry and store the chain in canonical form."""
+        if v is None:
+            return None
+        model_refs = parse_model_ref_list(v)
+        if not model_refs:
+            return None
+        for model_ref in model_refs:
+            _require_provider_prefixed_model_ref(model_ref)
+        return format_model_ref_list(model_refs)
+
+    @field_validator(*LIMIT_RANGES, mode="before")
+    @classmethod
+    def blank_limit_falls_back_to_its_default(cls, value: object, info: Any) -> object:
+        """Treat an empty value as "not set" rather than as a broken number.
+
+        The admin UI writes ``KEY=`` for a cleared field and a hand-edited file
+        can hold the same thing. Refusing to parse it stopped the server from
+        starting over a setting the user was trying to stop specifying.
+        """
+        if isinstance(value, str) and not value.strip():
+            return cls.model_fields[info.field_name].default
+        return value
+
+    @model_validator(mode="after")
+    def keep_limits_inside_their_usable_range(self) -> Settings:
+        """Clamp a limit rather than refuse to start.
+
+        A value outside its range is always a mistake, but the two ways to
+        answer a mistake are not equal: the admin UI rejects it up front with
+        the range quoted, while a file edited by hand is only discovered at
+        boot -- and a proxy that will not start is worse than one running with
+        a sane number and a warning saying so.
+        """
+        for attr, limit in LIMIT_RANGES.items():
+            value = getattr(self, attr)
+            clamped = limit.clamp(value)
+            if clamped == value:
+                continue
+            coerced = type(value)(clamped)
+            logger.warning(
+                "{} is outside its usable range ({} to {}); using {}",
+                attr.upper(),
+                limit.minimum,
+                limit.maximum,
+                coerced,
+            )
+            setattr(self, attr, coerced)
+        return self
+
+    @model_validator(mode="after")
+    def reference_managed_chatgpt_oauth_credentials(self) -> Settings:
+        """Mark FCC-owned OAuth credentials without loading secrets into Settings."""
+        if self.chatgpt_oauth_access_token.strip():
+            return self
+        if chatgpt_oauth_auth_path().is_file():
+            self.chatgpt_oauth_access_token = CHATGPT_OAUTH_MANAGED_CREDENTIAL_REFERENCE
+        return self
+
+    @model_validator(mode="after")
+    def check_nvidia_nim_api_key(self) -> Settings:
+        if (
+            self.voice_note_enabled
+            and self.whisper_device == "nvidia_nim"
+            and not self.nvidia_nim_api_key.strip()
+        ):
+            raise ValueError(
+                "NVIDIA_NIM_API_KEY is required when WHISPER_DEVICE is 'nvidia_nim'. "
+                "Set it in your .env file."
+            )
+        return self
+
+    @model_validator(mode="after")
+    def prefer_dotenv_anthropic_auth_token(self) -> Settings:
+        """Let explicit .env auth config override stale shell/client tokens."""
+        dotenv_value = env_file_override(self.model_config, ANTHROPIC_AUTH_TOKEN_ENV)
+        if dotenv_value is not None:
+            self.anthropic_auth_token = dotenv_value
+        return self
+
+    model_config = SettingsConfigDict(
+        env_file=settings_env_files(),
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
+
+
+@lru_cache
+def get_settings() -> Settings:
+    """Get cached settings instance."""
+    return Settings()

@@ -8,8 +8,8 @@ from typing import Any
 
 import pytest
 
-from free_claude_code.application import release_updates
-from free_claude_code.application.release_updates import (
+from my_claude_code.application import release_updates
+from my_claude_code.application.release_updates import (
     UpgradeResult,
     get_release_status,
     is_newer,
@@ -687,7 +687,7 @@ async def test_reconnect_timeout_tracks_the_configured_graceful_budget(
     monkeypatch,
 ) -> None:
     """The window uses the live graceful-shutdown setting, not the default."""
-    from free_claude_code.config.settings import Settings
+    from my_claude_code.config.settings import Settings
 
     monkeypatch.setattr(release_updates, "current_version", lambda: "4.15.0")
     graceful = 42.0

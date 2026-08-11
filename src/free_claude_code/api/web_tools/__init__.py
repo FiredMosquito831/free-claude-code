@@ -1,17 +1,3 @@
-"""Submodules for Anthropic web server tool handling (search/fetch, egress, streaming)."""
+"""Compatibility re-export of ``my_claude_code.api.web_tools``."""
 
-from .egress import (
-    WebFetchEgressPolicy,
-    WebFetchEgressViolation,
-    enforce_web_fetch_egress,
-)
-from .request import is_web_server_tool_request
-from .streaming import stream_web_server_tool_response
-
-__all__ = [
-    "WebFetchEgressPolicy",
-    "WebFetchEgressViolation",
-    "enforce_web_fetch_egress",
-    "is_web_server_tool_request",
-    "stream_web_server_tool_response",
-]
+from my_claude_code.api.web_tools import *  # noqa: F403

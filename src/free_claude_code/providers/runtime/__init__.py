@@ -1,11 +1,3 @@
-"""App-scoped provider runtime facade."""
+"""Compatibility re-export of ``my_claude_code.providers.runtime``."""
 
-from .config import build_provider_config
-from .factory import create_provider
-from .runtime import ProviderRuntime
-
-__all__ = [
-    "ProviderRuntime",
-    "build_provider_config",
-    "create_provider",
-]
+from my_claude_code.providers.runtime import *  # noqa: F403

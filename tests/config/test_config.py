@@ -5,22 +5,22 @@ from typing import Any, cast
 import pytest
 from pydantic import ValidationError
 
-from free_claude_code.config.constants import (
+from my_claude_code.config.constants import (
     ANTHROPIC_DEFAULT_MAX_OUTPUT_TOKENS,
     HTTP_CONNECT_TIMEOUT_DEFAULT,
 )
-from free_claude_code.config.env_files import (
+from my_claude_code.config.env_files import (
     ANTHROPIC_AUTH_TOKEN_ENV,
     process_env_key_is_effective,
 )
-from free_claude_code.config.model_refs import (
+from my_claude_code.config.model_refs import (
     configured_chat_model_refs,
     parse_model_name,
     parse_provider_type,
 )
-from free_claude_code.config.nim import NimSettings
-from free_claude_code.config.paths import messaging_state_dir_path
-from free_claude_code.config.reasoning import ReasoningPreference
+from my_claude_code.config.nim import NimSettings
+from my_claude_code.config.paths import messaging_state_dir_path
+from my_claude_code.config.reasoning import ReasoningPreference
 
 
 class TestSettings:
@@ -28,14 +28,14 @@ class TestSettings:
 
     def test_settings_loads(self):
         """Ensure Settings can be instantiated."""
-        from free_claude_code.config.settings import Settings
+        from my_claude_code.config.settings import Settings
 
         settings = Settings()
         assert settings is not None
 
     def test_default_values(self, monkeypatch):
         """Test default values are set and have correct types."""
-        from free_claude_code.config.settings import Settings
+        from my_claude_code.config.settings import Settings
 
         monkeypatch.delenv("CLAUDE_WORKSPACE", raising=False)
         monkeypatch.delenv("MODEL", raising=False)
@@ -60,7 +60,7 @@ class TestSettings:
         assert settings.open_admin_browser is True
 
     def test_open_admin_browser_loads_from_environment(self, monkeypatch):
-        from free_claude_code.config.settings import Settings
+        from my_claude_code.config.settings import Settings
 
         monkeypatch.setenv("FCC_OPEN_BROWSER", "false")
         monkeypatch.setitem(Settings.model_config, "env_file", ())
@@ -69,7 +69,7 @@ class TestSettings:
 
     def test_default_claude_workspace_uses_fcc_home(self, monkeypatch, tmp_path):
         """Unset CLAUDE_WORKSPACE stores agent data under the fixed path helper."""
-        from free_claude_code.config.settings import Settings
+        from my_claude_code.config.settings import Settings
 
         monkeypatch.setenv("HOME", str(tmp_path))
         monkeypatch.setenv("USERPROFILE", str(tmp_path))
@@ -83,7 +83,7 @@ class TestSettings:
 
     def test_server_log_path_uses_fcc_home(self, monkeypatch, tmp_path):
         """The server log location is fixed under ~/.fcc."""
-        from free_claude_code.config.paths import server_log_path
+        from my_claude_code.config.paths import server_log_path
 
         monkeypatch.setenv("HOME", str(tmp_path))
         monkeypatch.setenv("USERPROFILE", str(tmp_path))
@@ -92,7 +92,7 @@ class TestSettings:
 
     def test_removed_log_file_env_is_ignored(self, monkeypatch):
         """Legacy LOG_FILE values do not affect Settings or block startup."""
-        from free_claude_code.config.settings import Settings
+        from my_claude_code.config.settings import Settings
 
         monkeypatch.setenv("LOG_FILE", "custom/server.log")
         monkeypatch.setitem(Settings.model_config, "env_file", ())
@@ -103,7 +103,7 @@ class TestSettings:
 
     def test_stale_zai_base_url_env_is_ignored(self, monkeypatch):
         """Cloud Z.ai endpoint is fixed in provider metadata, not settings."""
-        from free_claude_code.config.settings import Settings
+        from my_claude_code.config.settings import Settings
 
         monkeypatch.setenv("ZAI_BASE_URL", "https://custom.zai.invalid/v1")
         monkeypatch.setitem(Settings.model_config, "env_file", ())
@@ -114,7 +114,7 @@ class TestSettings:
 
     def test_blank_claude_workspace_uses_fcc_home(self, monkeypatch, tmp_path):
         """An explicit blank env value does not affect the fixed workspace helper."""
-        from free_claude_code.config.settings import Settings
+        from my_claude_code.config.settings import Settings
 
         monkeypatch.setenv("HOME", str(tmp_path))
         monkeypatch.setenv("USERPROFILE", str(tmp_path))
@@ -128,7 +128,7 @@ class TestSettings:
 
     def test_explicit_claude_workspace_is_ignored(self, monkeypatch, tmp_path):
         """Custom CLAUDE_WORKSPACE values do not override the fixed workspace helper."""
-        from free_claude_code.config.settings import Settings
+        from my_claude_code.config.settings import Settings
 
         workspace = tmp_path / "custom-workspace"
         monkeypatch.setenv("HOME", str(tmp_path))
@@ -143,7 +143,7 @@ class TestSettings:
 
     def test_explicit_claude_cli_bin_is_ignored(self, monkeypatch):
         """Custom CLAUDE_CLI_BIN values do not become Settings fields."""
-        from free_claude_code.config.settings import Settings
+        from my_claude_code.config.settings import Settings
 
         monkeypatch.setenv("CLAUDE_CLI_BIN", "claude-custom")
         monkeypatch.setitem(Settings.model_config, "env_file", ())
@@ -155,7 +155,7 @@ class TestSettings:
 
     def test_direct_claude_runtime_overrides_are_ignored(self, monkeypatch, tmp_path):
         """Constructor extras cannot add fixed Claude runtime settings."""
-        from free_claude_code.config.settings import Settings
+        from my_claude_code.config.settings import Settings
 
         monkeypatch.setenv("HOME", str(tmp_path))
         monkeypatch.setenv("USERPROFILE", str(tmp_path))
@@ -177,7 +177,7 @@ class TestSettings:
 
     def test_get_settings_cached(self):
         """Test get_settings returns cached instance."""
-        from free_claude_code.config.settings import get_settings
+        from my_claude_code.config.settings import get_settings
 
         s1 = get_settings()
         s2 = get_settings()
@@ -185,7 +185,7 @@ class TestSettings:
 
     def test_empty_string_to_none_for_optional_int(self):
         """Test that empty string converts to None for optional int fields."""
-        from free_claude_code.config.settings import Settings
+        from my_claude_code.config.settings import Settings
 
         # Settings should handle NVIDIA_NIM_SEED="" gracefully
         settings = Settings()
@@ -193,7 +193,7 @@ class TestSettings:
 
     def test_model_setting(self):
         """Test model setting exists and is a string."""
-        from free_claude_code.config.settings import Settings
+        from my_claude_code.config.settings import Settings
 
         settings = Settings()
         assert isinstance(settings.model, str)
@@ -201,13 +201,13 @@ class TestSettings:
 
     def test_base_url_constant(self):
         """Test NVIDIA_NIM_DEFAULT_BASE is a constant."""
-        from free_claude_code.config.provider_catalog import NVIDIA_NIM_DEFAULT_BASE
+        from my_claude_code.config.provider_catalog import NVIDIA_NIM_DEFAULT_BASE
 
         assert NVIDIA_NIM_DEFAULT_BASE == "https://integrate.api.nvidia.com/v1"
 
     def test_lm_studio_base_url_from_env(self, monkeypatch):
         """LM_STUDIO_BASE_URL env var is loaded into settings."""
-        from free_claude_code.config.settings import Settings
+        from my_claude_code.config.settings import Settings
 
         monkeypatch.setenv("LM_STUDIO_BASE_URL", "http://custom:5678/v1")
         settings = Settings()
@@ -215,7 +215,7 @@ class TestSettings:
 
     def test_ollama_base_url_defaults_to_root(self, monkeypatch):
         """OLLAMA_BASE_URL keeps the customer-facing Ollama root default."""
-        from free_claude_code.config.settings import Settings
+        from my_claude_code.config.settings import Settings
 
         monkeypatch.delenv("OLLAMA_BASE_URL", raising=False)
         monkeypatch.setitem(Settings.model_config, "env_file", ())
@@ -224,13 +224,13 @@ class TestSettings:
 
     def test_ollama_base_url_accepts_v1_suffix(self, monkeypatch):
         """The adapter accepts either the root URL or the explicit OpenAI path."""
-        from free_claude_code.config.settings import Settings
+        from my_claude_code.config.settings import Settings
 
         monkeypatch.setenv("OLLAMA_BASE_URL", "http://localhost:11434/v1")
         assert Settings().ollama_base_url == "http://localhost:11434/v1"
 
     def test_ollama_cloud_api_key_from_env(self, monkeypatch):
-        from free_claude_code.config.settings import Settings
+        from my_claude_code.config.settings import Settings
 
         monkeypatch.setenv("OLLAMA_API_KEY", "ollama-cloud-key")
 
@@ -238,7 +238,7 @@ class TestSettings:
 
     def test_provider_rate_limit_from_env(self, monkeypatch):
         """PROVIDER_RATE_LIMIT env var is loaded into settings."""
-        from free_claude_code.config.settings import Settings
+        from my_claude_code.config.settings import Settings
 
         monkeypatch.setenv("PROVIDER_RATE_LIMIT", "20")
         settings = Settings()
@@ -246,7 +246,7 @@ class TestSettings:
 
     def test_provider_rate_window_from_env(self, monkeypatch):
         """PROVIDER_RATE_WINDOW env var is loaded into settings."""
-        from free_claude_code.config.settings import Settings
+        from my_claude_code.config.settings import Settings
 
         monkeypatch.setenv("PROVIDER_RATE_WINDOW", "30")
         settings = Settings()
@@ -254,7 +254,7 @@ class TestSettings:
 
     def test_http_read_timeout_from_env(self, monkeypatch):
         """HTTP_READ_TIMEOUT env var is loaded into settings."""
-        from free_claude_code.config.settings import Settings
+        from my_claude_code.config.settings import Settings
 
         monkeypatch.setenv("HTTP_READ_TIMEOUT", "600")
         settings = Settings()
@@ -262,7 +262,7 @@ class TestSettings:
 
     def test_http_write_timeout_from_env(self, monkeypatch):
         """HTTP_WRITE_TIMEOUT env var is loaded into settings."""
-        from free_claude_code.config.settings import Settings
+        from my_claude_code.config.settings import Settings
 
         monkeypatch.setenv("HTTP_WRITE_TIMEOUT", "20")
         settings = Settings()
@@ -270,7 +270,7 @@ class TestSettings:
 
     def test_http_connect_timeout_from_env(self, monkeypatch):
         """HTTP_CONNECT_TIMEOUT env var is loaded into settings."""
-        from free_claude_code.config.settings import Settings
+        from my_claude_code.config.settings import Settings
 
         monkeypatch.setenv("HTTP_CONNECT_TIMEOUT", "5")
         settings = Settings()
@@ -280,7 +280,7 @@ class TestSettings:
         self, monkeypatch
     ) -> None:
         """Default must match config.constants (and README / .env.example)."""
-        from free_claude_code.config.settings import Settings
+        from my_claude_code.config.settings import Settings
 
         monkeypatch.delenv("HTTP_CONNECT_TIMEOUT", raising=False)
         monkeypatch.setitem(Settings.model_config, "env_file", ())
@@ -290,7 +290,7 @@ class TestSettings:
 
     def test_reasoning_policy_from_env(self, monkeypatch):
         """REASONING_POLICY is loaded as a typed preference."""
-        from free_claude_code.config.settings import Settings
+        from my_claude_code.config.settings import Settings
 
         monkeypatch.setenv("REASONING_POLICY", "off")
         settings = Settings()
@@ -300,7 +300,7 @@ class TestSettings:
         """Only route overrides may inherit."""
         from pydantic import ValidationError
 
-        from free_claude_code.config.settings import Settings
+        from my_claude_code.config.settings import Settings
 
         monkeypatch.setenv("REASONING_POLICY", "inherit")
 
@@ -309,7 +309,7 @@ class TestSettings:
 
     def test_wafer_api_key_from_env(self, monkeypatch):
         """WAFER_API_KEY env var is loaded into settings."""
-        from free_claude_code.config.settings import Settings
+        from my_claude_code.config.settings import Settings
 
         monkeypatch.setenv("WAFER_API_KEY", "wafer-key")
         settings = Settings()
@@ -317,7 +317,7 @@ class TestSettings:
 
     def test_minimax_settings_from_env(self, monkeypatch):
         """MiniMax key and proxy env vars load into settings."""
-        from free_claude_code.config.settings import Settings
+        from my_claude_code.config.settings import Settings
 
         monkeypatch.setenv("MINIMAX_API_KEY", "minimax-key")
         monkeypatch.setenv("MINIMAX_PROXY", "http://proxy.test:8080")
@@ -327,7 +327,7 @@ class TestSettings:
 
     def test_cloudflare_settings_from_env(self, monkeypatch):
         """Cloudflare token, account, and proxy env vars load into settings."""
-        from free_claude_code.config.settings import Settings
+        from my_claude_code.config.settings import Settings
 
         monkeypatch.setenv("CLOUDFLARE_API_TOKEN", "cf-token")
         monkeypatch.setenv("CLOUDFLARE_ACCOUNT_ID", "cf-account")
@@ -339,7 +339,7 @@ class TestSettings:
 
     def test_vercel_settings_from_env(self, monkeypatch):
         """Vercel AI Gateway key and proxy env vars load into settings."""
-        from free_claude_code.config.settings import Settings
+        from my_claude_code.config.settings import Settings
 
         monkeypatch.setenv("AI_GATEWAY_API_KEY", "vercel-key")
         monkeypatch.setenv("VERCEL_AI_GATEWAY_PROXY", "http://proxy.test:8080")
@@ -349,7 +349,7 @@ class TestSettings:
 
     def test_huggingface_settings_from_env(self, monkeypatch):
         """Hugging Face key and proxy env vars load into settings."""
-        from free_claude_code.config.settings import Settings
+        from my_claude_code.config.settings import Settings
 
         monkeypatch.setenv("HUGGINGFACE_API_KEY", "hf-key")
         monkeypatch.setenv("HUGGINGFACE_PROXY", "http://proxy.test:8080")
@@ -360,7 +360,7 @@ class TestSettings:
 
     def test_cohere_settings_from_env(self, monkeypatch):
         """Cohere key and proxy env vars load into settings."""
-        from free_claude_code.config.settings import Settings
+        from my_claude_code.config.settings import Settings
 
         monkeypatch.setenv("COHERE_API_KEY", "cohere-key")
         monkeypatch.setenv("COHERE_PROXY", "http://proxy.test:8080")
@@ -370,7 +370,7 @@ class TestSettings:
 
     def test_github_models_settings_from_env(self, monkeypatch):
         """GitHub Models token and proxy env vars load into settings."""
-        from free_claude_code.config.settings import Settings
+        from my_claude_code.config.settings import Settings
 
         monkeypatch.setenv("GITHUB_MODELS_TOKEN", "github-token")
         monkeypatch.setenv("GITHUB_MODELS_PROXY", "http://proxy.test:8080")
@@ -380,7 +380,7 @@ class TestSettings:
 
     def test_sambanova_settings_from_env(self, monkeypatch):
         """SambaNova key and proxy env vars load into settings."""
-        from free_claude_code.config.settings import Settings
+        from my_claude_code.config.settings import Settings
 
         monkeypatch.setenv("SAMBANOVA_API_KEY", "sambanova-key")
         monkeypatch.setenv("SAMBANOVA_PROXY", "http://proxy.test:8080")
@@ -390,7 +390,7 @@ class TestSettings:
 
     def test_legacy_hf_token_env_is_ignored(self, monkeypatch):
         """HF_TOKEN is migrated by startup config migration, not read by Settings."""
-        from free_claude_code.config.settings import Settings
+        from my_claude_code.config.settings import Settings
 
         monkeypatch.setenv("HF_TOKEN", "legacy-token")
         monkeypatch.delenv("HUGGINGFACE_API_KEY", raising=False)
@@ -400,7 +400,7 @@ class TestSettings:
 
     def test_route_reasoning_from_env(self, monkeypatch):
         """Route reasoning preferences are loaded into settings."""
-        from free_claude_code.config.settings import Settings
+        from my_claude_code.config.settings import Settings
 
         monkeypatch.setenv("REASONING_FABLE", "high")
         monkeypatch.setenv("REASONING_OPUS", "max")
@@ -414,8 +414,8 @@ class TestSettings:
 
     def test_route_reasoning_inherits_root_policy(self, monkeypatch):
         """Inherit defers route reasoning to the root preference."""
-        from free_claude_code.application.routing import ModelRouter
-        from free_claude_code.config.settings import Settings
+        from my_claude_code.application.routing import ModelRouter
+        from my_claude_code.config.settings import Settings
 
         monkeypatch.setenv("REASONING_POLICY", "off")
         monkeypatch.setenv("REASONING_OPUS", "inherit")
@@ -428,8 +428,8 @@ class TestSettings:
 
     def test_resolve_reasoning_uses_routes(self, monkeypatch):
         """ModelRouter applies route preference then root fallback."""
-        from free_claude_code.application.routing import ModelRouter
-        from free_claude_code.config.settings import Settings
+        from my_claude_code.application.routing import ModelRouter
+        from my_claude_code.config.settings import Settings
 
         monkeypatch.setenv("REASONING_POLICY", "off")
         monkeypatch.setenv("REASONING_FABLE", "high")
@@ -460,7 +460,7 @@ class TestSettings:
 
     def test_anthropic_auth_token_from_env_without_dotenv_key(self, monkeypatch):
         """ANTHROPIC_AUTH_TOKEN env var is loaded when dotenv does not define it."""
-        from free_claude_code.config.settings import Settings
+        from my_claude_code.config.settings import Settings
 
         monkeypatch.setenv("ANTHROPIC_AUTH_TOKEN", "process-token")
         monkeypatch.setitem(Settings.model_config, "env_file", ())
@@ -477,7 +477,7 @@ class TestSettings:
         self, monkeypatch, tmp_path
     ):
         """An explicit empty .env token disables auth despite stale shell tokens."""
-        from free_claude_code.config.settings import Settings
+        from my_claude_code.config.settings import Settings
 
         env_file = tmp_path / ".env"
         env_file.write_text("ANTHROPIC_AUTH_TOKEN=\n", encoding="utf-8")
@@ -497,7 +497,7 @@ class TestSettings:
         self, monkeypatch, tmp_path
     ):
         """A configured .env token is the server token even with a stale shell token."""
-        from free_claude_code.config.settings import Settings
+        from my_claude_code.config.settings import Settings
 
         env_file = tmp_path / ".env"
         env_file.write_text(
@@ -519,7 +519,7 @@ class TestSettings:
     @pytest.mark.parametrize("removed_key", ["NIM_ENABLE_THINKING", "ENABLE_THINKING"])
     def test_removed_thinking_env_keys_are_ignored(self, monkeypatch, removed_key):
         """Stale thinking env keys do not block startup or affect settings."""
-        from free_claude_code.config.settings import Settings
+        from my_claude_code.config.settings import Settings
 
         monkeypatch.setenv(removed_key, "false")
         monkeypatch.setitem(Settings.model_config, "env_file", ())
@@ -534,7 +534,7 @@ class TestSettings:
         self, monkeypatch, tmp_path, removed_key, value
     ):
         """Stale thinking dotenv keys do not block startup or affect settings."""
-        from free_claude_code.config.settings import Settings
+        from my_claude_code.config.settings import Settings
 
         env_file = tmp_path / ".env"
         env_file.write_text(f"{removed_key}={value}\n", encoding="utf-8")
@@ -684,49 +684,49 @@ class TestSettingsOptionalStr:
     """Test Settings parse_optional_str validator."""
 
     def test_empty_telegram_token_to_none(self, monkeypatch):
-        from free_claude_code.config.settings import Settings
+        from my_claude_code.config.settings import Settings
 
         monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "")
         s = Settings()
         assert s.telegram_bot_token is None
 
     def test_valid_telegram_token_preserved(self, monkeypatch):
-        from free_claude_code.config.settings import Settings
+        from my_claude_code.config.settings import Settings
 
         monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "abc123")
         s = Settings()
         assert s.telegram_bot_token == "abc123"
 
     def test_empty_allowed_user_id_to_none(self, monkeypatch):
-        from free_claude_code.config.settings import Settings
+        from my_claude_code.config.settings import Settings
 
         monkeypatch.setenv("ALLOWED_TELEGRAM_USER_ID", "")
         s = Settings()
         assert s.allowed_telegram_user_id is None
 
     def test_discord_bot_token_from_env(self, monkeypatch):
-        from free_claude_code.config.settings import Settings
+        from my_claude_code.config.settings import Settings
 
         monkeypatch.setenv("DISCORD_BOT_TOKEN", "discord_token_123")
         s = Settings()
         assert s.discord_bot_token == "discord_token_123"
 
     def test_empty_discord_bot_token_to_none(self, monkeypatch):
-        from free_claude_code.config.settings import Settings
+        from my_claude_code.config.settings import Settings
 
         monkeypatch.setenv("DISCORD_BOT_TOKEN", "")
         s = Settings()
         assert s.discord_bot_token is None
 
     def test_allowed_discord_channels_from_env(self, monkeypatch):
-        from free_claude_code.config.settings import Settings
+        from my_claude_code.config.settings import Settings
 
         monkeypatch.setenv("ALLOWED_DISCORD_CHANNELS", "111,222,333")
         s = Settings()
         assert s.allowed_discord_channels == "111,222,333"
 
     def test_messaging_platform_from_env(self, monkeypatch):
-        from free_claude_code.config.settings import Settings
+        from my_claude_code.config.settings import Settings
 
         monkeypatch.setenv("MESSAGING_PLATFORM", "discord")
         s = Settings()
@@ -734,7 +734,7 @@ class TestSettingsOptionalStr:
 
     def test_whisper_device_auto_rejected(self, monkeypatch):
         """WHISPER_DEVICE=auto raises ValidationError (auto removed)."""
-        from free_claude_code.config.settings import Settings
+        from my_claude_code.config.settings import Settings
 
         monkeypatch.setenv("WHISPER_DEVICE", "auto")
         with pytest.raises(ValidationError, match="whisper_device"):
@@ -743,7 +743,7 @@ class TestSettingsOptionalStr:
     @pytest.mark.parametrize("device", ["cpu", "cuda"])
     def test_whisper_device_valid(self, monkeypatch, device):
         """Valid whisper_device values are accepted."""
-        from free_claude_code.config.settings import Settings
+        from my_claude_code.config.settings import Settings
 
         monkeypatch.setenv("WHISPER_DEVICE", device)
         s = Settings()
@@ -755,7 +755,7 @@ class TestPerModelMapping:
 
     def test_model_fields_default_none(self):
         """Per-model fields default to None."""
-        from free_claude_code.config.settings import Settings
+        from my_claude_code.config.settings import Settings
 
         s = Settings()
         assert s.model_fable is None
@@ -765,7 +765,7 @@ class TestPerModelMapping:
 
     def test_model_opus_from_env(self, monkeypatch):
         """MODEL_OPUS env var is loaded."""
-        from free_claude_code.config.settings import Settings
+        from my_claude_code.config.settings import Settings
 
         monkeypatch.setenv("MODEL_OPUS", "open_router/deepseek/deepseek-r1")
         s = Settings()
@@ -773,7 +773,7 @@ class TestPerModelMapping:
 
     def test_model_fable_from_env(self, monkeypatch):
         """MODEL_FABLE env var is loaded."""
-        from free_claude_code.config.settings import Settings
+        from my_claude_code.config.settings import Settings
 
         monkeypatch.setenv("MODEL_FABLE", "open_router/anthropic/claude-fable-5")
         s = Settings()
@@ -784,8 +784,8 @@ class TestPerModelMapping:
     )
     def test_empty_model_override_env_is_unset(self, monkeypatch, env_var):
         """Empty per-model override env vars are treated as unset."""
-        from free_claude_code.application.routing import ModelRouter
-        from free_claude_code.config.settings import Settings
+        from my_claude_code.application.routing import ModelRouter
+        from my_claude_code.config.settings import Settings
 
         monkeypatch.setenv(env_var, "")
         s = Settings()
@@ -844,7 +844,7 @@ class TestPerModelMapping:
         self, env_vars, expected_model, expected_haiku, monkeypatch
     ):
         """Test environment variables override model defaults."""
-        from free_claude_code.config.settings import Settings
+        from my_claude_code.config.settings import Settings
 
         for k, v in env_vars.items():
             monkeypatch.setenv(k, v)
@@ -855,7 +855,7 @@ class TestPerModelMapping:
 
     def test_model_sonnet_from_env(self, monkeypatch):
         """MODEL_SONNET env var is loaded."""
-        from free_claude_code.config.settings import Settings
+        from my_claude_code.config.settings import Settings
 
         monkeypatch.setenv("MODEL_SONNET", "nvidia_nim/meta/llama-3.3-70b-instruct")
         s = Settings()
@@ -863,7 +863,7 @@ class TestPerModelMapping:
 
     def test_model_haiku_from_env(self, monkeypatch):
         """MODEL_HAIKU env var is loaded."""
-        from free_claude_code.config.settings import Settings
+        from my_claude_code.config.settings import Settings
 
         monkeypatch.setenv("MODEL_HAIKU", "lmstudio/qwen2.5-7b")
         s = Settings()
@@ -871,7 +871,7 @@ class TestPerModelMapping:
 
     def test_model_opus_invalid_provider_raises(self, monkeypatch):
         """MODEL_OPUS with invalid provider prefix raises ValidationError."""
-        from free_claude_code.config.settings import Settings
+        from my_claude_code.config.settings import Settings
 
         monkeypatch.setenv("MODEL_OPUS", "bad_provider/some-model")
         with pytest.raises(ValidationError, match="Invalid provider"):
@@ -879,7 +879,7 @@ class TestPerModelMapping:
 
     def test_model_opus_no_slash_raises(self, monkeypatch):
         """MODEL_OPUS without provider prefix raises ValidationError."""
-        from free_claude_code.config.settings import Settings
+        from my_claude_code.config.settings import Settings
 
         monkeypatch.setenv("MODEL_OPUS", "noprefix")
         with pytest.raises(ValidationError, match="provider type"):
@@ -887,7 +887,7 @@ class TestPerModelMapping:
 
     def test_model_haiku_invalid_provider_raises(self, monkeypatch):
         """MODEL_HAIKU with invalid provider prefix raises ValidationError."""
-        from free_claude_code.config.settings import Settings
+        from my_claude_code.config.settings import Settings
 
         monkeypatch.setenv("MODEL_HAIKU", "invalid/model")
         with pytest.raises(ValidationError, match="Invalid provider"):
@@ -895,7 +895,7 @@ class TestPerModelMapping:
 
     def test_model_fable_invalid_provider_raises(self, monkeypatch):
         """MODEL_FABLE with invalid provider prefix raises ValidationError."""
-        from free_claude_code.config.settings import Settings
+        from my_claude_code.config.settings import Settings
 
         monkeypatch.setenv("MODEL_FABLE", "invalid/model")
         with pytest.raises(ValidationError, match="Invalid provider"):
@@ -903,8 +903,8 @@ class TestPerModelMapping:
 
     def test_resolve_model_fable_override(self):
         """ModelRouter returns model_fable for Fable model names."""
-        from free_claude_code.application.routing import ModelRouter
-        from free_claude_code.config.settings import Settings
+        from my_claude_code.application.routing import ModelRouter
+        from my_claude_code.config.settings import Settings
 
         s = Settings()
         s.model_fable = "open_router/anthropic/claude-fable-5"
@@ -915,8 +915,8 @@ class TestPerModelMapping:
 
     def test_resolve_model_opus_override(self):
         """ModelRouter returns model_opus for opus model names."""
-        from free_claude_code.application.routing import ModelRouter
-        from free_claude_code.config.settings import Settings
+        from my_claude_code.application.routing import ModelRouter
+        from my_claude_code.config.settings import Settings
 
         s = Settings()
         s.model_opus = "open_router/deepseek/deepseek-r1"
@@ -936,8 +936,8 @@ class TestPerModelMapping:
 
     def test_resolve_model_sonnet_override(self):
         """ModelRouter returns model_sonnet for sonnet model names."""
-        from free_claude_code.application.routing import ModelRouter
-        from free_claude_code.config.settings import Settings
+        from my_claude_code.application.routing import ModelRouter
+        from my_claude_code.config.settings import Settings
 
         s = Settings()
         s.model_sonnet = "nvidia_nim/meta/llama-3.3-70b-instruct"
@@ -953,8 +953,8 @@ class TestPerModelMapping:
 
     def test_resolve_model_haiku_override(self):
         """ModelRouter returns model_haiku for haiku model names."""
-        from free_claude_code.application.routing import ModelRouter
-        from free_claude_code.config.settings import Settings
+        from my_claude_code.application.routing import ModelRouter
+        from my_claude_code.config.settings import Settings
 
         s = Settings()
         s.model_haiku = "lmstudio/qwen2.5-7b"
@@ -974,8 +974,8 @@ class TestPerModelMapping:
 
     def test_resolve_model_fallback_when_override_not_set(self):
         """ModelRouter falls back to MODEL when model override is None."""
-        from free_claude_code.application.routing import ModelRouter
-        from free_claude_code.config.settings import Settings
+        from my_claude_code.application.routing import ModelRouter
+        from my_claude_code.config.settings import Settings
 
         s = Settings()
         s.model = "nvidia_nim/fallback-model"
@@ -999,8 +999,8 @@ class TestPerModelMapping:
 
     def test_resolve_model_unknown_model_falls_back(self):
         """ModelRouter falls back to MODEL for unrecognized model names."""
-        from free_claude_code.application.routing import ModelRouter
-        from free_claude_code.config.settings import Settings
+        from my_claude_code.application.routing import ModelRouter
+        from my_claude_code.config.settings import Settings
 
         s = Settings()
         s.model = "nvidia_nim/fallback-model"
@@ -1015,8 +1015,8 @@ class TestPerModelMapping:
 
     def test_resolve_model_case_insensitive(self):
         """Model classification is case-insensitive."""
-        from free_claude_code.application.routing import ModelRouter
-        from free_claude_code.config.settings import Settings
+        from my_claude_code.application.routing import ModelRouter
+        from my_claude_code.config.settings import Settings
 
         s = Settings()
         s.model_opus = "open_router/opus-model"
@@ -1107,7 +1107,7 @@ class TestPerModelMapping:
         self, monkeypatch
     ):
         """Startup validation model collection is limited to configured chat refs."""
-        from free_claude_code.config.settings import Settings
+        from my_claude_code.config.settings import Settings
 
         monkeypatch.setenv("FCC_SMOKE_MODEL_NVIDIA_NIM", "nvidia_nim/smoke")
         monkeypatch.setenv("WHISPER_MODEL", "openai/whisper-large-v3")

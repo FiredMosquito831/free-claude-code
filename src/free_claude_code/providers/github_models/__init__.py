@@ -1,5 +1,3 @@
-"""GitHub Models provider."""
+"""Compatibility re-export of ``my_claude_code.providers.github_models``."""
 
-from .client import GitHubModelsProvider
-
-__all__ = ["GitHubModelsProvider"]
+from my_claude_code.providers.github_models import *  # noqa: F403

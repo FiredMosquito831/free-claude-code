@@ -9,7 +9,7 @@ from typing import Any
 
 import pytest
 
-from free_claude_code.core.request_log import (
+from my_claude_code.core.request_log import (
     LIST_BODY_PREVIEW_CHARS,
     MAX_ERROR_CHARS,
     MAX_TEXT_CHARS,
@@ -610,7 +610,7 @@ def test_percentiles_match_old_interpolation_unfiltered_and_filtered(
 
 def test_stats_cache_evicts_least_recently_used(tmp_path) -> None:
     """The stats cache must be bounded rather than growing without limit."""
-    from free_claude_code.core import request_log as request_log_module
+    from my_claude_code.core import request_log as request_log_module
 
     store = RequestLogStore(tmp_path / "requests.db", max_rows=100)
     try:
@@ -642,7 +642,7 @@ def test_stats_cache_evicts_least_recently_used(tmp_path) -> None:
 
 def test_breakdown_truncation_flag(tmp_path) -> None:
     """A breakdown beyond the cap must be truncated with a visible flag."""
-    from free_claude_code.core import request_log as request_log_module
+    from my_claude_code.core import request_log as request_log_module
 
     store = RequestLogStore(tmp_path / "requests.db", max_rows=1000)
     try:

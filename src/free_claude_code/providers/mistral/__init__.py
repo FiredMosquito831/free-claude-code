@@ -1,5 +1,3 @@
-"""Mistral La Plateforme provider exports."""
+"""Compatibility re-export of ``my_claude_code.providers.mistral``."""
 
-from .client import MistralProvider
-
-__all__ = ["MistralProvider"]
+from my_claude_code.providers.mistral import *  # noqa: F403

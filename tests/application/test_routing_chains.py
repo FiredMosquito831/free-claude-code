@@ -2,10 +2,10 @@
 
 import pytest
 
-from free_claude_code.application.routing import ModelRouter, RouteDiversion
-from free_claude_code.config.reasoning import ReasoningPreference
-from free_claude_code.config.settings import Settings
-from free_claude_code.core.anthropic.models import MessagesRequest
+from my_claude_code.application.routing import ModelRouter, RouteDiversion
+from my_claude_code.config.reasoning import ReasoningPreference
+from my_claude_code.config.settings import Settings
+from my_claude_code.core.anthropic.models import MessagesRequest
 
 _IMAGE_BLOCK: dict[str, object] = {
     "type": "image",

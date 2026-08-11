@@ -8,7 +8,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from free_claude_code.providers.nvidia_nim.voice import (
+from my_claude_code.providers.nvidia_nim.voice import (
     _NIM_ASR_MODEL_MAP,
     NvidiaNimTranscriber,
 )

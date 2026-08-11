@@ -1,5 +1,3 @@
-"""LM Studio provider - OpenAI-compatible chat completions API."""
+"""Compatibility re-export of ``my_claude_code.providers.lmstudio``."""
 
-from .client import LMStudioProvider
-
-__all__ = ["LMStudioProvider"]
+from my_claude_code.providers.lmstudio import *  # noqa: F403

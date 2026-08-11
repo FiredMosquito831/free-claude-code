@@ -5,11 +5,11 @@ from collections.abc import Callable
 
 import httpx
 
-from free_claude_code.core.websearch.models import (
+from my_claude_code.core.websearch.models import (
     WebSearchResponse,
     WebSearchResultItem,
 )
-from free_claude_code.websearch.base import (
+from my_claude_code.websearch.base import (
     BaseWebSearchProvider,
     WebSearchProviderConfig,
 )

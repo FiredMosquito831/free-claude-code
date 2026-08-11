@@ -1,5 +1,3 @@
-"""Configuration management."""
+"""Compatibility re-export of ``my_claude_code.config``."""
 
-from .settings import Settings, get_settings
-
-__all__ = ["Settings", "get_settings"]
+from my_claude_code.config import *  # noqa: F403

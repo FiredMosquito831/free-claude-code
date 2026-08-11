@@ -5,11 +5,11 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import httpx
 import pytest
 
-from free_claude_code.application.errors import InvalidRequestError
-from free_claude_code.config.provider_catalog import LMSTUDIO_DEFAULT_BASE
-from free_claude_code.core.reasoning import ReasoningEffort, ReasoningPolicy
-from free_claude_code.providers.base import ProviderConfig
-from free_claude_code.providers.lmstudio import LMStudioProvider
+from my_claude_code.application.errors import InvalidRequestError
+from my_claude_code.config.provider_catalog import LMSTUDIO_DEFAULT_BASE
+from my_claude_code.core.reasoning import ReasoningEffort, ReasoningPolicy
+from my_claude_code.providers.base import ProviderConfig
+from my_claude_code.providers.lmstudio import LMStudioProvider
 from tests.providers.request_factory import make_messages_request
 from tests.providers.support import (
     REASONING_OFF,
@@ -40,7 +40,7 @@ def lmstudio_provider(lmstudio_config):
 def test_init(lmstudio_config):
     """Test provider initialization."""
     with patch(
-        "free_claude_code.providers.openai_chat.provider.AsyncOpenAI"
+        "my_claude_code.providers.openai_chat.provider.AsyncOpenAI"
     ) as mock_openai:
         provider = LMStudioProvider(
             lmstudio_config, rate_limiter=passthrough_rate_limiter()
@@ -218,7 +218,7 @@ def test_preflight_context_budget_rejects_request_over_90_percent(lmstudio_provi
     with (
         patch.object(lmstudio_provider, "_loaded_context_length", return_value=1000),
         patch(
-            "free_claude_code.providers.lmstudio.client.get_token_count",
+            "my_claude_code.providers.lmstudio.client.get_token_count",
             return_value=901,
         ),
         pytest.raises(InvalidRequestError, match="prompt is too long"),
@@ -237,7 +237,7 @@ def test_loaded_context_length_reads_max_across_loaded_models(lmstudio_provider)
         ]
     }
     with patch(
-        "free_claude_code.providers.lmstudio.client.httpx.get", return_value=response
+        "my_claude_code.providers.lmstudio.client.httpx.get", return_value=response
     ) as mock_get:
         value = lmstudio_provider._loaded_context_length()
 
@@ -248,7 +248,7 @@ def test_loaded_context_length_reads_max_across_loaded_models(lmstudio_provider)
 
 def test_loaded_context_length_fails_open_on_error(lmstudio_provider):
     with patch(
-        "free_claude_code.providers.lmstudio.client.httpx.get",
+        "my_claude_code.providers.lmstudio.client.httpx.get",
         side_effect=httpx.ConnectError("refused"),
     ):
         assert lmstudio_provider._loaded_context_length() is None
@@ -261,7 +261,7 @@ def test_loaded_context_length_is_cached_within_ttl(lmstudio_provider):
         "data": [{"state": "loaded", "loaded_context_length": 40960}]
     }
     with patch(
-        "free_claude_code.providers.lmstudio.client.httpx.get", return_value=response
+        "my_claude_code.providers.lmstudio.client.httpx.get", return_value=response
     ) as mock_get:
         first = lmstudio_provider._loaded_context_length()
         second = lmstudio_provider._loaded_context_length()

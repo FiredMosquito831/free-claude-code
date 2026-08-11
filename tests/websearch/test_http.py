@@ -3,12 +3,12 @@
 import httpx
 import pytest
 
-from free_claude_code.websearch.adapters.http import (
+from my_claude_code.websearch.adapters.http import (
     build_async_client,
     extract_error_message,
     request_json,
 )
-from free_claude_code.websearch.errors import (
+from my_claude_code.websearch.errors import (
     WebSearchAuthError,
     WebSearchInvalidRequestError,
     WebSearchQuotaError,

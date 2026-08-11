@@ -5,8 +5,8 @@ import logging
 
 import pytest
 
-from free_claude_code.messaging.models import IncomingMessage, MessageScope
-from free_claude_code.messaging.trees import (
+from my_claude_code.messaging.models import IncomingMessage, MessageScope
+from my_claude_code.messaging.trees import (
     CancellationReason,
     CancellationUiOwner,
     FailureResult,
@@ -15,11 +15,11 @@ from free_claude_code.messaging.trees import (
     QueueEntry,
     TreeQueueManager,
 )
-from free_claude_code.messaging.trees import manager as manager_module
-from free_claude_code.messaging.trees import processor as processor_module
-from free_claude_code.messaging.trees.node import MessageNode
-from free_claude_code.messaging.trees.processor import TreeQueueProcessor
-from free_claude_code.messaging.trees.runtime import MessageTree
+from my_claude_code.messaging.trees import manager as manager_module
+from my_claude_code.messaging.trees import processor as processor_module
+from my_claude_code.messaging.trees.node import MessageNode
+from my_claude_code.messaging.trees.processor import TreeQueueProcessor
+from my_claude_code.messaging.trees.runtime import MessageTree
 
 _SCOPE = MessageScope(platform="telegram", chat_id="chat")
 

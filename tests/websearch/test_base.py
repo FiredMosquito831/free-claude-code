@@ -2,14 +2,14 @@
 
 import pytest
 
-from free_claude_code.websearch.errors import (
+from my_claude_code.websearch.errors import (
     WebSearchAuthError,
     WebSearchConfigError,
     WebSearchInvalidRequestError,
     WebSearchRateLimitError,
     WebSearchUpstreamError,
 )
-from free_claude_code.websearch.rotation import KeyHealthState
+from my_claude_code.websearch.rotation import KeyHealthState
 from tests.websearch.support import (
     DomainStubWebSearchProvider,
     StubWebSearchProvider,

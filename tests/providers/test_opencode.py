@@ -1,7 +1,7 @@
 """Tests for the OpenCode OpenAI-compatible provider."""
 
-from free_claude_code.core.anthropic.models import MessagesRequest
-from free_claude_code.providers.base import ProviderConfig
+from my_claude_code.core.anthropic.models import MessagesRequest
+from my_claude_code.providers.base import ProviderConfig
 from tests.providers.support import (
     passthrough_rate_limiter,
     profiled_provider,

@@ -5,9 +5,9 @@ from datetime import UTC, datetime
 import pytest
 from fastapi.testclient import TestClient
 
-from free_claude_code.api.admin_websearch_routes import get_websearch_log_store
-from free_claude_code.websearch.analytics import WebSearchLogStore
-from free_claude_code.websearch.registry import SearchOutcome
+from my_claude_code.api.admin_websearch_routes import get_websearch_log_store
+from my_claude_code.websearch.analytics import WebSearchLogStore
+from my_claude_code.websearch.registry import SearchOutcome
 from tests.api.support import create_test_app
 
 

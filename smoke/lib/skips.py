@@ -3,7 +3,7 @@
 import httpx
 import pytest
 
-from free_claude_code.core.anthropic.stream_contracts import SSEEvent, text_content
+from my_claude_code.core.anthropic.stream_contracts import SSEEvent, text_content
 
 UPSTREAM_UNAVAILABLE_MARKERS = (
     "connection refused",

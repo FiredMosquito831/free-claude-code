@@ -6,26 +6,26 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from free_claude_code.application.errors import ApplicationUnavailableError
-from free_claude_code.application.model_metadata import ProviderModelInfo
-from free_claude_code.config.nim import NimSettings
-from free_claude_code.config.provider_catalog import (
+from my_claude_code.application.errors import ApplicationUnavailableError
+from my_claude_code.application.model_metadata import ProviderModelInfo
+from my_claude_code.config.nim import NimSettings
+from my_claude_code.config.provider_catalog import (
     DEEPSEEK_DEFAULT_BASE,
     NVIDIA_NIM_DEFAULT_BASE,
     OPENROUTER_DEFAULT_BASE,
     WAFER_DEFAULT_BASE,
 )
-from free_claude_code.config.settings import Settings
-from free_claude_code.core.reasoning import DEFAULT_REASONING_POLICY, ReasoningPolicy
-from free_claude_code.providers.base import BaseProvider, ProviderConfig
-from free_claude_code.providers.deepseek import DeepSeekProvider
-from free_claude_code.providers.model_listing import ModelListResponseError
-from free_claude_code.providers.nvidia_nim import NvidiaNimProvider
-from free_claude_code.providers.open_router import OpenRouterProvider
-from free_claude_code.providers.openai_chat import OpenAIChatProvider
-from free_claude_code.providers.runtime import ProviderRuntime
-from free_claude_code.providers.runtime.model_cache import ProviderModelCache
-from free_claude_code.runtime.provider_manager import ProviderRuntimeManager
+from my_claude_code.config.settings import Settings
+from my_claude_code.core.reasoning import DEFAULT_REASONING_POLICY, ReasoningPolicy
+from my_claude_code.providers.base import BaseProvider, ProviderConfig
+from my_claude_code.providers.deepseek import DeepSeekProvider
+from my_claude_code.providers.model_listing import ModelListResponseError
+from my_claude_code.providers.nvidia_nim import NvidiaNimProvider
+from my_claude_code.providers.open_router import OpenRouterProvider
+from my_claude_code.providers.openai_chat import OpenAIChatProvider
+from my_claude_code.providers.runtime import ProviderRuntime
+from my_claude_code.providers.runtime.model_cache import ProviderModelCache
+from my_claude_code.runtime.provider_manager import ProviderRuntimeManager
 from tests.providers.support import passthrough_rate_limiter, profiled_provider
 
 
@@ -73,7 +73,7 @@ def _manager(
 @pytest.mark.asyncio
 async def test_nim_lists_openai_compatible_model_ids() -> None:
     config = ProviderConfig(api_key="test-key", base_url=NVIDIA_NIM_DEFAULT_BASE)
-    with patch("free_claude_code.providers.openai_chat.provider.AsyncOpenAI"):
+    with patch("my_claude_code.providers.openai_chat.provider.AsyncOpenAI"):
         provider = NvidiaNimProvider(
             config, nim_settings=NimSettings(), rate_limiter=passthrough_rate_limiter()
         )

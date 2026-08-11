@@ -1,5 +1,3 @@
-"""DeepSeek provider exports."""
+"""Compatibility re-export of ``my_claude_code.providers.deepseek``."""
 
-from .client import DeepSeekProvider
-
-__all__ = ["DeepSeekProvider"]
+from my_claude_code.providers.deepseek import *  # noqa: F403

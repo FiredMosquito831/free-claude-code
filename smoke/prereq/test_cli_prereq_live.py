@@ -4,10 +4,10 @@ from pathlib import Path
 
 import pytest
 
-from free_claude_code.cli.claude_env import build_claude_proxy_env
+from my_claude_code.cli.claude_env import build_claude_proxy_env
 from smoke.lib.child_process import (
     cmd_fcc_init,
-    cmd_free_claude_code_serve,
+    cmd_my_claude_code_serve,
     run_captured_text,
 )
 from smoke.lib.config import SmokeConfig
@@ -34,10 +34,10 @@ def test_fcc_init_scaffolds_user_config(
     assert (tmp_path / ".fcc" / ".env").is_file()
 
 
-def test_free_claude_code_entrypoint_starts_server(smoke_config: SmokeConfig) -> None:
+def test_my_claude_code_entrypoint_starts_server(smoke_config: SmokeConfig) -> None:
     with start_server(
         smoke_config,
-        command=cmd_free_claude_code_serve(),
+        command=cmd_my_claude_code_serve(),
         env_overrides={"MESSAGING_PLATFORM": "none"},
         name="entrypoint",
     ) as server:

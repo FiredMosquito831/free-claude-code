@@ -4,8 +4,8 @@ import asyncio
 
 import pytest
 
-from free_claude_code.messaging.models import IncomingMessage, MessageScope
-from free_claude_code.messaging.trees import (
+from my_claude_code.messaging.models import IncomingMessage, MessageScope
+from my_claude_code.messaging.trees import (
     ConversationSnapshot,
     MessageState,
     NodeClaim,
