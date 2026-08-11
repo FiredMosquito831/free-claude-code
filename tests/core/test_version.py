@@ -9,14 +9,14 @@ import my_claude_code.core.version as version_module
 
 
 def test_package_version_uses_installed_distribution_metadata() -> None:
-    assert version_module.package_version() == distribution_version("free-claude-code")
+    assert version_module.package_version() == distribution_version("my-claude-code")
 
 
 def test_package_version_has_explicit_uninstalled_source_fallback(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     def missing(_distribution_name: str) -> str:
-        raise PackageNotFoundError("free-claude-code")
+        raise PackageNotFoundError("my-claude-code")
 
     monkeypatch.setattr(version_module, "distribution_version", missing)
 
@@ -39,4 +39,4 @@ def test_project_release_version_matches_installed_metadata() -> None:
     repo_root = Path(__file__).resolve().parents[2]
     pyproject = tomllib.loads((repo_root / "pyproject.toml").read_text("utf-8"))
 
-    assert pyproject["project"]["version"] == distribution_version("free-claude-code")
+    assert pyproject["project"]["version"] == distribution_version("my-claude-code")
