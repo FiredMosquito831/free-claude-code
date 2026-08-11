@@ -103,6 +103,47 @@ def test_reasoning_off_removes_thinking_control() -> None:
     assert "thinking" not in body
 
 
+def test_native_request_strips_reasoning_content_and_normalizes_inline_system() -> None:
+    request = MessagesRequest(
+        model="claude-sonnet-5",
+        messages=[
+            Message(
+                role="assistant",
+                content="prior",
+                reasoning_content="private reasoning",
+            ),
+            Message(role="system", content="inline instruction"),
+        ],
+    )
+
+    body = build_anthropic_messages_body(
+        request,
+        reasoning=ReasoningPolicy.provider_default(),
+    )
+
+    assert body["messages"] == [
+        {"role": "assistant", "content": "prior"},
+        {"role": "user", "content": "inline instruction"},
+    ]
+    assert "reasoning_content" not in json.dumps(body)
+
+
+def test_reasoning_budget_keeps_max_tokens_strictly_larger() -> None:
+    request = MessagesRequest(
+        model="claude-sonnet-5",
+        max_tokens=512,
+        messages=[Message(role="user", content="hello")],
+    )
+
+    body = build_anthropic_messages_body(
+        request,
+        reasoning=ReasoningPolicy.on(budget_tokens=512),
+    )
+
+    assert body["thinking"] == {"type": "enabled", "budget_tokens": 512}
+    assert body["max_tokens"] == 513
+
+
 def test_extra_body_cannot_override_canonical_fields() -> None:
     request = MessagesRequest(
         model="claude-sonnet-5",
@@ -157,6 +198,46 @@ async def test_native_sse_preserves_thinking_signature_tools_and_usage() -> None
     assert '"type":"input_json_delta"' in text
     assert '"cache_read_input_tokens":2' in text
     assert output[-1].startswith("event: message_stop")
+
+
+@pytest.mark.asyncio
+async def test_native_sse_handles_crlf_split_across_chunks() -> None:
+    raw = b'event: message_stop\r\ndata: {"type":"message_stop"}\r\n\r\n'
+
+    async def split_chunks() -> AsyncIterator[bytes]:
+        split = raw.index(b"\r\n") + 1
+        yield raw[:split]
+        yield raw[split:]
+
+    output = [event async for event in iter_anthropic_sse_frames(split_chunks())]
+
+    assert output == ['event: message_stop\ndata: {"type":"message_stop"}\n\n']
+
+
+@pytest.mark.asyncio
+async def test_native_sse_promotes_error_event_to_execution_failure() -> None:
+    from free_claude_code.core.failures import ExecutionFailure, FailureKind
+
+    with pytest.raises(ExecutionFailure) as caught:
+        _ = [
+            event
+            async for event in iter_anthropic_sse_frames(
+                _chunks(
+                    {
+                        "type": "error",
+                        "error": {
+                            "type": "rate_limit_error",
+                            "message": "capacity exhausted",
+                        },
+                    }
+                )
+            )
+        ]
+
+    assert caught.value.kind is FailureKind.RATE_LIMIT
+    assert caught.value.status_code == 429
+    assert caught.value.retryable is True
+    assert caught.value.message == "capacity exhausted"
 
 
 @pytest.mark.asyncio

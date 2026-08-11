@@ -4,9 +4,11 @@ import codecs
 import json
 from collections.abc import AsyncIterator
 
+from free_claude_code.core.anthropic.upstream_errors import anthropic_stream_failure
 from free_claude_code.providers.stream_recovery import TruncatedProviderStreamError
 
 _TERMINAL_EVENT = "message_stop"
+_ERROR_EVENT = "error"
 
 
 async def iter_anthropic_sse_frames(chunks: AsyncIterator[bytes]) -> AsyncIterator[str]:
@@ -15,19 +17,25 @@ async def iter_anthropic_sse_frames(chunks: AsyncIterator[bytes]) -> AsyncIterat
     buffer = ""
     terminal_seen = False
     async for chunk in chunks:
-        buffer += decoder.decode(chunk).replace("\r\n", "\n")
+        buffer += decoder.decode(chunk)
+        buffer = buffer.replace("\r\n", "\n")
         while "\n\n" in buffer:
             raw, buffer = buffer.split("\n\n", 1)
-            frame, event_name = _validated_frame(raw)
+            frame, event_name, payload = _validated_frame(raw)
             if frame is None:
                 continue
+            if event_name == _ERROR_EVENT:
+                raise anthropic_stream_failure(payload)
             terminal_seen = terminal_seen or event_name == _TERMINAL_EVENT
             yield frame
 
     buffer += decoder.decode(b"", final=True)
+    buffer = buffer.replace("\r\n", "\n")
     if buffer.strip():
-        frame, event_name = _validated_frame(buffer)
+        frame, event_name, payload = _validated_frame(buffer)
         if frame is not None:
+            if event_name == _ERROR_EVENT:
+                raise anthropic_stream_failure(payload)
             terminal_seen = terminal_seen or event_name == _TERMINAL_EVENT
             yield frame
     if not terminal_seen:
@@ -36,7 +44,9 @@ async def iter_anthropic_sse_frames(chunks: AsyncIterator[bytes]) -> AsyncIterat
         )
 
 
-def _validated_frame(raw: str) -> tuple[str | None, str | None]:
+def _validated_frame(
+    raw: str,
+) -> tuple[str | None, str | None, dict[str, object] | None]:
     event_name: str | None = None
     data_parts: list[str] = []
     for line in raw.splitlines():
@@ -48,7 +58,7 @@ def _validated_frame(raw: str) -> tuple[str | None, str | None]:
             data_parts.append(line[5:].lstrip())
 
     if not data_parts:
-        return None, event_name
+        return None, event_name, None
     payload = json.loads("\n".join(data_parts))
     if not isinstance(payload, dict):
         raise ValueError("Anthropic Messages SSE data must be a JSON object.")
@@ -63,4 +73,5 @@ def _validated_frame(raw: str) -> tuple[str | None, str | None]:
     return (
         f"event: {normalized_event}\ndata: {json.dumps(payload, separators=(',', ':'))}\n\n",
         normalized_event,
+        payload,
     )
