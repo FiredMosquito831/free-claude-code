@@ -12,6 +12,46 @@ from my_claude_code.core.identity import owner_for_invocation
 from my_claude_code.core.version import package_version
 
 
+def help_command(argv: Sequence[str] | None = None) -> None:
+    """Print a short reference for every command and how to use it."""
+    del argv  # --version is handled by the entry point; otherwise no options.
+    print(_help_text())
+
+
+def _help_text() -> str:
+    return """My Claude Code -- commands
+
+The proxy runs on your machine and routes your coding agents to the models and
+providers you configure. Everything is local: your keys stay in ~/.fcc.
+
+Start the proxy:
+  mcc-server              Start the local proxy and admin dashboard
+  my-claude-code          Same as mcc-server (full command name)
+
+Use a coding agent through the proxy:
+  mcc-claude              Launch Claude Code through the proxy
+  mcc-claude --discover-models   Also enable the model picker from the catalog
+  mcc-claude-old          Legacy launcher: full proxy environment, auto-compact
+  mcc-codex               Launch Codex through the proxy
+  mcc-pi                  Launch Pi through the proxy
+
+Manage and inspect:
+  mcc-init                Create or repair ~/.fcc/.env with the config template
+  mcc-chatgpt-oauth-login Log in to ChatGPT/Codex via OAuth device flow
+  mcc-compact-log         Compact the request log (deduplicate + compress)
+  mcc-help                Show this command reference
+
+The legacy fcc-* commands (fcc-server, fcc-claude, fcc-codex, fcc-pi,
+fcc-init, fcc-chatgpt-oauth-login, fcc-compact-log, free-claude-code) are kept
+as aliases and behave identically.
+
+Updates: install while the server is running. On Windows the update is staged
+and completes after you stop and restart the app; on Linux/WSL it applies
+immediately and is picked up on the next restart. Run mcc-server again after an
+update to start the new version.
+"""
+
+
 def serve(argv: Sequence[str] | None = None) -> None:
     """Start the FastAPI server."""
     if _print_version_if_requested(argv):

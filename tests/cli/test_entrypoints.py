@@ -187,6 +187,37 @@ def test_cli_scripts_are_registered() -> None:
     )
     assert scripts["fcc-codex"] == "my_claude_code.cli.launchers.codex:launch"
     assert scripts["fcc-pi"] == "my_claude_code.cli.launchers.pi:launch"
+    assert scripts["mcc-help"] == "my_claude_code.cli.entrypoints:help_command"
+    assert scripts["fcc-help"] == "my_claude_code.cli.entrypoints:help_command"
+
+
+def test_help_command_documents_every_mcc_command(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from my_claude_code.cli import entrypoints
+
+    entrypoints.help_command(())
+    out = capsys.readouterr().out
+
+    # Every native command appears with a purpose line.
+    for command in (
+        "mcc-server",
+        "my-claude-code",
+        "mcc-claude",
+        "mcc-claude-old",
+        "mcc-codex",
+        "mcc-pi",
+        "mcc-init",
+        "mcc-chatgpt-oauth-login",
+        "mcc-compact-log",
+        "mcc-help",
+    ):
+        assert command in out
+    # The legacy family is acknowledged as aliases, not advertised first.
+    assert "fcc-*" in out
+    assert "aliases" in out
+    # The install-while-running / restart note is present.
+    assert "restart" in out
 
 
 @pytest.mark.parametrize("entrypoint_name", ["serve", "init"])
