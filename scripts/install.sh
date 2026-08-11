@@ -352,6 +352,9 @@ validate_args() {
 resolve_release() {
     if [ -n "$requested_version" ]; then
         FCC_VERSION=$requested_version
+        # No release feed is read for an explicit version, so no digest is
+        # available; the download is left unverified but clearly reported.
+        FCC_WHEEL_NAME="my_claude_code-${FCC_VERSION}-py3-none-any.whl"
     else
         # Read even during a dry run: it is a GET that changes nothing, and it
         # is the only way to report the version that would actually install.
@@ -364,12 +367,24 @@ resolve_release() {
         [ -n "$FCC_VERSION" ] ||
             fail "Could not read the latest release version from the release feed."
         # GitHub publishes a sha256 digest per asset, so the download is still
-        # verified even though no checksum is pinned in this script.
+        # verified even though no checksum is pinned in this script. The release
+        # body can itself mention a sha256 (the release notes often repeat the
+        # digest), and the body precedes the assets in the payload, so a naive
+        # first '"digest"' match can land on prose instead of the asset. Grab the
+        # digest only from the asset whose name matches the wheel we will download.
+        FCC_WHEEL_NAME="my_claude_code-${FCC_VERSION}-py3-none-any.whl"
         FCC_WHEEL_SHA256=$(printf '%s\n' "$release_json" |
-            grep -m1 '"digest"' |
-            sed -e 's/.*sha256://' -e 's/".*//')
+            awk '
+                /"name":[[:space:]]*"'"$FCC_WHEEL_NAME"'"/ { in_asset = 1 }
+                in_asset && /"digest":[[:space:]]*"sha256:/ {
+                    line = $0
+                    sub(/^.*"digest":[[:space:]]*"sha256:/, "", line)
+                    sub(/".*$/, "", line)
+                    print line
+                    exit
+                }
+            ')
     fi
-    FCC_WHEEL_NAME="free_claude_code-${FCC_VERSION}-py3-none-any.whl"
     FCC_WHEEL_URL="https://github.com/${FCC_REPO}/releases/download/v${FCC_VERSION}/${FCC_WHEEL_NAME}"
 }
 
@@ -419,13 +434,13 @@ package_spec() {
     fi
 
     if [ "$include_nim" -eq 1 ] && [ "$include_local" -eq 1 ]; then
-        printf 'free-claude-code[voice,voice_local] @ %s' "$package_url"
+        printf 'my-claude-code[voice,voice_local] @ %s' "$package_url"
     elif [ "$include_nim" -eq 1 ]; then
-        printf 'free-claude-code[voice] @ %s' "$package_url"
+        printf 'my-claude-code[voice] @ %s' "$package_url"
     elif [ "$include_local" -eq 1 ]; then
-        printf 'free-claude-code[voice_local] @ %s' "$package_url"
+        printf 'my-claude-code[voice_local] @ %s' "$package_url"
     else
-        printf 'free-claude-code @ %s' "$package_url"
+        printf 'my-claude-code @ %s' "$package_url"
     fi
 }
 
@@ -436,9 +451,9 @@ install_my_claude_code() {
     spec=$(package_spec "$package_url")
 
     if [ -n "$torch_backend" ]; then
-        run uv tool install --force --refresh-package free-claude-code --python "$PYTHON_VERSION" --torch-backend "$torch_backend" "$spec"
+        run uv tool install --force --refresh-package my-claude-code --python "$PYTHON_VERSION" --torch-backend "$torch_backend" "$spec"
     else
-        run uv tool install --force --refresh-package free-claude-code --python "$PYTHON_VERSION" "$spec"
+        run uv tool install --force --refresh-package my-claude-code --python "$PYTHON_VERSION" "$spec"
     fi
 }
 

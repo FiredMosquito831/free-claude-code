@@ -341,7 +341,7 @@ def test_extras_and_python_come_from_the_uv_receipt(monkeypatch, tmp_path) -> No
     receipt = tmp_path / "uv-receipt.toml"
     receipt.write_text(
         "[tool]\n"
-        'requirements = [{ name = "free-claude-code", path = "/x.whl",'
+        'requirements = [{ name = "my-claude-code", path = "/x.whl",'
         ' extras = ["voice"] }]\n'
         'python = "3.14.0"\n',
         encoding="utf-8",

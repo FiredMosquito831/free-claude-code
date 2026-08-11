@@ -411,10 +411,11 @@ def test_process_replacement_flushes_logs_and_execs_stable_launcher() -> None:
         patch.object(commands, "_server_launcher", return_value="/stable/fcc-server"),
         patch.object(commands.logger, "complete") as complete,
         patch.object(commands, "kill_all_best_effort") as kill_all,
+        patch.object(commands, "wait_for_port_free", return_value=True),
         patch.object(commands.os, "execv") as execv,
         patch.object(commands.sys, "argv", ["fcc-server", "--example"]),
     ):
-        commands._replace_server_process()
+        commands._replace_server_process(_launcher_settings())
 
     complete.assert_called_once()
     kill_all.assert_called_once()
@@ -432,7 +433,7 @@ def test_windows_process_replacement_exits_for_the_external_helper() -> None:
         patch.object(commands, "kill_all_best_effort") as kill_all,
         patch.object(commands.os, "execv") as execv,
     ):
-        commands._replace_server_process()
+        commands._replace_server_process(_launcher_settings())
 
     complete.assert_called_once()
     kill_all.assert_called_once()
@@ -449,7 +450,7 @@ def test_wsl_drvfs_process_replacement_exits_for_the_external_helper() -> None:
         patch.object(commands, "kill_all_best_effort") as kill_all,
         patch.object(commands.os, "execv") as execv,
     ):
-        commands._replace_server_process()
+        commands._replace_server_process(_launcher_settings())
 
     complete.assert_called_once()
     kill_all.assert_called_once()
@@ -1641,13 +1642,14 @@ def test_process_replacement_logs_recovery_command_when_execv_fails() -> None:
         patch.object(commands, "_server_launcher", return_value="/stable/fcc-server"),
         patch.object(commands.logger, "complete"),
         patch.object(commands, "kill_all_best_effort"),
+        patch.object(commands, "wait_for_port_free", return_value=True),
         patch.object(
             commands.os, "execv", side_effect=OSError(13, "Permission denied")
         ),
         patch.object(commands.sys, "argv", ["fcc-server", "--example"]),
         patch.object(commands.logger, "error") as error,
     ):
-        commands._replace_server_process()
+        commands._replace_server_process(_launcher_settings())
 
     error.assert_called_once()
     recovery = " ".join(str(arg) for arg in error.call_args.args)
