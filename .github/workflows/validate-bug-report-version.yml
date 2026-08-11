@@ -26,7 +26,7 @@ jobs:
             // and the legacy "FCC version" header for pre-rebrand issues.
             const fieldPattern = "^### (?:FCC|MCC|App) version\r?\n+\s*([^\r\n]+)";
             // Accept a bare semver, or one prefixed with the old or new package name.
-            const versionPattern = "^(?:(?:(?:free-claude-code|my-claude-code) )?\d+\.\d+\.\d+|None)$";
+            const versionPattern = "^(?:(?:(?:free-claude-code|my-claude-code) )?\\d+\\.\\d+\\.\\d+|None)$";
             const match = (issue.body || "").match(new RegExp(fieldPattern, "m"));
             const version = match?.[1]?.trim() || "";
             const valid = new RegExp(versionPattern).test(version);

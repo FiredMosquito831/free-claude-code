@@ -21,7 +21,7 @@ def test_bug_form_requests_an_exact_version_or_none() -> None:
     assert "Run `mcc-server --version`" in form
     assert "enter only the version number" in form
     assert "enter `None`" in form
-    assert 'placeholder: "4.6.1 or None"' in form
+    assert 'placeholder: "5.0.0 or None"' in form
     assert "not installed" not in form
     assert "free-claude-code" not in form
 
