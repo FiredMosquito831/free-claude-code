@@ -2137,6 +2137,65 @@ textarea:focus-visible,
   align-items: center;
 }
 
+/* Export window */
+.export-card {
+  width: min(720px, 94vw);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.export-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.export-row-label {
+  min-width: 72px;
+  font-size: 13px;
+  color: var(--muted, #888);
+}
+
+.export-radio {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
+}
+
+.export-custom-range {
+  display: inline-flex;
+  gap: 8px;
+}
+
+.export-fields {
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  margin: 0;
+}
+
+.export-fields legend {
+  font-size: 13px;
+  color: var(--muted, #888);
+  padding: 0 4px;
+}
+
+.export-field-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 8px 16px;
+}
+
+.export-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
+}
+
 .requests-detail-meta {
   display: grid;
   grid-template-columns: 140px 1fr;

@@ -179,6 +179,7 @@ async function api(path, options = {}) {
 
 async function load() {
   showMessage("Loading admin config");
+  const savedState = restoreDashboardState();
   await loadOnboarding().catch((error) => showMessage(error.message, "error"));
   if (
     state.onboarding &&
@@ -187,6 +188,19 @@ async function load() {
     !state.userNavigated
   ) {
     state.activeView = "get_started";
+  } else if (savedState?.activeView) {
+    state.activeView = savedState.activeView;
+  }
+  if (savedState?.autoRefresh != null && byId("reqAutoRefresh")) {
+    byId("reqAutoRefresh").checked = Boolean(savedState.autoRefresh);
+  }
+  if (savedState?.autoRefreshInterval && byId("reqAutoRefreshInterval")) {
+    byId("reqAutoRefreshInterval").value = String(savedState.autoRefreshInterval);
+  }
+  if (savedState?.webSearchStatsPeriod) {
+    state.webSearchStatsPeriod = savedState.webSearchStatsPeriod;
+    const periodSelect = byId("webSearchStatsPeriod");
+    if (periodSelect) periodSelect.value = savedState.webSearchStatsPeriod;
   }
   const config = await api("/admin/api/config");
   state.config = config;
@@ -208,6 +222,8 @@ async function load() {
   showMessage("");
   await loadVersionInfo();
   await loadClaudeSettings();
+  // A restored "on" auto-refresh must actually start polling.
+  updateRequestAutoRefresh();
 }
 
 function renderNav() {
@@ -236,6 +252,8 @@ function setActiveView(viewId, { scroll = false } = {}) {
     VIEW_GROUPS.find((view) => view.id === viewId) || VIEW_GROUPS[0];
   state.activeView = activeView.id;
   byId("pageTitle").textContent = activeView.title;
+  // Persist real navigation, but never the forced onboarding view.
+  if (activeView.id !== "get_started") persistDashboardState();
 
   document.querySelectorAll(".nav-link").forEach((link) => {
     const selected = link.dataset.view === activeView.id;
@@ -4489,20 +4507,6 @@ function downloadJson(filename, value) {
   URL.revokeObjectURL(url);
 }
 
-async function exportWebSearchAnalytics() {
-  const params = webSearchAnalyticsParams({ limit: 500 });
-  params.set("include_content", "true");
-  const page = await api(`/admin/api/websearch/requests?${params}`);
-  downloadJson(
-    `mcc-websearch-${new Date().toISOString().replace(/[:.]/g, "-")}.json`,
-    {
-      exported_at: new Date().toISOString(),
-      filters: Object.fromEntries(params),
-      ...page,
-    },
-  );
-}
-
 async function clearWebSearchAnalytics() {
   const total = Number(state.webSearchAnalyticsPage?.total || 0);
   if (
@@ -4524,13 +4528,17 @@ byId("webSearchStatsApply").addEventListener("click", () =>
 byId("webSearchStatsRefresh").addEventListener("click", () =>
   loadWebSearchAnalytics().catch((error) => showMessage(error.message, "error")),
 );
+byId("webSearchStatsPeriod").addEventListener("change", () => {
+  const period = byId("webSearchStatsPeriod")?.value || "daily";
+  state.webSearchStatsPeriod = period;
+  persistDashboardState();
+  loadWebSearchAnalytics().catch((error) => showMessage(error.message, "error"));
+});
 byId("webSearchFilterQuery").addEventListener("keydown", (event) => {
   if (event.key !== "Enter") return;
   loadWebSearchAnalytics().catch((error) => showMessage(error.message, "error"));
 });
-byId("webSearchExportButton").addEventListener("click", () =>
-  exportWebSearchAnalytics().catch((error) => showMessage(error.message, "error")),
-);
+byId("webSearchExportButton").addEventListener("click", openExportModal);
 byId("webSearchClearButton").addEventListener("click", () =>
   clearWebSearchAnalytics().catch((error) => showMessage(error.message, "error")),
 );
@@ -4548,6 +4556,33 @@ document.addEventListener("pointerdown", (event) => {
   state.modelComboboxes.forEach((combobox) => {
     if (combobox.isOpen && !combobox.element.contains(event.target)) combobox.close();
   });
+});
+
+// Export window.
+byId("exportClose").addEventListener("click", closeExportModal);
+byId("exportModal").addEventListener("click", (event) => {
+  if (event.target === byId("exportModal")) closeExportModal();
+});
+byId("exportDownloadButton").addEventListener("click", () =>
+  runExport().catch((error) => showMessage(error.message, "error")),
+);
+document.addEventListener("keydown", (event) => {
+  trapExportModalFocus(event);
+  if (event.key === "Escape" && !byId("exportModal").hidden) {
+    closeExportModal();
+  }
+});
+document.querySelectorAll('input[name="exportScope"]').forEach((radio) => {
+  radio.addEventListener("change", () => {
+    const scope = exportScope();
+    renderExportFieldList(scope);
+    byId("exportPeriod").value = EXPORT_DEFAULT_PERIOD[scope];
+    byId("exportCustomRange").hidden = true;
+    byId("exportHint").textContent = "";
+  });
+});
+byId("exportPeriod").addEventListener("change", () => {
+  byId("exportCustomRange").hidden = byId("exportPeriod").value !== "custom";
 });
 
 byId("getStartedDismissButton").addEventListener("click", () => {
@@ -5290,6 +5325,41 @@ function applyTheme(name) {
   });
   chartRedrawers.forEach((fn) => { try { fn(); } catch (_) {} });
 }
+/* ------------------------------------------------- dashboard state persistence
+   The theme is persisted separately above (``mcc-theme``); this remembers the
+   active view plus the analytics auto-refresh settings and web-search period
+   so an F5 refresh picks the user back up where they were. */
+const DASH_STATE_KEY = "mcc-dashboard-state";
+
+function persistDashboardState() {
+  let stateToSave;
+  try {
+    stateToSave = {
+      activeView: state.activeView === "get_started" ? undefined : state.activeView,
+      autoRefresh: byId("reqAutoRefresh")?.checked ?? undefined,
+      autoRefreshInterval: byId("reqAutoRefreshInterval")?.value
+        ? String(byId("reqAutoRefreshInterval").value)
+        : undefined,
+      webSearchStatsPeriod: state.webSearchStatsPeriod || undefined,
+    };
+    localStorage.setItem(DASH_STATE_KEY, JSON.stringify(stateToSave));
+  } catch (_) {
+    /* storage unavailable or full; persistence is best-effort */
+  }
+}
+
+function restoreDashboardState() {
+  try {
+    const raw = localStorage.getItem(DASH_STATE_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") return {};
+    return parsed;
+  } catch (_) {
+    return {};
+  }
+}
+
 function initThemeSwitch() {
   let saved = "midnight";
   try { saved = localStorage.getItem(THEME_KEY) || "midnight"; } catch (_) {}
@@ -5641,24 +5711,236 @@ function trapRequestDetailFocus(event) {
   }
 }
 
-async function exportRequestAnalytics() {
-  const params = reqFilters();
-  const exportParams = new URLSearchParams(params);
-  exportParams.set("limit", "500");
-  exportParams.set("offset", "0");
-  const [stats, page] = await Promise.all([
-    api(`/admin/api/requests/stats?${params}`),
-    api(`/admin/api/requests?${exportParams}`),
-  ]);
-  downloadJson(
-    `mcc-requests-${new Date().toISOString().replace(/[:.]/g, "-")}.json`,
-    {
-      exported_at: new Date().toISOString(),
-      filters: Object.fromEntries(params),
-      stats,
-      ...page,
-    },
+/* ------------------------------------------------------------- export window */
+
+// Field definitions per scope, in display order. The ids are the ones the
+// export endpoint accepts; the labels are what the user reads.
+const EXPORT_FIELDS = {
+  requests: [
+    { id: "input", label: "Input" },
+    { id: "output", label: "Output" },
+    { id: "tool_calls", label: "Tool calls" },
+    { id: "thinking", label: "Thinking" },
+    { id: "providers", label: "Provider" },
+    { id: "models", label: "Model" },
+    { id: "error_rate", label: "Error rate" },
+    { id: "cache_hit", label: "Cache hit" },
+    { id: "total_input", label: "Total input" },
+    { id: "input_cached", label: "Input cached" },
+    { id: "input_uncached", label: "Input uncached" },
+    { id: "tokens_out", label: "Tokens out" },
+    { id: "turns_with_tools", label: "Turns with tools" },
+  ],
+  websearch: [
+    { id: "provider", label: "Provider" },
+    { id: "key_label", label: "Key" },
+    { id: "query", label: "Query" },
+    { id: "results_count", label: "Results" },
+    { id: "duration_ms", label: "Duration (ms)" },
+    { id: "status", label: "Status" },
+    { id: "cost_usd", label: "Cost (USD)" },
+    { id: "error_kind", label: "Error kind" },
+    { id: "error_message", label: "Error message" },
+    { id: "attempt_number", label: "Attempt #" },
+    { id: "route_id", label: "Route" },
+    { id: "input", label: "Input" },
+    { id: "output", label: "Output" },
+    { id: "provider_config", label: "Provider config" },
+    { id: "content_captured", label: "Content captured" },
+  ],
+};
+
+const EXPORT_DEFAULT_FIELDS = {
+  requests: new Set([
+    "providers",
+    "models",
+    "error_rate",
+    "cache_hit",
+    "total_input",
+    "input_cached",
+    "input_uncached",
+    "tokens_out",
+    "turns_with_tools",
+  ]),
+  websearch: new Set(["provider", "status", "results_count", "duration_ms", "cost_usd"]),
+};
+
+const EXPORT_DEFAULT_PERIOD = { requests: "86400", websearch: "604800" };
+let exportReturnFocus = null;
+
+function exportScope() {
+  const checked = document.querySelector('input[name="exportScope"]:checked');
+  return checked ? checked.value : "requests";
+}
+
+function renderExportFieldList(scope) {
+  const container = byId("exportFieldList");
+  container.innerHTML = "";
+  const defaults = EXPORT_DEFAULT_FIELDS[scope] || new Set();
+  (EXPORT_FIELDS[scope] || []).forEach((field) => {
+    const label = document.createElement("label");
+    label.className = "export-field";
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.value = field.id;
+    checkbox.checked = defaults.has(field.id);
+    const span = document.createElement("span");
+    span.textContent = field.label;
+    label.append(checkbox, span);
+    container.appendChild(label);
+  });
+}
+
+function openExportModal() {
+  exportReturnFocus = document.activeElement;
+  // Default scope to the view the user opened from.
+  const initial = state.activeView === "web_search" ? "websearch" : "requests";
+  const scopeRadios = document.querySelectorAll('input[name="exportScope"]');
+  scopeRadios.forEach((radio) => {
+    radio.checked = radio.value === initial;
+  });
+  byId("exportFormat").value = "json";
+  byId("exportPeriod").value = EXPORT_DEFAULT_PERIOD[initial];
+  byId("exportCustomRange").hidden = true;
+  byId("exportGroupBy").value = "";
+  renderExportFieldList(initial);
+  byId("exportHint").textContent = "";
+  byId("exportModal").hidden = false;
+  byId("exportDownloadButton").focus();
+}
+
+function closeExportModal() {
+  byId("exportModal").hidden = true;
+  if (exportReturnFocus instanceof HTMLElement) {
+    exportReturnFocus.focus();
+  }
+  exportReturnFocus = null;
+}
+
+function trapExportModalFocus(event) {
+  const modal = byId("exportModal");
+  if (event.key !== "Tab" || modal.hidden) return;
+  const focusable = Array.from(
+    modal.querySelectorAll(
+      'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+    ),
+  ).filter(
+    (element) =>
+      element instanceof HTMLElement && !element.hidden && element.closest("[hidden]") === null,
   );
+  if (focusable.length === 0) {
+    event.preventDefault();
+    return;
+  }
+  const first = focusable[0];
+  const last = focusable[focusable.length - 1];
+  if (event.shiftKey && document.activeElement === first) {
+    event.preventDefault();
+    last.focus();
+  } else if (!event.shiftKey && document.activeElement === last) {
+    event.preventDefault();
+    first.focus();
+  }
+}
+
+function exportPeriodSeconds() {
+  const raw = byId("exportPeriod").value;
+  if (raw === "custom") return null;
+  return Number(raw) || 0;
+}
+
+function exportCustomSince() {
+  const value = byId("exportSince").value;
+  if (!value) return null;
+  return new Date(value).toISOString();
+}
+
+function exportCustomUntil() {
+  const value = byId("exportUntil").value;
+  if (!value) return null;
+  return new Date(value).toISOString();
+}
+
+function exportParamsFor(scope) {
+  const params = new URLSearchParams();
+  params.set("format", byId("exportFormat").value);
+  params.set("scope", scope);
+  const groupBy = byId("exportGroupBy").value;
+  if (groupBy) params.set("group_by", groupBy);
+  const fields = Array.from(byId("exportFieldList").querySelectorAll("input:checked"))
+    .map((input) => input.value);
+  if (fields.length) params.set("fields", fields.join(","));
+  const periodSeconds = exportPeriodSeconds();
+  if (periodSeconds !== null) {
+    params.set("since", String(Math.floor(Date.now() / 1000) - periodSeconds));
+  } else {
+    const since = exportCustomSince();
+    if (since) params.set("since", since);
+    const until = exportCustomUntil();
+    if (until) params.set("until", until);
+  }
+  return params;
+}
+
+async function runExport() {
+  const scope = exportScope();
+  const params = exportParamsFor(scope);
+  // Carry the current view's filters into the export.
+  if (scope === "websearch") {
+    const ws = webSearchAnalyticsParams({});
+    ws.forEach((value, key) => {
+      if (!params.has(key)) params.set(key, value);
+    });
+    params.set("include_content", "true");
+  } else {
+    reqFilters().forEach((value, key) => {
+      if (!params.has(key)) params.set(key, value);
+    });
+  }
+  byId("exportHint").textContent = "Preparing export…";
+  try {
+    const response = await fetch(`/admin/api/export?${params}`, {
+      cache: "no-store",
+      headers: { Accept: "application/octet-stream" },
+    });
+    if (!response.ok) {
+      let detail = response.statusText;
+      try {
+        const body = await response.json();
+        detail = body.detail || detail;
+      } catch (_) {
+        /* non-JSON error body */
+      }
+      throw new Error(detail || `Export failed (${response.status})`);
+    }
+    const blob = await response.blob();
+    const filename = `mcc-${scope}-${params.get("format")}-${new Date()
+      .toISOString()
+      .replace(/[:.]/g, "-")}.${params.get("format")}`;
+    downloadBlob(filename, blob);
+    byId("exportHint").textContent = "Export downloaded.";
+  } catch (error) {
+    byId("exportHint").textContent = "";
+    throw error;
+  }
+}
+
+function downloadBlob(filename, blob) {
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
+}
+
+function downloadJson(filename, value) {
+  const blob = new Blob([`${JSON.stringify(value, null, 2)}\n`], {
+    type: "application/json",
+  });
+  downloadBlob(filename, blob);
 }
 
 function requestAutoRefreshEnabled() {
@@ -5755,11 +6037,13 @@ byId("reqRefreshButton").addEventListener("click", () =>
 byId("reqAutoRefresh").addEventListener("change", () => {
   updateRequestAutoRefresh();
   if (requestAutoRefreshEnabled()) pollRequestPulse();
+  persistDashboardState();
 });
-byId("reqAutoRefreshInterval").addEventListener("change", updateRequestAutoRefresh);
-byId("reqExportButton").addEventListener("click", () =>
-  exportRequestAnalytics().catch((error) => showMessage(error.message, "error")),
-);
+byId("reqAutoRefreshInterval").addEventListener("change", () => {
+  updateRequestAutoRefresh();
+  persistDashboardState();
+});
+byId("reqExportButton").addEventListener("click", openExportModal);
 byId("reqClearButton").addEventListener("click", () => {
   if (
     !window.confirm(

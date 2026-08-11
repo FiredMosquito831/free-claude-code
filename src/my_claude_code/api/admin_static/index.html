@@ -299,7 +299,7 @@
               </label>
               <button id="reqApplyFilters" class="secondary-button" type="button">Apply</button>
               <button id="reqExportButton" class="secondary-button" type="button">
-                Export JSON
+                Export
               </button>
               <span id="reqBodiesIndicator" class="requests-indicator"></span>
               <button id="reqClearButton" class="secondary-button danger" type="button">Clear log</button>
@@ -450,6 +450,95 @@
                 </div>
               </div>
             </div>
+
+            <div
+              id="exportModal"
+              class="requests-modal"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="exportTitle"
+              hidden
+            >
+              <div class="requests-modal-card export-card">
+                <div class="requests-modal-header">
+                  <h3 id="exportTitle">Export analytics</h3>
+                  <button id="exportClose" class="secondary-button" type="button">Close</button>
+                </div>
+
+                <div class="export-row" role="radiogroup" aria-label="Scope">
+                  <span class="export-row-label">Scope</span>
+                  <label class="export-radio">
+                    <input type="radio" name="exportScope" value="requests" checked />
+                    Model requests
+                  </label>
+                  <label class="export-radio">
+                    <input type="radio" name="exportScope" value="websearch" />
+                    Web Search
+                  </label>
+                </div>
+
+                <div class="export-row">
+                  <label class="export-row-label" for="exportFormat">Format</label>
+                  <select id="exportFormat">
+                    <option value="json">JSON</option>
+                    <option value="csv">CSV</option>
+                    <option value="xlsx">XLSX</option>
+                    <option value="txt">TXT</option>
+                  </select>
+                </div>
+
+                <div class="export-row">
+                  <label class="export-row-label" for="exportPeriod">Period</label>
+                  <select id="exportPeriod">
+                    <option value="3600">Last hour</option>
+                    <option value="86400" selected>Last 24 hours</option>
+                    <option value="604800">Last 7 days</option>
+                    <option value="2592000">Last 30 days</option>
+                    <option value="custom">Custom…</option>
+                  </select>
+                  <span id="exportCustomRange" class="export-custom-range" hidden>
+                    <input
+                      id="exportSince"
+                      type="datetime-local"
+                      aria-label="From"
+                    />
+                    <input
+                      id="exportUntil"
+                      type="datetime-local"
+                      aria-label="To"
+                    />
+                  </span>
+                </div>
+
+                <div class="export-row">
+                  <label class="export-row-label" for="exportGroupBy">Group by</label>
+                  <select id="exportGroupBy">
+                    <option value="">None (flat detail)</option>
+                    <option value="provider,period,model">Provider → Period → Model</option>
+                    <option value="period,provider,model">Period → Provider → Model</option>
+                    <option value="provider,model">Provider → Model</option>
+                    <option value="period">Period only</option>
+                    <option value="provider">Provider only</option>
+                  </select>
+                </div>
+
+                <fieldset class="export-fields">
+                  <legend>Fields</legend>
+                  <div id="exportFieldList" class="export-field-grid"></div>
+                </fieldset>
+
+                <div class="requests-modal-header">
+                  <span id="exportHint" class="last-updated"></span>
+                  <button
+                    id="exportDownloadButton"
+                    class="secondary-button"
+                    type="button"
+                  >
+                    Download
+                  </button>
+                </div>
+              </div>
+            </div>
           </section>
 
           <section id="view-web_search" class="admin-view" data-view="web_search" hidden>
@@ -550,7 +639,7 @@
                   class="secondary-button"
                   type="button"
                 >
-                  Export JSON
+                  Export
                 </button>
                 <button
                   id="webSearchClearButton"
