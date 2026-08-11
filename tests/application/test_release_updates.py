@@ -76,6 +76,46 @@ def test_unknown_versions_never_look_newer() -> None:
     assert is_newer("4.15.0", "unknown") is False
 
 
+def test_current_version_falls_back_to_the_legacy_distribution(monkeypatch) -> None:
+    """A migration install still running the legacy tool must not report unknown."""
+    from importlib.metadata import PackageNotFoundError
+
+    from my_claude_code.core.version import LEGACY_DISTRIBUTION, NATIVE_DISTRIBUTION
+
+    def fake_installed(distribution: str) -> str:
+        if distribution == NATIVE_DISTRIBUTION:
+            raise PackageNotFoundError(NATIVE_DISTRIBUTION)
+        assert distribution == LEGACY_DISTRIBUTION
+        return "4.30.0"
+
+    monkeypatch.setattr(release_updates, "installed_version", fake_installed)
+
+    assert release_updates.current_version() == "4.30.0"
+
+
+def test_current_version_prefers_the_native_distribution(monkeypatch) -> None:
+    from my_claude_code.core.version import NATIVE_DISTRIBUTION
+
+    def fake_installed(distribution: str) -> str:
+        assert distribution == NATIVE_DISTRIBUTION
+        return "5.0.1"
+
+    monkeypatch.setattr(release_updates, "installed_version", fake_installed)
+
+    assert release_updates.current_version() == "5.0.1"
+
+
+def test_current_version_unknown_only_when_no_owner_installed(monkeypatch) -> None:
+    from importlib.metadata import PackageNotFoundError
+
+    def fake_installed(distribution: str) -> str:
+        raise PackageNotFoundError(distribution)
+
+    monkeypatch.setattr(release_updates, "installed_version", fake_installed)
+
+    assert release_updates.current_version() == "unknown"
+
+
 # ------------------------------------------------------------------ status
 
 

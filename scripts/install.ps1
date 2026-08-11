@@ -587,6 +587,33 @@ function Configure-AndConfirmFreeClaudeCode {
     }
 }
 
+function Assert-NoLauncherRunning {
+    # ``uv tool install --force`` overwrites every launcher shim in the tool bin
+    # directory. Windows cannot overwrite a running .exe, so a live launcher
+    # (the proxy itself, or an fcc-claude/fcc-codex/fcc-pi child) makes uv fail
+    # mid-install with a cryptic os error 32. Refuse up front, before uv mutates
+    # anything, naming every running launcher. Checks both command families whose
+    # shims live in the same bin dir.
+    $LauncherCommands = @(
+        "fcc-server", "fcc-claude", "fcc-claude-old", "fcc-codex", "fcc-pi",
+        "fcc-init", "fcc-chatgpt-oauth-login", "fcc-compact-log",
+        "free-claude-code",
+        "mcc-server", "mcc-claude", "mcc-claude-old", "mcc-codex", "mcc-pi",
+        "mcc-init", "mcc-chatgpt-oauth-login", "mcc-compact-log",
+        "my-claude-code"
+    )
+    $running = @()
+    foreach ($commandName in $LauncherCommands) {
+        $processes = @(Get-Process -Name $commandName -ErrorAction SilentlyContinue)
+        if ($processes.Count -gt 0) {
+            $running += $commandName
+        }
+    }
+    if ($running.Count -gt 0) {
+        throw "My Claude Code is still running ($($running -join ', ')). Stop those processes, then rerun install."
+    }
+}
+
 if ($Help) {
     Show-Usage
     return
@@ -606,10 +633,15 @@ Add-KnownBinDirectories
 Write-Step "Ensuring uv $MinUvVersion or newer is installed"
 Ensure-Uv
 
-Write-Step "Installing or updating Free Claude Code"
+if (-not $DryRun) {
+    Write-Step "Checking for running My Claude Code processes"
+    Assert-NoLauncherRunning
+}
+
+Write-Step "Installing or updating My Claude Code"
 $InstalledVersion = Install-FreeClaudeCode
 
-Write-Step "Configuring PATH and verifying Free Claude Code"
+Write-Step "Configuring PATH and verifying My Claude Code"
 Configure-AndConfirmFreeClaudeCode -ExpectedVersion $InstalledVersion
 
 Write-Host ""
@@ -617,11 +649,16 @@ if ($DryRun) {
     Write-Host "Dry run complete. No changes were made."
 }
 else {
-    Write-Host "Free Claude Code $InstalledVersion is installed and verified."
-    Write-Host "Start the proxy with: fcc-server"
+    Write-Host "My Claude Code $InstalledVersion is installed and verified."
     Write-Host ""
-    Write-Host "If you use Claude Code, Codex, or Pi, launch them through the proxy"
-    Write-Host "with fcc-claude, fcc-codex, or fcc-pi."
-    Write-Host "Need the previous fcc-claude behavior (gateway model discovery, auto-compact,"
-    Write-Host "telemetry disabled)? Use fcc-claude-old instead."
+    Write-Host "Start the proxy:"
+    Write-Host "  mcc-server"
+    Write-Host ""
+    Write-Host "Use a coding agent through the proxy:"
+    Write-Host "  mcc-claude   Claude Code via the proxy"
+    Write-Host "  mcc-codex    Codex via the proxy"
+    Write-Host "  mcc-pi       Pi via the proxy"
+    Write-Host ""
+    Write-Host "Model discovery for Claude Code (recommended):"
+    Write-Host "  mcc-claude --discover-models"
 }

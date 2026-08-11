@@ -495,6 +495,42 @@ configure_and_verify_my_claude_code() {
         fail "Expected free-claude-code $FCC_VERSION; found: $installed_version"
 }
 
+launcher_is_running() {
+    command_name=$1
+
+    if command -v pgrep >/dev/null 2>&1; then
+        if pgrep -x "$command_name" >/dev/null 2>&1; then
+            return 0
+        fi
+        if pgrep -f "(^|/)${command_name}( |$)" >/dev/null 2>&1; then
+            return 0
+        fi
+        return 1
+    fi
+
+    ps -A -o comm= 2>/dev/null | grep -qx "$command_name"
+}
+
+assert_no_running_launchers() {
+    # ``uv tool install --force`` replaces every launcher shim in the tool bin
+    # directory. A running launcher (the proxy itself, or an fcc-claude /
+    # fcc-codex / fcc-pi child) would make that replacement fail partway, so
+    # refuse up front, before uv mutates anything, naming every running command.
+    running=""
+    for command_name in fcc-server fcc-claude fcc-claude-old fcc-codex fcc-pi \
+        fcc-init fcc-chatgpt-oauth-login fcc-compact-log free-claude-code \
+        mcc-server mcc-claude mcc-claude-old mcc-codex mcc-pi mcc-init \
+        mcc-chatgpt-oauth-login mcc-compact-log my-claude-code; do
+        if launcher_is_running "$command_name"; then
+            running="${running} ${command_name}"
+        fi
+    done
+
+    if [ -n "$running" ]; then
+        fail "My Claude Code is still running (${running# }). Stop those processes, then rerun install."
+    fi
+}
+
 parse_args "$@"
 validate_args
 add_known_bin_directories
@@ -508,7 +544,12 @@ require_command mktemp
 step "Ensuring uv $MIN_UV_VERSION or newer is installed"
 ensure_uv
 
-step "Installing or updating Free Claude Code"
+if [ "$dry_run" -eq 0 ]; then
+    step "Checking for running My Claude Code processes"
+    assert_no_running_launchers
+fi
+
+step "Installing or updating My Claude Code"
 install_my_claude_code
 
 step "Configuring PATH and verifying My Claude Code"
@@ -517,10 +558,13 @@ configure_and_verify_my_claude_code
 if [ "$dry_run" -eq 1 ]; then
     printf '\nDry run complete. No changes were made.\n'
 else
-    printf '\nFree Claude Code %s is installed and verified.\n' "$FCC_VERSION"
-    printf 'Start the proxy with: fcc-server\n'
-    printf '\nIf you use Claude Code, Codex, or Pi, launch them through the proxy\n'
-    printf 'with fcc-claude, fcc-codex, or fcc-pi.\n'
-    printf 'Need the previous fcc-claude behavior (gateway model discovery, auto-compact,\n'
-    printf 'telemetry disabled)? Use fcc-claude-old instead.\n'
+    printf '\nMy Claude Code %s is installed and verified.\n' "$FCC_VERSION"
+    printf '\nStart the proxy:\n'
+    printf '  mcc-server\n'
+    printf '\nUse a coding agent through the proxy:\n'
+    printf '  mcc-claude   Claude Code via the proxy\n'
+    printf '  mcc-codex    Codex via the proxy\n'
+    printf '  mcc-pi       Pi via the proxy\n'
+    printf '\nModel discovery for Claude Code (recommended):\n'
+    printf '  mcc-claude --discover-models\n'
 fi
