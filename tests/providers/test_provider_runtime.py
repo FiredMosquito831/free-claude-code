@@ -23,6 +23,7 @@ from free_claude_code.config.provider_catalog import (
 )
 from free_claude_code.providers.chatgpt_oauth import ChatGPTOAuthProvider
 from free_claude_code.providers.cloudflare import CloudflareProvider
+from free_claude_code.providers.commandcode import CommandCodeProvider
 from free_claude_code.providers.deepseek import DeepSeekProvider
 from free_claude_code.providers.gemini import GeminiProvider
 from free_claude_code.providers.github_models import GitHubModelsProvider
@@ -115,6 +116,8 @@ def _make_settings(**overrides):
     mock.nous_api_key = "test_nous_key"
     mock.kilo_proxy = ""
     mock.kilo_api_key = "test_kilo_key"
+    mock.commandcode_proxy = ""
+    mock.commandcode_api_key = "test_commandcode_key"
     mock.cline_proxy = ""
     mock.cline_api_key = "test_cline_key"
     mock.cloudflare_api_token = "test_cloudflare_token"
@@ -456,6 +459,7 @@ def test_create_provider_instantiates_each_builtin():
         "cline": OpenAIChatProvider,
         "nous_portal": NousPortalProvider,
         "kilo": KiloProvider,
+        "commandcode": CommandCodeProvider,
     }
     sentinel_limiter = MagicMock(spec=ProviderRateLimiter)
 

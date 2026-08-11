@@ -72,6 +72,7 @@ PROVIDER_SMOKE_DEFAULT_MODELS: dict[str, str] = {
     "novita": "novita/deepseek/deepseek-v3.2",
     "nous_portal": "nous_portal/deepseek/deepseek-v4-flash-0731",
     "kilo": "kilo/kilo-auto/balanced",
+    "commandcode": "commandcode/deepseek/deepseek-v4-flash",
     "cline": "cline/anthropic/claude-sonnet-4-6",
     "cerebras": "cerebras/llama3.1-8b",
     "cloudflare": "cloudflare/@cf/moonshotai/kimi-k2.6",
@@ -319,6 +320,8 @@ class SmokeConfig:
             return bool(getattr(self.settings, "nous_api_key", "").strip())
         if provider == "kilo":
             return bool(getattr(self.settings, "kilo_api_key", "").strip())
+        if provider == "commandcode":
+            return bool(getattr(self.settings, "commandcode_api_key", "").strip())
         if provider == "cline":
             return bool(getattr(self.settings, "cline_api_key", "").strip())
         if provider == "cerebras":

@@ -6,6 +6,7 @@ from free_claude_code.messaging.platforms.factory import create_messaging_compon
 from free_claude_code.providers.base import BaseProvider
 from free_claude_code.providers.chatgpt_oauth import ChatGPTOAuthProvider
 from free_claude_code.providers.cloudflare import CloudflareProvider
+from free_claude_code.providers.commandcode import CommandCodeProvider
 from free_claude_code.providers.deepseek import DeepSeekProvider
 from free_claude_code.providers.gemini import GeminiProvider
 from free_claude_code.providers.github_models import GitHubModelsProvider
@@ -97,6 +98,7 @@ def test_provider_and_platform_registries_include_advertised_builtins() -> None:
         "open_router": OpenRouterProvider,
         "nous_portal": NousPortalProvider,
         "kilo": KiloProvider,
+        "commandcode": CommandCodeProvider,
         "mistral": MistralProvider,
         "deepseek": DeepSeekProvider,
         "cloudflare": CloudflareProvider,
