@@ -1505,6 +1505,111 @@ class RequestLogStore:
             row, body_preview_chars=None, bodies=bodies.get(request_id)
         )
 
+    def iter_export_rows(
+        self,
+        *,
+        columns: list[str],
+        need_bodies: bool,
+        provider: str | None = None,
+        model: str | None = None,
+        status: str | None = None,
+        endpoint: str | None = None,
+        key: str | None = None,
+        since: float | None = None,
+        until: float | None = None,
+        q: str | None = None,
+        page_size: int = 1_000,
+    ) -> Iterator[dict[str, Any]]:
+        """Yield every matching row for an export, bypassing the 500-row page cap.
+
+        Uses keyset pagination over ``(ts_epoch, id)`` instead of OFFSET so a
+        full-table export stays O(n) rather than O(n^2) on the offset walk, and
+        keeps a single connection open for the whole stream (closed in
+        ``finally`` so abandoning the generator mid-iteration leaks nothing).
+        Bodies are decompressed only when ``need_bodies`` is true and a row
+        actually references a stored blob.
+        """
+        where, args = self._where(
+            provider=provider,
+            model=model,
+            status=status,
+            endpoint=endpoint,
+            key=key,
+            since=since,
+            until=until,
+            q=q,
+        )
+        conn = self._connect()
+        try:
+            cursor: Any = None
+            while True:
+                page_where = where
+                page_args: list[Any] = list(args)
+                if cursor is not None:
+                    last_ts, last_id = cursor
+                    page_where = f"{where}{' AND' if where else ' WHERE'}"
+                    page_where += " (ts_epoch, id) < (?, ?)"
+                    page_args.extend([last_ts, last_id])
+                page_sql = (
+                    f"SELECT {', '.join(columns)} FROM requests{page_where}"
+                    " ORDER BY ts_epoch DESC, id DESC LIMIT ?"
+                )
+                rows = conn.execute(page_sql, [*page_args, page_size]).fetchall()
+                if not rows:
+                    return
+                ids = [str(row["id"]) for row in rows]
+                bodies = self._fetch_bodies(conn, ids) if need_bodies else {}
+                for row in rows:
+                    yield self._row_to_dict(
+                        row,
+                        body_preview_chars=None,
+                        bodies=bodies.get(str(row["id"])),
+                    )
+                cursor = (rows[-1]["ts_epoch"], rows[-1]["id"])
+        finally:
+            conn.close()
+
+    def iter_export_aggregates(
+        self,
+        *,
+        select: str,
+        names: list[str],
+        group_by: list[str],
+        provider: str | None = None,
+        model: str | None = None,
+        status: str | None = None,
+        endpoint: str | None = None,
+        key: str | None = None,
+        since: float | None = None,
+        until: float | None = None,
+        q: str | None = None,
+    ) -> Iterator[dict[str, Any]]:
+        """Yield the aggregated (grouped) records for an export.
+
+        ``select``/``names`` come from ``core.export.request_aggregate_sql``;
+        ``group_by`` is the ordered dimension list, which becomes both GROUP BY
+        and ORDER BY so the output is deterministically grouped.
+        """
+        where, args = self._where(
+            provider=provider,
+            model=model,
+            status=status,
+            endpoint=endpoint,
+            key=key,
+            since=since,
+            until=until,
+            q=q,
+        )
+        group_sql = ", ".join(group_by)
+        order_sql = ", ".join(group_by)
+        sql = (
+            f"SELECT {select} FROM requests{where}"
+            f" GROUP BY {group_sql} ORDER BY {order_sql}"
+        )
+        with self._connection() as conn:
+            for row in conn.execute(sql, args).fetchall():
+                yield {name: row[name] for name in names}
+
     def _fetch_bodies(
         self, conn: sqlite3.Connection, ids: list[str]
     ) -> dict[str, dict[str, Any]]:
