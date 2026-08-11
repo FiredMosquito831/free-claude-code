@@ -114,7 +114,7 @@ ignore = [
 ]
 
 [tool.ruff.lint.isort]
-known-first-party = ["my_claude_code", "free_claude_code", "smoke"]
+known-first-party = ["my_claude_code", "smoke"]
 
 [tool.ruff.format]
 quote-style = "double"

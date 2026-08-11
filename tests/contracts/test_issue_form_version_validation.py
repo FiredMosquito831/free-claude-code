@@ -18,7 +18,7 @@ def _workflow_pattern(name: str) -> str:
 def test_bug_form_requests_an_exact_version_or_none() -> None:
     form = BUG_FORM.read_text(encoding="utf-8")
 
-    assert "Run `fcc-server --version`" in form
+    assert "Run `mcc-server --version`" in form
     assert "enter only the version number" in form
     assert "enter `None`" in form
     assert 'placeholder: "4.6.1 or None"' in form

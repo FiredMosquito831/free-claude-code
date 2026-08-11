@@ -6,5 +6,8 @@ third-party code or straggler import that still references the legacy
 maintaining a duplicate copy.
 """
 
-from my_claude_code import __all__ as __all__  # explicit re-export
-from my_claude_code import identity, version  # noqa: F401 — core public API
+import my_claude_code  # compat shim: legacy namespace resolves to the canonical package
+
+
+def __getattr__(name: str) -> object:
+    return getattr(my_claude_code, name)
