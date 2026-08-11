@@ -5,9 +5,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from free_claude_code.config.provider_catalog import SAMBANOVA_DEFAULT_BASE
-from free_claude_code.core.reasoning import ReasoningEffort, ReasoningPolicy
-from free_claude_code.providers.base import ProviderConfig
+from my_claude_code.config.provider_catalog import SAMBANOVA_DEFAULT_BASE
+from my_claude_code.core.reasoning import ReasoningEffort, ReasoningPolicy
+from my_claude_code.providers.base import ProviderConfig
 from tests.providers.request_factory import make_messages_request
 from tests.providers.support import passthrough_rate_limiter, profiled_provider
 
@@ -39,7 +39,7 @@ def test_default_base_url_constant():
 
 def test_init_uses_default_base_url_and_api_key(sambanova_config):
     with patch(
-        "free_claude_code.providers.openai_chat.provider.AsyncOpenAI"
+        "my_claude_code.providers.openai_chat.provider.AsyncOpenAI"
     ) as mock_openai:
         provider = profiled_provider(
             "sambanova", sambanova_config, rate_limiter=passthrough_rate_limiter()
@@ -53,7 +53,7 @@ def test_init_uses_default_base_url_and_api_key(sambanova_config):
 def test_init_strips_trailing_slash(sambanova_config):
     config = replace(sambanova_config, base_url=f"{SAMBANOVA_DEFAULT_BASE}/")
 
-    with patch("free_claude_code.providers.openai_chat.provider.AsyncOpenAI"):
+    with patch("my_claude_code.providers.openai_chat.provider.AsyncOpenAI"):
         provider = profiled_provider(
             "sambanova", config, rate_limiter=passthrough_rate_limiter()
         )

@@ -15,8 +15,8 @@ from unittest.mock import AsyncMock
 import pytest
 from fastapi.testclient import TestClient
 
-from free_claude_code.api import admin_custom_routes
-from free_claude_code.config.provider_registry import ProviderRegistry
+from my_claude_code.api import admin_custom_routes
+from my_claude_code.config.provider_registry import ProviderRegistry
 from tests.api.support import create_test_app, runtime_for_app
 
 _ENV_KEYS = ("FCC_ENV_FILE",)

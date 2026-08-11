@@ -17,7 +17,7 @@ from pathlib import Path
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-ADMIN_STATIC = REPO_ROOT / "src/free_claude_code/api/admin_static"
+ADMIN_STATIC = REPO_ROOT / "src/my_claude_code/api/admin_static"
 
 # Control labels the user-facing docs instruct the reader to press or look for.
 # Add to this when the docs start naming a new control; the point is that a

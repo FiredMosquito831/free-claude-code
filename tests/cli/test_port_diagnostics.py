@@ -2,7 +2,7 @@
 
 import socket
 
-from free_claude_code.cli.port_diagnostics import (
+from my_claude_code.cli.port_diagnostics import (
     diagnose_port_owner,
     is_address_in_use,
     probe_port_available,
@@ -75,7 +75,7 @@ def test_wait_for_port_free_returns_true_once_released() -> None:
 
 def test_wait_for_port_free_times_out_when_held(monkeypatch) -> None:
     monkeypatch.setattr(
-        "free_claude_code.cli.port_diagnostics.probe_port_available",
+        "my_claude_code.cli.port_diagnostics.probe_port_available",
         lambda *a, **k: False,
     )
     assert wait_for_port_free("127.0.0.1", 8082, timeout=0.1, interval=0.02) is False

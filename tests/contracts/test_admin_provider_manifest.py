@@ -1,8 +1,8 @@
 """Ensure admin UI manifest exposes every catalog credential/proxy binding."""
 
-from free_claude_code.config.admin.manifest import FIELD_BY_KEY
-from free_claude_code.config.provider_catalog import PROVIDER_CATALOG
-from free_claude_code.config.settings import Settings
+from my_claude_code.config.admin.manifest import FIELD_BY_KEY
+from my_claude_code.config.provider_catalog import PROVIDER_CATALOG
+from my_claude_code.config.settings import Settings
 
 
 def test_provider_catalog_remote_credentials_in_admin_manifest() -> None:
@@ -96,8 +96,8 @@ def test_provider_catalog_proxy_attrs_in_admin_manifest() -> None:
 
 
 def test_provider_catalog_display_names_are_admin_status_source() -> None:
-    from free_claude_code.config.admin.status import provider_config_status
-    from free_claude_code.config.admin.values import load_value_state
+    from my_claude_code.config.admin.status import provider_config_status
+    from my_claude_code.config.admin.values import load_value_state
 
     status_by_provider = {
         entry["provider_id"]: entry
@@ -120,7 +120,7 @@ def test_cloudflare_account_id_is_admin_provider_field() -> None:
 
 
 def test_commandcode_card_owns_key_rotation_and_proxy_fields() -> None:
-    from free_claude_code.config.admin.status import provider_config_status
+    from my_claude_code.config.admin.status import provider_config_status
 
     by_id = {entry["provider_id"]: entry for entry in provider_config_status({})}
     card = by_id["commandcode"]
@@ -140,7 +140,7 @@ def test_provider_status_reports_the_size_of_each_key_pool(monkeypatch) -> None:
     Admin UI cannot count a comma-separated pool itself, and fetching the count
     per provider would mean 35 requests on every page load.
     """
-    from free_claude_code.config.admin.status import provider_config_status
+    from my_claude_code.config.admin.status import provider_config_status
 
     state = {
         "NVIDIA_NIM_API_KEY": {"value": "key-one, key-two ,key-three"},
@@ -166,7 +166,7 @@ def test_every_remote_provider_can_be_given_a_key_from_its_own_card() -> None:
     provider, so its card rendered a single advanced proxy input and no way to
     add a key at all.
     """
-    from free_claude_code.config.admin.status import provider_config_status
+    from my_claude_code.config.admin.status import provider_config_status
 
     stranded: list[str] = []
     for entry in provider_config_status({}):
@@ -196,7 +196,7 @@ def test_every_remote_provider_can_be_given_a_key_from_its_own_card() -> None:
 
 def test_shared_credentials_name_each_other_in_both_directions() -> None:
     """OpenCode Zen and OpenCode Go are one account behind two endpoints."""
-    from free_claude_code.config.admin.status import provider_config_status
+    from my_claude_code.config.admin.status import provider_config_status
 
     by_id = {entry["provider_id"]: entry for entry in provider_config_status({})}
 
@@ -249,7 +249,7 @@ def test_azure_openai_requires_a_base_url_naming_the_users_resource() -> None:
 
 def test_every_remote_provider_reports_a_key_count() -> None:
     """A provider missing this renders a card face with no summary line."""
-    from free_claude_code.config.admin.status import provider_config_status
+    from my_claude_code.config.admin.status import provider_config_status
 
     remote = [
         entry for entry in provider_config_status({}) if entry["kind"] == "remote"

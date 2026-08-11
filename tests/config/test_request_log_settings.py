@@ -1,6 +1,6 @@
 """Settings parsing tests for request log configuration."""
 
-from free_claude_code.config.settings import Settings
+from my_claude_code.config.settings import Settings
 
 
 def test_request_log_defaults() -> None:

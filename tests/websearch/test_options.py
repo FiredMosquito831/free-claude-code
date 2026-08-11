@@ -1,18 +1,18 @@
 """Advanced options reader: dotenv/process precedence and registry plumbing."""
 
-from free_claude_code.config.settings import Settings
-from free_claude_code.config.websearch_catalog import (
+from my_claude_code.config.settings import Settings
+from my_claude_code.config.websearch_catalog import (
     WEBSEARCH_CATALOG,
     WebSearchDescriptor,
     WebSearchOptionSpec,
 )
-from free_claude_code.websearch.base import WebSearchProviderConfig
-from free_claude_code.websearch.options import (
+from my_claude_code.websearch.base import WebSearchProviderConfig
+from my_claude_code.websearch.options import (
     option_enabled,
     option_int,
     read_websearch_options,
 )
-from free_claude_code.websearch.registry import build_provider
+from my_claude_code.websearch.registry import build_provider
 
 _DESCRIPTOR = WebSearchDescriptor(
     provider_id="stub",

@@ -1,6 +1,3 @@
-"""Direct ChatGPT/Codex OAuth provider using the Responses API."""
+"""Compatibility re-export of ``my_claude_code.providers.chatgpt_oauth``."""
 
-from .browser_login import chatgpt_oauth_login_command
-from .provider import ChatGPTOAuthProvider
-
-__all__ = ["ChatGPTOAuthProvider", "chatgpt_oauth_login_command"]
+from my_claude_code.providers.chatgpt_oauth import *  # noqa: F403

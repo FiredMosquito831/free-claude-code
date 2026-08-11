@@ -4,8 +4,8 @@ from unittest.mock import patch
 
 import pytest
 
-from free_claude_code.config.provider_catalog import NOVITA_DEFAULT_BASE
-from free_claude_code.providers.base import ProviderConfig
+from my_claude_code.config.provider_catalog import NOVITA_DEFAULT_BASE
+from my_claude_code.providers.base import ProviderConfig
 from tests.providers.request_factory import make_messages_request
 from tests.providers.support import passthrough_rate_limiter, profiled_provider
 
@@ -34,7 +34,7 @@ def novita_provider(novita_config):
 def test_init(novita_config):
     """Test provider initialization."""
     with patch(
-        "free_claude_code.providers.openai_chat.provider.AsyncOpenAI"
+        "my_claude_code.providers.openai_chat.provider.AsyncOpenAI"
     ) as mock_openai:
         provider = profiled_provider(
             "novita", novita_config, rate_limiter=passthrough_rate_limiter()
@@ -49,7 +49,7 @@ def test_default_base_url_constant():
 
 
 def test_novita_catalog_descriptor():
-    from free_claude_code.config.provider_catalog import PROVIDER_CATALOG
+    from my_claude_code.config.provider_catalog import PROVIDER_CATALOG
 
     descriptor = PROVIDER_CATALOG["novita"]
 
@@ -71,7 +71,7 @@ def test_build_request_body_basic(novita_provider):
 
 
 def test_reasoning_replay_uses_think_tags(novita_provider):
-    from free_claude_code.core.anthropic import ReasoningReplayMode
+    from my_claude_code.core.anthropic import ReasoningReplayMode
 
     assert (
         novita_provider._profile.request_policy.reasoning_replay

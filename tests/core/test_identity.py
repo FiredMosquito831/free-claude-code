@@ -3,7 +3,7 @@
 import sys
 from unittest.mock import patch
 
-from free_claude_code.core import identity
+from my_claude_code.core import identity
 
 
 def test_legacy_commands_all_map_to_legacy_owner() -> None:
@@ -45,7 +45,7 @@ def test_owner_for_invocation_reads_sys_argv() -> None:
 
 def test_running_owner_uses_recorded_distribution() -> None:
     with patch(
-        "free_claude_code.core.identity.distribution_name",
+        "my_claude_code.core.identity.distribution_name",
         return_value="my-claude-code",
     ):
         assert identity.running_owner() is identity.NATIVE_OWNER
@@ -53,7 +53,7 @@ def test_running_owner_uses_recorded_distribution() -> None:
 
 def test_running_owner_falls_back_when_distribution_unknown() -> None:
     with patch(
-        "free_claude_code.core.identity.distribution_name",
+        "my_claude_code.core.identity.distribution_name",
         return_value="who-knows",
     ):
         assert identity.running_owner() is identity.LEGACY_OWNER
@@ -91,7 +91,7 @@ def test_owner_stable_launchers_are_distinct() -> None:
 
 
 def test_migration_bridge_reexports_identity_symbols() -> None:
-    import free_claude_code.core.identity as identity_module
+    import my_claude_code.core.identity as identity_module
 
     for symbol in (
         "LEGACY_DISTRIBUTION",

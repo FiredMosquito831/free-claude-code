@@ -6,20 +6,20 @@ cover only the opt-in paths.
 
 import pytest
 
-from free_claude_code.config.websearch_catalog import WEBSEARCH_CATALOG
-from free_claude_code.websearch.adapters.brave import BraveWebSearchProvider
-from free_claude_code.websearch.adapters.ddgs import DdgsWebSearchProvider
-from free_claude_code.websearch.adapters.exa import ExaWebSearchProvider
-from free_claude_code.websearch.adapters.firecrawl import FirecrawlWebSearchProvider
-from free_claude_code.websearch.adapters.jina import JinaWebSearchProvider
-from free_claude_code.websearch.adapters.linkup import LinkupWebSearchProvider
-from free_claude_code.websearch.adapters.parallel import ParallelWebSearchProvider
-from free_claude_code.websearch.adapters.perplexity import PerplexityWebSearchProvider
-from free_claude_code.websearch.adapters.searchapi import SearchApiWebSearchProvider
-from free_claude_code.websearch.adapters.searxng import SearxngWebSearchProvider
-from free_claude_code.websearch.adapters.serpapi import SerpApiWebSearchProvider
-from free_claude_code.websearch.adapters.serper import SerperWebSearchProvider
-from free_claude_code.websearch.adapters.tavily import TavilyWebSearchProvider
+from my_claude_code.config.websearch_catalog import WEBSEARCH_CATALOG
+from my_claude_code.websearch.adapters.brave import BraveWebSearchProvider
+from my_claude_code.websearch.adapters.ddgs import DdgsWebSearchProvider
+from my_claude_code.websearch.adapters.exa import ExaWebSearchProvider
+from my_claude_code.websearch.adapters.firecrawl import FirecrawlWebSearchProvider
+from my_claude_code.websearch.adapters.jina import JinaWebSearchProvider
+from my_claude_code.websearch.adapters.linkup import LinkupWebSearchProvider
+from my_claude_code.websearch.adapters.parallel import ParallelWebSearchProvider
+from my_claude_code.websearch.adapters.perplexity import PerplexityWebSearchProvider
+from my_claude_code.websearch.adapters.searchapi import SearchApiWebSearchProvider
+from my_claude_code.websearch.adapters.searxng import SearxngWebSearchProvider
+from my_claude_code.websearch.adapters.serpapi import SerpApiWebSearchProvider
+from my_claude_code.websearch.adapters.serper import SerperWebSearchProvider
+from my_claude_code.websearch.adapters.tavily import TavilyWebSearchProvider
 from tests.websearch.support import (
     attach_mock_client,
     build_config,
@@ -783,7 +783,7 @@ class TestDdgsOptions:
                 captured.update(kwargs)
                 return []
 
-        monkeypatch.setattr("free_claude_code.websearch.adapters.ddgs.DDGS", FakeDDGS)
+        monkeypatch.setattr("my_claude_code.websearch.adapters.ddgs.DDGS", FakeDDGS)
         provider = DdgsWebSearchProvider(
             build_config(
                 api_keys=(),
@@ -817,7 +817,7 @@ class TestDdgsOptions:
                 captured.update(kwargs)
                 return []
 
-        monkeypatch.setattr("free_claude_code.websearch.adapters.ddgs.DDGS", FakeDDGS)
+        monkeypatch.setattr("my_claude_code.websearch.adapters.ddgs.DDGS", FakeDDGS)
         provider = DdgsWebSearchProvider(build_config(api_keys=(), rotation="single"))
         await provider.search("q", max_results=3)
         assert captured == {"max_results": 3}

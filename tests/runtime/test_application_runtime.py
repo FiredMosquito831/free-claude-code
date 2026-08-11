@@ -4,20 +4,20 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-import free_claude_code.messaging.session.persistence as persistence_module
-from free_claude_code.config.admin.persistence import PreparedAdminUpdate
-from free_claude_code.config.settings import Settings
-from free_claude_code.messaging.command_context import StopOutcome
-from free_claude_code.messaging.platforms.ports import (
+import my_claude_code.messaging.session.persistence as persistence_module
+from my_claude_code.config.admin.persistence import PreparedAdminUpdate
+from my_claude_code.config.settings import Settings
+from my_claude_code.messaging.command_context import StopOutcome
+from my_claude_code.messaging.platforms.ports import (
     InboundMessageHandler,
     MessagingPlatformComponents,
     MessagingStartupNotice,
 )
-from free_claude_code.messaging.session import SessionStore
-from free_claude_code.messaging.workflow import MessagingWorkflow
-from free_claude_code.providers.runtime import ProviderRuntime
-from free_claude_code.runtime.application import ApplicationRuntime
-from free_claude_code.runtime.provider_manager import ProviderRuntimeManager
+from my_claude_code.messaging.session import SessionStore
+from my_claude_code.messaging.workflow import MessagingWorkflow
+from my_claude_code.providers.runtime import ProviderRuntime
+from my_claude_code.runtime.application import ApplicationRuntime
+from my_claude_code.runtime.provider_manager import ProviderRuntimeManager
 
 
 class TrackingRuntime(ProviderRuntime):
@@ -234,11 +234,11 @@ async def test_provider_apply_constructs_before_commit_then_publishes(tmp_path) 
 
     with (
         patch(
-            "free_claude_code.runtime.application.prepare_admin_update",
+            "my_claude_code.runtime.application.prepare_admin_update",
             return_value=prepared,
         ),
         patch(
-            "free_claude_code.runtime.application.commit_prepared_admin_update",
+            "my_claude_code.runtime.application.commit_prepared_admin_update",
             side_effect=commit,
         ),
     ):
@@ -269,11 +269,11 @@ async def test_candidate_failure_never_commits_and_preserves_current(tmp_path) -
 
     with (
         patch(
-            "free_claude_code.runtime.application.prepare_admin_update",
+            "my_claude_code.runtime.application.prepare_admin_update",
             return_value=prepared,
         ),
         patch(
-            "free_claude_code.runtime.application.commit_prepared_admin_update"
+            "my_claude_code.runtime.application.commit_prepared_admin_update"
         ) as commit,
         pytest.raises(RuntimeError, match="candidate failed"),
     ):
@@ -299,11 +299,11 @@ async def test_persistence_failure_closes_candidate_and_preserves_current(
 
     with (
         patch(
-            "free_claude_code.runtime.application.prepare_admin_update",
+            "my_claude_code.runtime.application.prepare_admin_update",
             return_value=prepared,
         ),
         patch(
-            "free_claude_code.runtime.application.commit_prepared_admin_update",
+            "my_claude_code.runtime.application.commit_prepared_admin_update",
             side_effect=OSError("disk full"),
         ),
         pytest.raises(OSError, match="disk full"),
@@ -337,11 +337,11 @@ async def test_restart_required_apply_commits_without_hot_publication(tmp_path) 
 
     with (
         patch(
-            "free_claude_code.runtime.application.prepare_admin_update",
+            "my_claude_code.runtime.application.prepare_admin_update",
             return_value=prepared,
         ),
         patch(
-            "free_claude_code.runtime.application.commit_prepared_admin_update",
+            "my_claude_code.runtime.application.commit_prepared_admin_update",
             return_value=_applied_response(("PORT",)),
         ) as commit,
     ):
@@ -781,7 +781,7 @@ async def test_public_start_retries_transient_partial_messaging_cleanup() -> Non
         ),
         patch.object(manager, "start_model_list_refresh"),
         patch(
-            "free_claude_code.runtime.application.messaging_platform_factory.create_messaging_components",
+            "my_claude_code.runtime.application.messaging_platform_factory.create_messaging_components",
             return_value=components,
         ),
         patch.object(
@@ -843,7 +843,7 @@ async def test_public_start_retains_persistently_unclean_partial_messaging_graph
         ),
         patch.object(manager, "start_model_list_refresh"),
         patch(
-            "free_claude_code.runtime.application.messaging_platform_factory.create_messaging_components",
+            "my_claude_code.runtime.application.messaging_platform_factory.create_messaging_components",
             return_value=components,
         ),
         patch.object(
@@ -887,7 +887,7 @@ async def test_messaging_start_failure_is_nonfatal_after_complete_cleanup() -> N
 
     with (
         patch(
-            "free_claude_code.runtime.application.messaging_platform_factory.create_messaging_components",
+            "my_claude_code.runtime.application.messaging_platform_factory.create_messaging_components",
             side_effect=RuntimeError("messaging unavailable"),
         ),
         patch.object(runtime, "_cleanup_messaging", AsyncMock(return_value=True)),
@@ -906,7 +906,7 @@ async def test_messaging_start_failure_fails_closed_when_cleanup_is_incomplete()
 
     with (
         patch(
-            "free_claude_code.runtime.application.messaging_platform_factory.create_messaging_components",
+            "my_claude_code.runtime.application.messaging_platform_factory.create_messaging_components",
             side_effect=RuntimeError("messaging unavailable"),
         ),
         patch.object(runtime, "_cleanup_messaging", AsyncMock(return_value=False)),
@@ -932,7 +932,7 @@ async def test_composition_records_runtime_before_workspace_setup() -> None:
 
     with (
         patch(
-            "free_claude_code.runtime.application.os.makedirs",
+            "my_claude_code.runtime.application.os.makedirs",
             side_effect=OSError("workspace failed"),
         ),
         pytest.raises(OSError, match="workspace failed"),
@@ -977,12 +977,12 @@ async def test_composition_publishes_startup_notice_after_runtime_and_repair() -
 
     with (
         patch(
-            "free_claude_code.runtime.application.cli_managed.ManagedClaudeSessionManager",
+            "my_claude_code.runtime.application.cli_managed.ManagedClaudeSessionManager",
             return_value=cli_manager,
         ) as manager_constructor,
-        patch("free_claude_code.runtime.application.messaging_session.SessionStore"),
+        patch("my_claude_code.runtime.application.messaging_session.SessionStore"),
         patch(
-            "free_claude_code.runtime.application.messaging_workflow_module.MessagingWorkflow",
+            "my_claude_code.runtime.application.messaging_workflow_module.MessagingWorkflow",
             return_value=workflow,
         ),
     ):

@@ -1,6 +1,6 @@
 """Neutral Anthropic continuation and tool-repair helpers."""
 
-from free_claude_code.core.anthropic.streaming import (
+from my_claude_code.core.anthropic.streaming import (
     ToolSchema,
     accept_tool_json_repair,
     continuation_suffix,

@@ -1,0 +1,3625 @@
+:root {
+  color-scheme: dark;
+  
+  /* Color Palette */
+  --bg: #090a0f;
+  --panel: #11131c;
+  --panel-strong: #171b26;
+  --card: #151822;
+  --card-hover: #1e2230;
+  --input: #0a0b10;
+  --input-focus: #0f1118;
+  --text: #f3f4f6;
+  --text-strong: #ffffff;
+  --muted: #9ca3af;
+  --line: rgba(255, 255, 255, 0.06);
+  --line-strong: rgba(255, 255, 255, 0.12);
+  
+  /* Brand and Accent Colors */
+  --accent: #10b981;
+  --accent-dark: #059669;
+  --accent-muted: rgba(16, 185, 129, 0.08);
+  --accent-border: rgba(16, 185, 129, 0.3);
+  
+  /* Status Colors */
+  --ok: #10b981;
+  --ok-bg: rgba(16, 185, 129, 0.08);
+  --ok-border: rgba(16, 185, 129, 0.25);
+  
+  --warn: #f59e0b;
+  --warn-bg: rgba(245, 158, 11, 0.08);
+  --warn-border: rgba(245, 158, 11, 0.25);
+  
+  --error: #ef4444;
+  --error-bg: rgba(239, 68, 68, 0.08);
+  --error-border: rgba(239, 68, 68, 0.25);
+  
+  --neutral: #6b7280;
+  --neutral-bg: rgba(107, 114, 128, 0.08);
+  --neutral-border: rgba(107, 114, 128, 0.25);
+  
+  --info: #3b82f6;
+
+  /* Reasoning panes reuse the existing info blue rather than introducing a
+     hue; the palette stays exactly as wide as it already was. */
+  --reasoning: var(--info);
+  --reasoning-bg: rgba(59, 130, 246, 0.06);
+  --reasoning-border: rgba(59, 130, 246, 0.28);
+
+  /* Box Shadow & Glows */
+  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.2);
+  --shadow: 0 12px 34px rgba(0, 0, 0, 0.5);
+  --glow-accent: 0 0 12px rgba(16, 185, 129, 0.15);
+  
+  /* Borders and Radius */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-full: 9999px;
+  --dropdown-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%239ca3af' stroke-width='2.5'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' d='M19.5 8.25l-7.5 7.5-7.5-7.5'/%3E%3C/svg%3E");
+  
+  /* Typography */
+  --font-sans: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  /* Model refs are paths, not prose. Setting them in mono makes the
+     provider prefix scannable and stops a long slug reading as a mistake. */
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
+    "Liberation Mono", monospace;
+  
+  /* Transitions */
+  --transition-fast: 0.15s ease;
+  --transition-normal: 0.22s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans);
+  letter-spacing: -0.01em;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Custom Scrollbars */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: var(--bg);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--panel-strong);
+  border-radius: var(--radius-full);
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--muted);
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+
+/* App Shell Layout */
+.app-shell {
+  display: grid;
+  grid-template-columns: 260px minmax(0, 1fr);
+  min-height: 100vh;
+  padding-bottom: 96px; /* Space for action bar */
+}
+
+/* Sidebar Navigation */
+.sidebar {
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  border-right: 1px solid var(--line);
+  background: var(--bg);
+  padding: 24px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 32px;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.brand-mark {
+  display: grid;
+  width: 40px;
+  height: 40px;
+  place-items: center;
+  border-radius: var(--radius-md);
+  background: linear-gradient(135deg, var(--accent), var(--accent-dark));
+  color: #ffffff;
+  font-weight: 800;
+  font-size: 15px;
+  box-shadow: var(--glow-accent);
+}
+
+.brand h1 {
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1.2;
+  color: var(--text-strong);
+  margin: 0;
+}
+
+.brand p {
+  color: var(--muted);
+  font-size: 12px;
+  margin: 0;
+}
+
+.section-nav {
+  display: grid;
+  gap: 6px;
+}
+
+.nav-link {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-height: 40px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--muted);
+  padding: 10px 14px;
+  text-align: left;
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 14px;
+  transition: all var(--transition-fast);
+}
+
+.nav-link:hover {
+  background: var(--panel-strong);
+  color: var(--text-strong);
+}
+
+.nav-link.active {
+  background: var(--accent-muted);
+  border-color: var(--accent-border);
+  color: var(--accent);
+  box-shadow: var(--shadow-sm);
+}
+
+/* Accessible focus outlines */
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+.nav-link:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* Main Content Area */
+.main {
+  min-width: 0;
+  padding: 40px 48px;
+}
+
+.topbar {
+  margin-bottom: 32px;
+}
+
+.topbar h2 {
+  font-size: 30px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  color: var(--text-strong);
+  margin: 0;
+}
+
+/* Provider Strip & Panels */
+.provider-strip,
+.settings-section {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--panel);
+  box-shadow: var(--shadow);
+  margin-bottom: 24px;
+  transition: border-color var(--transition-normal);
+}
+
+.provider-strip {
+  padding: 24px;
+}
+
+.strip-header,
+.section-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+.strip-header h3,
+.section-heading h3 {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text-strong);
+  margin: 0;
+}
+
+.section-heading p {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.4;
+  margin: 4px 0 0 0;
+}
+
+/* Provider Status Cards */
+.provider-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 16px;
+}
+
+.provider-card {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 140px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  padding: 16px;
+  background: var(--card);
+  transition: all var(--transition-normal);
+}
+
+.provider-card:hover {
+  border-color: var(--line-strong);
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-sm);
+  background: var(--card-hover);
+}
+
+.provider-title {
+  display: flex;
+  align-items: center;
+  /* flex-wrap, not nowrap: some display names are long ("Alibaba Coding
+     Plan (International)") and a flex item's default min-content sizing
+     would otherwise refuse to shrink below its longest word, pushing the
+     status pill out of the card instead of wrapping the name under it. */
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 8px 12px;
+}
+
+.provider-title strong {
+  min-width: 0;
+  overflow-wrap: break-word;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-strong);
+}
+
+/* Modern status pills with color indicators */
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  border: 1px solid var(--neutral-border);
+  border-radius: var(--radius-full);
+  padding: 2px 10px;
+  background: var(--neutral-bg);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  white-space: nowrap;
+}
+
+.status-pill.ok {
+  color: var(--ok);
+  background: var(--ok-bg);
+  border-color: var(--ok-border);
+}
+
+.status-pill.warn {
+  color: var(--warn);
+  background: var(--warn-bg);
+  border-color: var(--warn-border);
+}
+
+.status-pill.error {
+  color: var(--error);
+  background: var(--error-bg);
+  border-color: var(--error-border);
+}
+
+.provider-meta {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+  word-break: break-all;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+/* Providers tab: one flat, searchable grid of provider cards --------------
+   35 providers, each of which is a small form (a key pool with per-key
+   health, a rotation policy, proxy, base URL). The face carries the summary;
+   Configure expands the card in place to hold the form. No category
+   grouping and nothing collapsed by default beyond a card's own body --
+   grouping hid the page behind headings and made finding a provider harder. */
+.pv-wrap {
+  display: flex;
+  flex-direction: column;
+}
+
+.pv-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  padding-bottom: 16px;
+  margin-bottom: 4px;
+  border-bottom: 1px solid var(--line);
+}
+
+.pv-search {
+  position: relative;
+  flex: 1 1 300px;
+  min-width: 200px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.pv-search-label {
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--muted);
+}
+
+.pv-search input[type="search"] {
+  width: 100%;
+  min-height: 38px;
+  padding: 0 12px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--line-strong);
+  background: var(--input);
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  transition: border-color var(--transition-fast), background var(--transition-fast);
+}
+
+.pv-search input[type="search"]::placeholder {
+  color: var(--muted);
+}
+
+.pv-search input[type="search"]:focus {
+  outline: none;
+  border-color: var(--accent-border);
+  background: var(--input-focus);
+  box-shadow: var(--glow-accent);
+}
+
+.pv-count {
+  font-size: 12.5px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.pv-configured-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--muted);
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+
+.pv-configured-toggle:hover {
+  color: var(--text);
+}
+
+/* Same geometry as the provider grid this page has always used. */
+.pv-grid {
+  align-items: start;
+  padding-top: 18px;
+}
+
+.pv-card {
+  gap: 14px;
+  justify-content: flex-start;
+  min-height: 0;
+}
+
+.pv-card[hidden] {
+  display: none;
+}
+
+/* An open card takes the whole row so the key pool has room to breathe. */
+.pv-card.pv-open {
+  grid-column: 1 / -1;
+  background: var(--panel-strong);
+  border-color: var(--line-strong);
+  box-shadow: var(--shadow-sm);
+  transform: none;
+}
+
+.pv-card .provider-meta {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.pv-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: auto;
+}
+
+.pv-actions .test-button,
+.pv-actions .pv-configure {
+  min-height: 32px;
+  font-size: 12.5px;
+  padding: 0 12px;
+}
+
+.pv-card-body {
+  display: none;
+  flex-direction: column;
+  gap: 18px;
+  padding-top: 16px;
+  border-top: 1px dashed var(--line);
+}
+
+.pv-card.pv-open .pv-card-body {
+  display: flex;
+}
+
+/* Inside an open card the summary line is redundant with the key manager. */
+.pv-card.pv-open .provider-meta {
+  display: none;
+}
+
+.pv-empty {
+  display: none;
+  margin: 0;
+  padding: 40px 8px;
+  text-align: center;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.pv-wrap.pv-no-results .pv-empty {
+  display: block;
+}
+
+.pv-other {
+  margin-top: 26px;
+  padding-top: 20px;
+  border-top: 1px solid var(--line);
+}
+
+.pv-other-heading {
+  margin: 0 0 14px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--muted);
+}
+
+.pv-configure:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+@media (max-width: 720px) {
+  .pv-toolbar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}
+
+/* Button & Form Controls styling */
+.test-button,
+.ghost-button,
+.secondary-button,
+.primary-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 36px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--line-strong);
+  padding: 6px 14px;
+  font-weight: 600;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  text-decoration: none;
+}
+
+.test-button {
+  background: var(--panel-strong);
+  color: var(--text);
+  border-color: var(--line);
+  margin-top: auto;
+  align-self: flex-start;
+}
+
+.test-button:hover:not(:disabled) {
+  background: var(--card-hover);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.test-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.secondary-button {
+  background: transparent;
+  color: var(--text);
+  border-color: var(--line-strong);
+}
+
+.secondary-button:hover:not(:disabled) {
+  background: var(--panel-strong);
+  border-color: var(--text);
+}
+
+.primary-button {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #06100b;
+}
+
+.primary-button:hover:not(:disabled) {
+  background: var(--accent-dark);
+}
+
+.primary-button:disabled {
+  cursor: not-allowed;
+  border-color: var(--line);
+  background: var(--panel-strong);
+  color: var(--muted);
+}
+
+.oauth-login-control {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 12px;
+  background: var(--accent-muted);
+  border: 1px solid var(--accent-border);
+  border-radius: var(--radius-md);
+}
+
+.ghost-button {
+  background: transparent;
+  color: var(--muted);
+  border-color: transparent;
+}
+
+.ghost-button:hover:not(:disabled) {
+  color: var(--text-strong);
+  background: var(--panel-strong);
+}
+
+/* Credential key manager */
+.ws-key-manager {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.key-manager-toggle {
+  align-self: flex-start;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  padding: 6px 12px;
+}
+
+.key-manager-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  background: var(--panel-strong);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+}
+
+.key-manager-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.key-manager-empty,
+.key-manager-note {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.key-manager-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.key-manager-key {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.85rem;
+  color: var(--text-strong);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.key-manager-remove {
+  flex-shrink: 0;
+  padding: 2px 8px;
+  font-size: 0.8rem;
+}
+
+.key-manager-remove:hover:not(:disabled) {
+  color: var(--error, #f87171);
+}
+
+.key-manager-add {
+  display: flex;
+  gap: 8px;
+}
+
+.key-manager-add input {
+  flex: 1;
+  min-width: 0;
+}
+
+.key-manager-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.key-manager-rotation {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.key-manager-rotation select {
+  max-width: 150px;
+}
+
+.key-health-badge {
+  flex-shrink: 0;
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  color: var(--muted);
+}
+
+.key-health-healthy {
+  color: var(--ok, #34d399);
+  border-color: var(--ok, #34d399);
+}
+
+.key-health-cooldown {
+  color: var(--warn, #fbbf24);
+  border-color: var(--warn, #fbbf24);
+}
+
+.key-health-circuit-open,
+.key-health-locked-out {
+  color: var(--error, #f87171);
+  border-color: var(--error, #f87171);
+}
+
+.key-health-half-open {
+  color: var(--accent, #818cf8);
+  border-color: var(--accent, #818cf8);
+}
+
+/* Forms layout */
+.form-sections {
+  display: grid;
+  gap: 24px;
+}
+
+.settings-section {
+  padding: 24px;
+  scroll-margin-top: 24px;
+}
+
+.section-heading {
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 16px;
+  margin-bottom: 24px;
+}
+
+.field-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 20px;
+}
+
+/* Field Grouping */
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-content: start;
+}
+
+.field label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-strong);
+}
+
+.field-source {
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  background: var(--accent-muted);
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+}
+
+/* Form Inputs, Select, Textareas */
+.field input[type="text"],
+.field input[type="number"],
+.field input[type="password"],
+.field select,
+.field textarea {
+  width: 100%;
+  min-height: 40px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-md);
+  background: var(--input);
+  color: var(--text-strong);
+  padding: 10px 14px;
+  font-size: 14px;
+  transition: all var(--transition-fast);
+}
+
+/* Custom Dropdown Styling for Select Elements */
+.field select {
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  background-image: var(--dropdown-chevron);
+  background-repeat: no-repeat;
+  background-position: right 14px center;
+  background-size: 14px;
+  padding-right: 36px;
+}
+
+.model-combobox {
+  position: relative;
+  width: 100%;
+}
+
+.model-combobox.open {
+  z-index: 110;
+}
+
+.field .model-combobox input[type="text"] {
+  padding-right: 44px;
+}
+
+.model-combobox-toggle {
+  position: absolute;
+  top: 0;
+  right: 0;
+  display: grid;
+  width: 42px;
+  height: 40px;
+  place-items: center;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.model-combobox-toggle::before {
+  width: 14px;
+  height: 14px;
+  background-image: var(--dropdown-chevron);
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: 14px;
+  content: "";
+  transition: transform var(--transition-fast);
+}
+
+.model-combobox-toggle[aria-expanded="true"]::before {
+  transform: rotate(180deg);
+}
+
+.model-combobox-toggle:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.model-combobox-list {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  left: 0;
+  z-index: 120;
+  max-height: 280px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-md);
+  background: var(--panel-strong);
+  box-shadow: var(--shadow);
+  padding: 6px;
+}
+
+.model-combobox-list[hidden] {
+  display: none;
+}
+
+.model-combobox-option {
+  border-radius: var(--radius-sm);
+  padding: 9px 10px;
+  color: var(--text);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+
+.model-combobox-option:hover,
+.model-combobox-option.active {
+  background: var(--accent-muted);
+  color: var(--accent);
+}
+
+.model-combobox-empty {
+  padding: 10px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.field input:focus,
+.field select:focus,
+.field textarea:focus {
+  border-color: var(--accent);
+  background: var(--input-focus);
+  box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.15);
+  outline: none;
+}
+
+/* Checkbox specific layout styling */
+.field input[type="checkbox"] {
+  align-self: flex-start;
+  width: 20px;
+  height: 20px;
+  accent-color: var(--accent);
+  cursor: pointer;
+  margin: 4px 0;
+}
+
+.field textarea {
+  min-height: 100px;
+  resize: vertical;
+  line-height: 1.5;
+}
+
+.field input:disabled,
+.field select:disabled,
+.field textarea:disabled {
+  background: rgba(255, 255, 255, 0.02);
+  border-color: var(--line);
+  color: var(--muted);
+  cursor: not-allowed;
+}
+
+.field-description {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+  margin-top: 2px;
+}
+
+/* Model fallback chain editor */
+.model-chain-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.model-chain-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.model-chain-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.model-chain-row .model-combobox {
+  flex: 1;
+  min-width: 0;
+}
+
+.model-chain-index {
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: var(--radius-full);
+  background: var(--accent-muted);
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.model-chain-move,
+.model-chain-remove {
+  flex: 0 0 auto;
+  min-height: 40px;
+  padding: 4px 10px;
+}
+
+.model-chain-move {
+  width: 36px;
+  padding: 4px;
+}
+
+.model-chain-remove:hover:not(:disabled) {
+  color: var(--error, #f87171);
+}
+
+.model-chain-add {
+  align-self: flex-start;
+}
+
+/* ----------------------------------------------------------- Model routing --
+   A tier's primary model and its fallbacks are one path, so they live in one
+   card. The rail down the left is the signature: markers sit on it, and its
+   length is the depth of that tier's safety net -- a tier with no fallbacks
+   shows a stub, a tier with three shows a long descent. */
+
+.route-layout {
+  display: grid;
+  gap: 20px;
+}
+
+.route-rule {
+  margin: 0;
+  max-width: 68ch;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.route-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+  gap: 16px;
+}
+
+.route-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 18px 20px 20px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--card);
+  transition: border-color var(--transition-fast);
+}
+
+.route-card:focus-within {
+  border-color: var(--line-strong);
+}
+
+.route-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.route-tier {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-strong);
+}
+
+/* Replaces four near-identical "Select None to use the Default Model for X"
+   sentences with the state they were all describing. */
+.route-state {
+  flex: 0 0 auto;
+  padding: 3px 9px;
+  border: 1px solid var(--accent-border);
+  border-radius: var(--radius-full);
+  background: var(--accent-muted);
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
+.route-state.is-inherited {
+  border-color: var(--neutral-border);
+  background: var(--neutral-bg);
+  color: var(--muted);
+}
+
+.route-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.route-rail {
+  position: relative;
+  gap: 10px;
+}
+
+/* The rail is drawn per node rather than as one absolute line down the card:
+   each node carries its own segment from its marker's centre into the gap
+   below, so the line meets every marker exactly whatever height a row ends up
+   being. A single line with a fixed offset only lands correctly while every
+   row is the same height, which is not a guarantee worth depending on. */
+.route-rail .route-node,
+.route-rail .model-chain-row,
+.route-rail .model-chain-add {
+  position: relative;
+}
+
+.route-rail .route-node::before,
+.route-rail .model-chain-row::before,
+.route-rail .model-chain-add::after {
+  content: "";
+  position: absolute;
+  left: 12px;
+  width: 2px;
+  border-radius: 1px;
+  background: var(--line-strong);
+  top: -10px;
+  bottom: -10px;
+}
+
+/* The path begins at the primary model and ends at the add affordance. */
+.route-rail .route-node.is-primary::before {
+  top: 50%;
+  background: linear-gradient(to bottom, var(--accent-border), var(--line-strong));
+}
+
+.route-rail .model-chain-add::after {
+  bottom: 50%;
+}
+
+/* A tier with no fallbacks has only the primary and the add node, so the two
+   halves meet and the rail reads as the stub it is. */
+
+.route-node {
+  position: relative;
+  display: grid;
+  grid-template-columns: 26px minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  min-height: 40px;
+}
+
+.route-marker {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: var(--radius-full);
+  background: var(--panel-strong);
+  border: 1px solid var(--line-strong);
+}
+
+.route-node.is-primary .route-marker {
+  border-color: var(--accent-border);
+}
+
+.route-node.is-primary .route-marker::after {
+  content: "";
+  width: 8px;
+  height: 8px;
+  border-radius: var(--radius-full);
+  background: var(--accent);
+  box-shadow: var(--glow-accent);
+}
+
+/* Chain rows become rail nodes: same marker column, same gap, so the numbers
+   line up under the primary dot instead of floating beside it. */
+.route-rail .model-chain-editor {
+  gap: 10px;
+}
+
+.route-rail .model-chain-rows {
+  gap: 10px;
+}
+
+.route-rail .model-chain-row {
+  position: relative;
+  display: grid;
+  grid-template-columns: 26px minmax(0, 1fr) auto auto auto;
+  align-items: center;
+  gap: 6px;
+  min-height: 40px;
+}
+
+.route-rail .model-chain-index {
+  position: relative;
+  z-index: 1;
+  width: 26px;
+  height: 26px;
+  border: 1px solid var(--line-strong);
+  background: var(--panel-strong);
+  color: var(--text);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.route-rail .model-chain-move,
+.route-rail .model-chain-remove {
+  width: 30px;
+  min-height: 30px;
+  height: 30px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius-sm);
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1;
+}
+
+.route-rail .model-chain-remove {
+  font-size: 18px;
+}
+
+.route-rail .model-chain-move:disabled {
+  opacity: 0.25;
+}
+
+/* The rail terminates in the affordance rather than trailing past it. */
+.route-rail .model-chain-add {
+  display: grid;
+  grid-template-columns: 26px auto;
+  align-items: center;
+  gap: 12px;
+  min-height: 40px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.route-rail .model-chain-add::before {
+  content: "+";
+  position: relative;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: var(--radius-full);
+  border: 1px dashed var(--line-strong);
+  background: var(--panel);
+  color: var(--muted);
+  font-size: 14px;
+  transition: color var(--transition-fast), border-color var(--transition-fast);
+}
+
+.route-rail .model-chain-add:hover {
+  color: var(--text-strong);
+  background: none;
+}
+
+.route-rail .model-chain-add:hover::before {
+  color: var(--accent);
+  border-color: var(--accent-border);
+}
+
+/* Model refs read as identifiers, so they are set in mono here. */
+.route-card .model-combobox input[type="text"],
+.route-card .model-combobox-option {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  letter-spacing: 0;
+}
+
+/* The vision adapter is not a tier: it fires on what a request contains, not
+   on which model was asked for, so it does not get a rail. */
+.route-vision {
+  border-style: dashed;
+  background: var(--panel);
+}
+
+.route-vision .route-vision-control {
+  max-width: 460px;
+}
+
+.route-fallback-enter {
+  animation: route-fallback-in var(--transition-normal);
+}
+
+@keyframes route-fallback-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+
+@media (max-width: 720px) {
+  .route-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .route-card {
+    padding: 16px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .route-fallback-enter {
+    animation: none;
+  }
+}
+
+/* Show/Hide Advanced fields */
+.field.advanced-field {
+  display: none;
+}
+
+.settings-section.show-advanced .advanced-field {
+  display: flex;
+}
+
+.advanced-toggle {
+  margin-top: 20px;
+  font-size: 12px;
+  border: 1px solid var(--line-strong);
+}
+
+/* Fixed Bottom Action Bar */
+.action-bar {
+  position: fixed;
+  right: 0;
+  bottom: 0;
+  left: 260px;
+  z-index: 100;
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(200px, 1fr) auto;
+  gap: 20px;
+  align-items: center;
+  min-height: 80px;
+  border-top: 1px solid var(--line);
+  background: rgba(9, 10, 15, 0.82);
+  padding: 16px 40px;
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  box-shadow: 0 -8px 30px rgba(0, 0, 0, 0.3);
+}
+
+.action-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.action-meta strong {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-strong);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.action-meta span {
+  color: var(--muted);
+  font-size: 11px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.message-area {
+  min-width: 0;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.4;
+}
+
+.message-area.error {
+  color: var(--error);
+  font-weight: 600;
+}
+
+.message-area.ok {
+  color: var(--ok);
+  font-weight: 600;
+}
+
+.message-area.warn {
+  color: var(--warn);
+  font-weight: 600;
+}
+
+.action-buttons {
+  display: flex;
+  gap: 12px;
+}
+
+.action-buttons button {
+  min-width: 100px;
+}
+
+/* Web Search provider cards: key manager + analytics */
+.card-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+}
+
+.ws-key-manager {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.ws-key-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ws-key-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  justify-content: space-between;
+}
+
+.ws-key-label {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--text-strong);
+}
+
+.ws-key-empty {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.ws-key-add {
+  display: flex;
+  gap: 8px;
+}
+
+.ws-key-add input {
+  flex: 1;
+  min-width: 0;
+  padding: 8px 12px;
+  background: var(--input);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+}
+
+.ws-key-add input:focus {
+  outline: none;
+  border-color: var(--accent-border);
+  background: var(--input-focus);
+}
+
+.ws-advanced {
+  border-top: 1px solid var(--line);
+  padding-top: 12px;
+}
+
+.ws-advanced summary {
+  cursor: pointer;
+  user-select: none;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.ws-advanced summary:hover {
+  color: var(--text);
+}
+
+.ws-advanced[open] summary {
+  margin-bottom: 12px;
+}
+
+.ws-advanced .field {
+  margin: 0 0 12px 8px;
+}
+
+/* Advanced option fields live outside .settings-section.show-advanced, so
+   undo the generic grid's advanced-field hiding inside the card group. */
+.ws-advanced .field.advanced-field {
+  display: flex;
+}
+
+.period-toggle {
+  display: flex;
+  gap: 8px;
+}
+
+.period-button.active {
+  border-color: var(--accent-border);
+  color: var(--accent);
+  background: var(--accent-muted);
+}
+
+.analytics-body {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  color: var(--muted);
+}
+
+.route-summary,
+.observability-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  margin-bottom: 20px;
+  padding: 18px 20px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-lg);
+  background:
+    radial-gradient(circle at top right, var(--accent-muted), transparent 45%),
+    var(--panel);
+  box-shadow: var(--shadow-sm);
+}
+
+.route-summary-main,
+.observability-heading > div:first-child {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
+
+.route-summary-main strong,
+.observability-heading h3 {
+  margin: 0;
+  color: var(--text-strong);
+  font-size: 18px;
+}
+
+.route-summary-main span,
+.observability-heading p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+/* Reality diverging from configuration is the one fact on this page that
+   should not read as neutral status text -- it means the line above it is
+   describing a request that predates the current setup. */
+.route-summary-main .route-summary-observed.route-summary-observed-drift {
+  color: var(--warn);
+}
+
+.route-summary-main .route-summary-observed {
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.eyebrow {
+  color: var(--accent) !important;
+  font-size: 11px !important;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.observability-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.toggle-control {
+  display: inline-flex;
+  flex-direction: row !important;
+  align-items: center;
+  gap: 7px !important;
+  min-height: 34px;
+  padding: 0 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-md);
+  background: var(--input);
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.toggle-control input {
+  accent-color: var(--accent);
+}
+
+.last-updated {
+  color: var(--muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.provider-card.effective-provider {
+  border-color: var(--accent-border);
+  background:
+    linear-gradient(180deg, var(--accent-muted), transparent 70%),
+    var(--card);
+  box-shadow: var(--glow-accent);
+}
+
+/* ------------------------------------------------- Web search: active route --
+   Fourteen providers compete for equal visual weight below. The fix is to
+   spend boldness in exactly one place: the route this install is actually
+   using, right now, at the top of the page. #webSearchRouteSummary reuses
+   the shared .route-summary card chrome (border/background/shadow) but grows
+   into a hero -- provider name set large, route path in mono, state chip
+   pinned above it. Every other provider card recedes a step instead (see
+   #webSearchGrid .provider-card:not(.effective-provider) below), so the
+   effective one reads first without hiding the rest. */
+
+#webSearchRouteSummary.route-summary {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+  padding: 22px 24px;
+}
+
+.ws-hero-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+}
+
+.ws-hero-provider {
+  margin: 0;
+  color: var(--text-strong);
+  font-size: 28px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  line-height: 1.15;
+}
+
+.ws-hero-path {
+  font-family: var(--font-mono);
+  font-size: 13px;
+}
+
+.ws-hero-path-label,
+.ws-hero-path-arrow,
+.ws-hero-path-fallback {
+  color: var(--muted);
+}
+
+/* The primary hop is the one actually taking requests; fallbacks after it
+   are a safety net, not the answer, so only the first hop is set at full
+   contrast weight. */
+.ws-hero-path-primary {
+  color: var(--text-strong);
+  font-weight: 600;
+}
+
+.provider-title-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+/* Names what the accent wash on .effective-provider means, instead of
+   leaving a reader to infer it from a border color alone. */
+.ws-active-badge {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border: 1px solid var(--accent-border);
+  border-radius: var(--radius-full);
+  background: var(--accent-muted);
+  color: var(--accent);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+/* An opacity dim was the first pass here and it was the safe move, not the
+   specific one: it fades the status pill along with everything else, which
+   is exactly the signal worth keeping at full strength on a card you might
+   be about to switch to (missing key vs. configured, still legible without
+   guessing through a filter). What actually distinguishes "the route this
+   install uses" from "a provider it could use" is presence, not brightness:
+   the effective card is the only one that gets to exist as a raised surface
+   (var(--card), border, glow). The rest sit flush with var(--panel), the
+   section's own background -- carried by nothing but their 1px border,
+   the way an inactive tab sits flush with its own bar. Content stays at
+   full opacity throughout, so this reads as "not selected", not "dimmed". */
+#webSearchGrid .provider-card:not(.effective-provider) {
+  background: var(--panel);
+}
+
+/* Provider identifiers (env var names, key labels) read as identifiers, not
+   prose, so they're set in the shared mono stack here. */
+#webSearchGrid .provider-meta {
+  font-family: var(--font-mono);
+}
+
+@media (max-width: 560px) {
+  .ws-hero-provider {
+    font-size: 22px;
+  }
+}
+
+.analytics-summary {
+  font-weight: 600;
+  color: var(--text);
+}
+
+.analytics-warning {
+  padding: 10px 12px;
+  border: 1px solid var(--warn-border);
+  border-radius: var(--radius-md);
+  background: var(--warn-bg);
+  color: var(--warn);
+  font-size: 13px;
+}
+
+.analytics-panel {
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--panel);
+}
+
+.analytics-block h4 {
+  margin: 0 0 8px;
+  font-size: 14px;
+  color: var(--text-strong);
+}
+
+.analytics-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.analytics-table th,
+.analytics-table td {
+  text-align: left;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--line);
+}
+
+.analytics-table th {
+  color: var(--muted);
+  font-weight: 600;
+  text-transform: uppercase;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+}
+
+.analytics-table td {
+  color: var(--text);
+}
+
+.analytics-table .analytics-empty {
+  color: var(--muted);
+}
+
+.analytics-footnote {
+  margin: 0;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.table-scroll {
+  width: 100%;
+  overflow-x: auto;
+  border-radius: var(--radius-md);
+}
+
+.chart-heading,
+.chart-legend {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.chart-legend {
+  justify-content: flex-end;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.chart-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.legend-swatch {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+}
+
+/* These must track the chart series colours in drawBarChart(). */
+.legend-swatch.requests {
+  background: var(--accent);
+}
+
+.legend-swatch.errors {
+  background: var(--error);
+}
+
+/* Tablet Layout Optimization */
+@media (max-width: 900px) {
+  .app-shell {
+    display: flex;
+    flex-direction: column;
+    padding-bottom: 180px; /* More room for stacked action bar */
+  }
+
+  .sidebar {
+    position: relative;
+    height: auto;
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+    padding: 20px;
+    gap: 20px;
+  }
+
+  .section-nav {
+    grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  }
+
+  .main {
+    padding: 24px 20px;
+  }
+
+  .action-bar {
+    left: 0;
+    grid-template-columns: 1fr;
+    gap: 12px;
+    padding: 16px 20px;
+    min-height: auto;
+    background: rgba(9, 10, 15, 0.95);
+  }
+
+  .action-meta {
+    flex-direction: row;
+    justify-content: space-between;
+    align-items: center;
+  }
+
+  .action-meta span {
+    text-align: right;
+  }
+
+  .action-buttons {
+    width: 100%;
+  }
+
+  .action-buttons button {
+    flex: 1;
+    min-height: 44px; /* Better touch target on mobile */
+  }
+
+  .route-summary,
+  .observability-heading {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .observability-actions {
+    justify-content: flex-start;
+  }
+}
+
+/* Mobile Layout Optimization */
+@media (max-width: 600px) {
+  .brand {
+    justify-content: center;
+    text-align: center;
+    flex-direction: column;
+  }
+  
+  .brand-mark {
+    width: 48px;
+    height: 48px;
+  }
+
+  .section-nav {
+    grid-template-columns: 1fr;
+  }
+  
+  .topbar {
+    text-align: center;
+  }
+
+  .topbar h2 {
+    font-size: 24px;
+  }
+
+  .provider-grid {
+    grid-template-columns: 1fr;
+  }
+  
+  .field-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .action-meta {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 2px;
+  }
+
+  .action-meta span {
+    text-align: left;
+  }
+}
+
+/* Requests / analytics view */
+.requests-toolbar {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+
+.requests-toolbar label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--muted, #888);
+}
+
+.requests-toolbar input,
+.requests-toolbar select {
+  padding: 6px 8px;
+  border: 1px solid var(--border, #333);
+  border-radius: 6px;
+  background: var(--panel, #1b1b1b);
+  color: inherit;
+}
+
+.requests-indicator {
+  font-size: 12px;
+  color: var(--muted, #888);
+  margin-left: auto;
+}
+
+.secondary-button.danger {
+  border-color: #a33;
+  color: #e05d5d;
+}
+
+.requests-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.requests-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px;
+  border: 1px solid var(--border, #333);
+  border-radius: 8px;
+  background: var(--panel, #1b1b1b);
+}
+
+.requests-card strong {
+  font-size: 18px;
+}
+
+.requests-card span {
+  font-size: 12px;
+  color: var(--muted, #888);
+}
+
+.requests-card small {
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.35;
+}
+
+/* Explains a plateau where the reader would otherwise see a broken counter:
+   the stored rows are capped, and uptime gaps are not idle time. */
+.requests-retention {
+  margin: -6px 0 16px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--muted, #888);
+}
+
+.requests-lifetime {
+  margin-bottom: 20px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border, #333);
+}
+
+.requests-lifetime .chart-heading {
+  margin-bottom: 4px;
+}
+
+.requests-lifetime .requests-retention {
+  margin: 0 0 14px;
+  max-width: 70ch;
+}
+
+.requests-charts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.requests-chart h4 {
+  margin: 0 0 8px;
+  font-size: 13px;
+  color: var(--muted, #888);
+}
+
+.requests-chart canvas {
+  display: block;
+  width: 100%;
+  /* Pinned in CSS on purpose: the script resizes the bitmap for the display's
+     pixel density, and without this the element would grow with it. */
+  height: 180px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--card);
+}
+
+.requests-breakdowns {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(260px, 1fr);
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+#reqProviderBreakdown,
+#reqTopErrors {
+  overflow-x: auto;
+}
+
+.requests-table {
+  width: 100%;
+  min-width: 920px;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.requests-table th,
+.requests-table td {
+  text-align: left;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border, #333);
+}
+
+.req-row:hover {
+  background: var(--panel, #1b1b1b);
+}
+
+.req-detail-button {
+  min-height: 30px;
+  padding: 4px 10px;
+}
+
+.req-status-error td:nth-child(5) {
+  color: #e05d5d;
+}
+
+.req-status-cancelled td:nth-child(5) {
+  color: #d8a23f;
+}
+
+.requests-pager {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.requests-modal {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+
+.requests-modal[hidden] {
+  display: none;
+}
+
+.requests-modal-card {
+  width: min(980px, 94vw);
+  max-height: 88vh;
+  overflow: auto;
+  padding: 20px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-lg);
+  background: var(--panel);
+  box-shadow: var(--shadow);
+}
+
+.requests-modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.requests-detail-meta {
+  display: grid;
+  grid-template-columns: 140px 1fr;
+  gap: 4px 12px;
+  font-size: 13px;
+}
+
+.requests-detail-meta dt {
+  color: var(--muted, #888);
+}
+
+.requests-detail-meta dd {
+  margin: 0;
+  word-break: break-all;
+}
+
+.requests-detail-body {
+  max-height: 260px;
+  overflow: auto;
+  margin: 0;
+  padding: 12px;
+  border-radius: var(--radius-sm);
+  background: var(--input);
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+/* ---- Turn transcript -----------------------------------------------------
+   An assistant turn is three different kinds of speech: the model reasons,
+   it acts, then it answers. Each pane is keyed by a coloured rule so the
+   kind is readable before a single word is. */
+
+.transcript {
+  display: grid;
+  gap: 12px;
+  margin-top: 18px;
+}
+
+.turn-pane {
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--neutral);
+  border-radius: var(--radius-md);
+  background: var(--card);
+}
+
+.turn-pane[data-kind="thinking"] {
+  border-left-color: var(--reasoning);
+  background: var(--reasoning-bg);
+}
+
+.turn-pane[data-kind="tools"] {
+  border-left-color: var(--warn);
+}
+
+.turn-pane[data-kind="response"] {
+  border-left-color: var(--accent);
+}
+
+.turn-pane-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.turn-pane-head h4 {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-strong);
+}
+
+.turn-pane[data-kind="thinking"] .turn-pane-head h4 {
+  color: var(--reasoning);
+}
+
+.turn-pane-meta {
+  font-size: 11px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Reasoning is long and usually noise, so it opens on demand. */
+details.turn-pane > summary {
+  cursor: pointer;
+  list-style: none;
+  margin-bottom: 0;
+}
+
+details.turn-pane > summary::-webkit-details-marker {
+  display: none;
+}
+
+details.turn-pane > summary h4::before {
+  content: "▸";
+  display: inline-block;
+  margin-right: 8px;
+  color: var(--reasoning);
+  transition: transform var(--transition-fast);
+}
+
+details.turn-pane[open] > summary h4::before {
+  transform: rotate(90deg);
+}
+
+details.turn-pane[open] > summary {
+  margin-bottom: 10px;
+}
+
+details.turn-pane > summary:focus-visible {
+  outline: 2px solid var(--reasoning);
+  outline-offset: 3px;
+  border-radius: var(--radius-sm);
+}
+
+/* The pane is already a container; the body should not draw a second one. */
+.turn-pane .requests-detail-body {
+  padding: 0;
+  background: transparent;
+}
+
+.turn-pane[data-kind="thinking"] .requests-detail-body {
+  color: var(--text);
+}
+
+.turn-empty {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+/* An absent body reads as a note, not as content. */
+.requests-detail-body.turn-empty-body {
+  color: var(--muted);
+  background: transparent;
+  padding: 0;
+}
+
+.turn-chips-empty {
+  color: var(--muted);
+}
+
+/* ---- Tool calls ---- */
+
+.tool-calls {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  counter-reset: toolcall;
+}
+
+.tool-call {
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--input);
+}
+
+.tool-call-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.tool-call-ordinal {
+  counter-increment: toolcall;
+  font-size: 11px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.tool-call-ordinal::before {
+  content: counter(toolcall);
+}
+
+.tool-call-name {
+  padding: 2px 8px;
+  border: 1px solid var(--warn-border);
+  border-radius: var(--radius-full);
+  background: var(--warn-bg);
+  color: var(--warn);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+}
+
+.tool-call-args {
+  max-height: 200px;
+  overflow: auto;
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--text);
+}
+
+.tool-call-partial {
+  color: var(--warn);
+}
+
+/* ---- Turn shape chips in the request table ---- */
+
+.turn-chips {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.turn-chip {
+  padding: 1px 7px;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--line-strong);
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.turn-chip[data-kind="thinking"] {
+  border-color: var(--reasoning-border);
+  color: var(--reasoning);
+}
+
+.turn-chip[data-kind="tools"] {
+  border-color: var(--warn-border);
+  color: var(--warn);
+}
+
+.turn-chip[data-kind="response"] {
+  border-color: var(--accent-border);
+  color: var(--accent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  details.turn-pane > summary h4::before {
+    transition: none;
+  }
+}
+
+.websearch-detail-card {
+  width: min(980px, 94vw);
+}
+
+.websearch-result-summary {
+  display: grid;
+  gap: 10px;
+}
+
+.websearch-result-answer,
+.websearch-result-item {
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--panel);
+}
+
+.websearch-result-answer strong,
+.websearch-result-item strong {
+  display: block;
+  margin-bottom: 5px;
+}
+
+.websearch-result-item a {
+  display: block;
+  margin-bottom: 6px;
+  overflow-wrap: anywhere;
+}
+
+.websearch-result-item p {
+  margin: 5px 0 0;
+  white-space: pre-wrap;
+}
+
+.websearch-result-item small {
+  color: var(--muted);
+}
+
+@media (max-width: 760px) {
+  .requests-breakdowns {
+    grid-template-columns: 1fr;
+  }
+
+  .websearch-analytics-toolbar {
+    align-items: stretch;
+  }
+}
+
+/* Custom providers */
+.cp-note {
+  color: var(--muted);
+  font-size: 13px;
+  padding: 8px 0;
+}
+
+.cp-details {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.cp-key-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.cp-key-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.cp-key-label {
+  font-size: 12px;
+  color: var(--text-strong);
+}
+
+.cp-key-add {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.cp-key-add input {
+  flex: 1;
+  min-width: 0;
+}
+
+.cp-form {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 16px;
+  margin-top: 20px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  padding: 16px;
+  background: var(--card);
+}
+
+.cp-form-actions {
+  display: flex;
+  gap: 12px;
+  align-items: flex-end;
+}
+
+/* Version indicator, update banners, and version panel */
+.version-indicator {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: -12px;
+  padding: 0 2px;
+  color: var(--muted);
+  font-size: 11px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+.version-indicator .version-update-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: var(--radius-full);
+  background: var(--accent);
+  box-shadow: var(--glow-accent);
+}
+
+.version-banners {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 24px;
+}
+
+.version-banners:empty {
+  display: none;
+  margin-bottom: 0;
+}
+
+.version-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px 20px;
+  border: 1px solid var(--accent-border);
+  border-radius: var(--radius-lg);
+  background: var(--accent-muted);
+  box-shadow: var(--shadow-sm);
+}
+
+.version-banner.restart-required {
+  border-color: var(--warn-border);
+  background: var(--warn-bg);
+}
+
+.version-banner-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.version-banner-title {
+  color: var(--text-strong);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.version-banner-detail {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.version-banner-detail a {
+  color: var(--accent);
+}
+
+.version-banner-notes {
+  margin-top: 8px;
+}
+
+.version-banner-notes summary {
+  color: var(--accent);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.version-banner-notes pre {
+  margin: 8px 0 0;
+  max-height: 320px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+  background: var(--surface-2, rgba(255, 255, 255, 0.03));
+  border-radius: 6px;
+  padding: 10px 12px;
+}
+
+.version-banner-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.version-details {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 16px;
+}
+
+.version-details dl {
+  margin: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.version-details dt {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.version-details dd {
+  margin: 0;
+  color: var(--text-strong);
+  font-size: 14px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+.version-details .version-error {
+  color: var(--warn);
+}
+
+.claude-settings-targets {
+  margin-top: 8px;
+}
+
+.claude-settings-targets-single {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 13px;
+  color: var(--muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+.claude-settings-targets-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+}
+
+.claude-settings-targets-list li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.claude-settings-targets-list .ghost-button {
+  min-height: 28px;
+  padding: 3px 10px;
+  font-size: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-full);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+.claude-settings-badge {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--neutral-border);
+  background: var(--neutral-bg);
+  color: var(--muted);
+}
+
+.claude-settings-badge.ok {
+  color: var(--ok);
+  background: var(--ok-bg);
+  border-color: var(--ok-border);
+}
+
+.claude-settings-status {
+  margin-top: 14px;
+  padding: 10px 12px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--neutral-border);
+  background: var(--neutral-bg);
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.claude-settings-status.ok {
+  color: var(--ok);
+  background: var(--ok-bg);
+  border-color: var(--ok-border);
+}
+
+.claude-settings-status.warn {
+  color: var(--warn);
+  background: var(--warn-bg);
+  border-color: var(--warn-border);
+}
+
+.claude-settings-status.error {
+  color: var(--error);
+  background: var(--error-bg);
+  border-color: var(--error-border);
+}
+
+.claude-settings-status .claude-settings-summary {
+  margin: 0;
+}
+
+.claude-settings-overrides {
+  margin-top: 10px;
+}
+
+.claude-settings-overrides .claude-settings-override {
+  margin: 0 0 6px;
+  padding: 8px 12px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--warn-border);
+  background: var(--warn-bg);
+  color: var(--warn);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.claude-settings-project-note {
+  margin: 10px 0 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.version-upgrade-log {
+  margin-top: 16px;
+  max-height: 180px;
+}
+
+/* ---------------------------------------------------------------- guide --- */
+
+.guide {
+  display: grid;
+  grid-template-columns: 224px minmax(0, 1fr);
+  gap: 40px;
+  align-items: start;
+}
+
+@media (max-width: 900px) {
+  .guide {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 20px;
+  }
+}
+
+.guide-toc {
+  position: sticky;
+  top: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--card);
+}
+
+.guide-toc-eyebrow {
+  margin: 2px 10px 8px;
+}
+
+.guide-toc a {
+  color: var(--muted);
+  text-decoration: none;
+  font-size: 13px;
+  padding: 7px 10px;
+  border-left: 2px solid transparent;
+  border-radius: var(--radius-sm);
+}
+
+.guide-toc a:hover,
+.guide-toc a:focus-visible {
+  color: var(--text-strong);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.guide-toc a:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+/* Which section you are actually reading. */
+.guide-toc a[aria-current="true"] {
+  color: var(--accent);
+  border-left-color: var(--accent);
+  background: var(--accent-muted);
+}
+
+/* Prose wants a narrow measure; screenshots want every pixel available.
+   The column is wide, and only the running text is capped. */
+.guide-body {
+  max-width: 1180px;
+  color: var(--text);
+  line-height: 1.7;
+  font-size: 15px;
+}
+
+.guide-body > p,
+.guide-body > ul,
+.guide-body > ol,
+.guide-body > h3,
+.guide-body > h4,
+.guide-body > .guide-note {
+  max-width: 74ch;
+}
+
+.guide-body h3 {
+  color: var(--text-strong);
+  font-size: 20px;
+  letter-spacing: -0.01em;
+  margin: 48px 0 12px;
+  padding-top: 20px;
+  border-top: 1px solid var(--line);
+  scroll-margin-top: 24px;
+}
+
+.guide-body h3:first-child {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: none;
+}
+
+.guide-body h4 {
+  color: var(--text-strong);
+  font-size: 15px;
+  margin: 24px 0 8px;
+  scroll-margin-top: 24px;
+}
+
+.guide-body p,
+.guide-body ul,
+.guide-body ol {
+  margin: 0 0 12px;
+}
+
+.guide-body ul,
+.guide-body ol {
+  padding-left: 22px;
+}
+
+.guide-body li {
+  margin-bottom: 6px;
+}
+
+/* Cross-references between sections, not decoration: each one restates a
+   connection the prose already makes explicit (e.g. "the model id" pointing
+   at the section that explains model ids), so it reads as a real link
+   between two treatments of the same fact rather than a link salad. */
+.guide-body a {
+  color: var(--accent);
+  text-decoration-color: var(--accent-border);
+  text-underline-offset: 2px;
+}
+
+.guide-body a:hover,
+.guide-body a:focus-visible {
+  text-decoration-color: var(--accent);
+}
+
+.guide-body a:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+.guide-body code {
+  font-size: 12.5px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--accent);
+}
+
+.guide-body pre {
+  position: relative;
+  margin: 0 0 16px;
+  padding: 14px 60px 14px 16px;
+  border-radius: var(--radius-md);
+  overflow-x: auto;
+  background: var(--input);
+  border: 1px solid var(--line);
+  font-size: 13px;
+}
+
+.guide-body pre code {
+  background: none;
+  padding: 0;
+  color: var(--text);
+  line-height: 1.6;
+}
+
+/* What is about to be pasted somewhere else is worth copying exactly, not
+   retyping -- the one utility added to the reference read, kept as quiet as
+   the code block it sits on. */
+.guide-copy-button {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  padding: 4px 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  background: var(--card);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  transition:
+    border-color var(--transition-fast),
+    color var(--transition-fast),
+    background var(--transition-fast);
+}
+
+.guide-copy-button:hover {
+  border-color: var(--accent-border);
+  color: var(--text);
+}
+
+.guide-copy-button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.guide-copy-button.is-copied {
+  border-color: var(--accent-border);
+  background: var(--accent-muted);
+  color: var(--accent);
+}
+
+.guide-note {
+  border-left: 3px solid var(--accent);
+  padding: 12px 16px;
+  margin: 0 0 16px;
+  border-radius: 0 var(--radius-md) var(--radius-md) 0;
+  background: var(--accent-muted);
+  /* Callouts carry the advice worth reading twice, so they are not dimmed. */
+  color: var(--text);
+}
+
+/* Screenshots are the whole point of a tutorial; they get the full column
+   width and open at full size on click. */
+.guide-shot {
+  display: block;
+  width: 100%;
+  margin: 8px 0 8px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--line-strong);
+  background: var(--bg);
+  cursor: zoom-in;
+  transition: border-color var(--transition-fast);
+}
+
+.guide-shot:hover,
+.guide-shot:focus-visible {
+  border-color: var(--accent-border);
+}
+
+.guide-shot:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+
+.guide-shot-caption {
+  margin: 0 0 22px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+/* Full-size viewer */
+.guide-lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(0, 0, 0, 0.88);
+  cursor: zoom-out;
+}
+
+.guide-lightbox[hidden] {
+  display: none;
+}
+
+.guide-lightbox img {
+  max-width: 100%;
+  max-height: calc(100vh - 100px);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--line-strong);
+  box-shadow: var(--shadow);
+}
+
+.guide-lightbox-bar {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.guide-lightbox-hint {
+  position: absolute;
+  bottom: 18px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.guide-table {
+  width: 100%;
+  margin: 0 0 16px;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.guide-table th,
+.guide-table td {
+  text-align: left;
+  padding: 7px 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+  vertical-align: top;
+}
+
+.guide-table th {
+  color: var(--text-strong);
+  font-weight: 600;
+}
+
+.guide-table td {
+  color: var(--muted);
+}
+
+/* Get Started checklist */
+.get-started-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 20px;
+}
+
+.get-started-progress-label {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+/* The one bold move on this view: progress reads as a filled bar, not just
+   a number, so "almost done" and "just started" are visible before you read
+   a single word. */
+.get-started-progress-bar {
+  height: 8px;
+  border-radius: var(--radius-full);
+  background: var(--panel-strong);
+  overflow: hidden;
+}
+
+.get-started-progress-fill {
+  height: 100%;
+  border-radius: var(--radius-full);
+  background: var(--accent);
+  transition: width var(--transition-normal);
+}
+
+.get-started-steps {
+  list-style: none;
+  margin: 0 0 20px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* The 3 required steps are a causal chain; the rest are independent extras.
+   This divider is the only thing that says so -- everything else about a
+   step's own card is unchanged whichever group it's in. */
+.get-started-group-heading {
+  margin: 4px 2px 0;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.get-started-group-heading:first-child {
+  margin-top: 0;
+}
+
+.get-started-step {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--card);
+  overflow: hidden;
+}
+
+.get-started-step.expanded {
+  border-color: var(--accent-border);
+}
+
+.get-started-step-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  cursor: pointer;
+}
+
+.get-started-step-header:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.get-started-step-header strong {
+  flex: 1;
+  min-width: 0;
+  color: var(--text-strong);
+  font-size: 14px;
+}
+
+.get-started-step.done .get-started-step-header strong {
+  color: var(--muted);
+}
+
+.get-started-step-chevron {
+  color: var(--muted);
+  font-size: 16px;
+  line-height: 1;
+  transition: transform 0.15s ease;
+}
+
+.get-started-step.expanded .get-started-step-chevron {
+  transform: rotate(90deg);
+}
+
+/* Closed-because-done and closed-because-not-started should not require
+   reading the pill to tell apart. */
+.get-started-step-chevron.is-done {
+  color: var(--accent);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.get-started-step-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 0 16px 16px;
+}
+
+.get-started-step-body p {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.4;
+  margin: 0;
+}
+
+.get-started-step-instructions {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding-left: 20px;
+}
+
+.get-started-step-instructions li {
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.get-started-step-body .secondary-button {
+  align-self: flex-start;
+}
+
+.get-started-footer {
+  display: flex;
+  justify-content: flex-end;
+}
+
+/* Brief highlight for a field/card scrolled to from the Get Started button. */
+.onboarding-highlight {
+  animation: onboarding-highlight-pulse 2s ease;
+}
+
+@keyframes onboarding-highlight-pulse {
+  0% {
+    box-shadow: 0 0 0 3px var(--accent-border);
+    border-radius: var(--radius-md);
+  }
+  100% {
+    box-shadow: 0 0 0 3px transparent;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .onboarding-highlight {
+    animation: none;
+    box-shadow: 0 0 0 3px var(--accent-border);
+  }
+
+  .get-started-progress-fill {
+    transition: none;
+  }
+
+  .get-started-step-chevron {
+    transition: none;
+  }
+}
+
+/* --------------------------------------------------------------- Failover --
+   A fallback that quietly works still changes what answered a request, so it
+   has to be visible: a badge on the row that was diverted, and a panel
+   naming which primary is failing and what covered for it. */
+
+.fallback-badge {
+  margin-left: 8px;
+  padding: 2px 7px;
+  border: 1px solid var(--warn-border);
+  border-radius: var(--radius-full);
+  background: var(--warn-bg);
+  color: var(--warn);
+  font-family: var(--font-sans);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
+.fallback-route {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.fallback-route:last-child {
+  border-bottom: 0;
+}
+
+.fallback-route-path {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.fallback-route-path code {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--muted);
+  word-break: break-all;
+}
+
+/* The model that actually answered is the one worth reading first. */
+.fallback-route-path code.fallback-route-served {
+  color: var(--text);
+}
+
+.fallback-route-arrow {
+  color: var(--warn);
+  font-size: 13px;
+}
+
+.fallback-route-count {
+  flex: 0 0 auto;
+  color: var(--text-strong);
+  font-size: 13px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+/* A pooled credential is managed by its key list, not by a single field: the
+   raw control is kept in the document for the shared apply machinery but is
+   never shown, so "enter a new value to replace" cannot sit above a list of
+   individual keys with Remove buttons. */
+.field-pooled > [hidden] {
+  /* The `hidden` attribute only sets display:none at UA level, which any
+     later display rule silently beats. Pin it for this wrapper. */
+  display: none;
+}
+
+.field-pooled .key-manager {
+  margin-top: 4px;
+}
+
+/* Route trace --------------------------------------------------------------
+   A chain is only legible as a path, so the request detail draws every model
+   it was prepared to try in order, with the one that answered marked. The
+   colour carries the state; the word next to it carries the same thing for
+   anyone who cannot use the colour. */
+.route-trace {
+  margin: 0 0 18px;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--panel-strong);
+}
+
+.route-trace[hidden] {
+  /* The `hidden` attribute is only a UA-level display:none, which any later
+     display rule silently beats. Pin it. */
+  display: none;
+}
+
+.route-trace-note {
+  margin: 0 0 12px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.route-trace-hops {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  counter-reset: route-hop;
+}
+
+.route-trace-hop {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 6px 10px;
+  border-left: 2px solid var(--line-strong);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  background: var(--card);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  min-width: 0;
+}
+
+.route-trace-hop code {
+  overflow-wrap: anywhere;
+  color: var(--text-strong);
+}
+
+.route-trace-state {
+  margin-left: auto;
+  padding-left: 12px;
+  font-family: var(--font-sans);
+  font-size: 10.5px;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  color: var(--muted);
+}
+
+.route-trace-served {
+  border-left-color: var(--ok);
+}
+
+.route-trace-served .route-trace-state {
+  color: var(--ok);
+  font-weight: 700;
+}
+
+.route-trace-failed {
+  border-left-color: var(--error);
+}
+
+.route-trace-failed code {
+  color: var(--muted);
+  text-decoration: line-through;
+}
+
+.route-trace-failed .route-trace-state {
+  color: var(--error);
+}
+
+.route-trace-untried {
+  opacity: 0.6;
+}
+
+.route-badge-diverted {
+  border-color: var(--accent-border);
+  background: var(--accent-muted);
+  color: var(--accent);
+}
+
+/* Where a tier sends an image ----------------------------------------------
+   The fallback rail answers "what covers this model when it fails". This
+   answers "what happens to a screenshot", which is a different question and
+   was not on the page at all. It only appears on a tier whose model is
+   documented not to read images, so its presence is itself the signal. */
+.route-vision-hop {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  margin: 12px 0 0;
+  padding: 9px 12px;
+  border: 1px dashed var(--accent-border);
+  border-radius: var(--radius-sm);
+  background: var(--accent-muted);
+  font-size: 11.5px;
+  line-height: 1.45;
+  min-width: 0;
+}
+
+.route-vision-hop code {
+  font-family: var(--font-mono);
+  color: var(--text-strong);
+  overflow-wrap: anywhere;
+}
+
+.route-vision-hop-label {
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--accent);
+  text-transform: uppercase;
+  font-size: 10.5px;
+}
+
+.route-vision-hop-arrow {
+  color: var(--accent);
+}
+
+.route-vision-hop-why {
+  flex-basis: 100%;
+  color: var(--muted);
+}
+
+/* No adapter configured: the images have nowhere to go, which is a warning
+   rather than a routing fact. */
+.route-vision-hop.is-unset {
+  border-color: var(--warn-border);
+  background: var(--warn-bg);
+}
+
+.route-vision-hop.is-unset .route-vision-hop-label,
+.route-vision-hop.is-unset .route-vision-hop-arrow {
+  color: var(--warn);
+}
+
+.route-vision-summary {
+  margin: 12px 0 0;
+  color: var(--text-strong);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.route-vision-summary.is-idle {
+  color: var(--muted);
+}
+
+/* A view whose values are trade-offs opens by saying so, rather than making
+   the reader infer it from a wall of number fields. */
+.view-intro {
+  margin: 0 0 22px;
+  max-width: 68ch;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.6;
+  border-left: 2px solid var(--line-strong);
+  padding-left: 14px;
+}
+
+/* â”€â”€ Theme variants (brand: Midnight / Paper / High Contrast) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+   The console ships three themes, all driven by the same semantic tokens.
+   The <html> element carries a [data-theme] attribute; default (no attribute
+   or "midnight") is the dark operations console defined in :root above. */
+
+:root[data-theme="paper"] {
+  color-scheme: light;
+
+  --bg: #f6f7f9;
+  --panel: #ffffff;
+  --panel-strong: #eef0f4;
+  --card: #ffffff;
+  --card-hover: #f1f3f7;
+  --input: #ffffff;
+  --input-focus: #f6f7f9;
+  --text: #11131c;
+  --text-strong: #000000;
+  --muted: #5b6472;
+  --line: rgba(0, 0, 0, 0.08);
+  --line-strong: rgba(0, 0, 0, 0.16);
+
+  --accent: #059669;
+  --accent-dark: #047857;
+  --accent-muted: rgba(5, 150, 105, 0.1);
+  --accent-border: rgba(5, 150, 105, 0.35);
+
+  --ok: #047857;
+  --ok-bg: rgba(4, 120, 87, 0.1);
+  --ok-border: rgba(4, 120, 87, 0.3);
+
+  --warn: #b45309;
+  --warn-bg: rgba(180, 83, 9, 0.1);
+  --warn-border: rgba(180, 83, 9, 0.3);
+
+  --error: #b91c1c;
+  --error-bg: rgba(185, 28, 28, 0.1);
+  --error-border: rgba(185, 28, 28, 0.3);
+
+  --neutral: #4b5563;
+  --neutral-bg: rgba(75, 85, 99, 0.1);
+  --neutral-border: rgba(75, 85, 99, 0.3);
+
+  --info: #1d4ed8;
+
+  --reasoning: var(--info);
+  --reasoning-bg: rgba(29, 78, 216, 0.08);
+  --reasoning-border: rgba(29, 78, 216, 0.3);
+
+  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.08);
+  --shadow: 0 12px 34px rgba(0, 0, 0, 0.12);
+  --glow-accent: 0 0 12px rgba(5, 150, 105, 0.12);
+
+  --dropdown-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%235b6472' stroke-width='2.5'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' d='M19.5 8.25l-7.5 7.5-7.5-7.5'/%3E%3C/svg%3E");
+}
+
+:root[data-theme="high-contrast"] {
+  color-scheme: dark;
+
+  --bg: #000000;
+  --panel: #000000;
+  --panel-strong: #0a0a0a;
+  --card: #0a0a0a;
+  --card-hover: #161616;
+  --input: #000000;
+  --input-focus: #0a0a0a;
+  --text: #ffffff;
+  --text-strong: #ffffff;
+  --muted: #e5e7eb;
+  --line: #ffffff;
+  --line-strong: #ffffff;
+
+  --accent: #00ffa3;
+  --accent-dark: #00e090;
+  --accent-muted: rgba(0, 255, 163, 0.18);
+  --accent-border: #00ffa3;
+
+  --ok: #00ffa3;
+  --ok-bg: rgba(0, 255, 163, 0.16);
+  --ok-border: #00ffa3;
+
+  --warn: #ffd400;
+  --warn-bg: rgba(255, 212, 0, 0.16);
+  --warn-border: #ffd400;
+
+  --error: #ff6b6b;
+  --error-bg: rgba(255, 107, 107, 0.16);
+  --error-border: #ff6b6b;
+
+  --neutral: #ffffff;
+  --neutral-bg: rgba(255, 255, 255, 0.12);
+  --neutral-border: #ffffff;
+
+  --info: #66b2ff;
+
+  --reasoning: var(--info);
+  --reasoning-bg: rgba(102, 178, 255, 0.14);
+  --reasoning-border: #66b2ff;
+
+  --shadow-sm: none;
+  --shadow: none;
+  --glow-accent: none;
+
+  --dropdown-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%23ffffff' stroke-width='2.5'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' d='M19.5 8.25l-7.5 7.5-7.5-7.5'/%3E%3C/svg%3E");
+}
+
+:root[data-theme="high-contrast"] button,
+:root[data-theme="high-contrast"] input,
+:root[data-theme="high-contrast"] select,
+:root[data-theme="high-contrast"] textarea,
+:root[data-theme="high-contrast"] .card,
+:root[data-theme="high-contrast"] .panel {
+  border-width: 2px;
+}
+
+/* â”€â”€ Theme switcher control â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+.theme-switch {
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  border-radius: var(--radius-md);
+  background: var(--panel-strong);
+  border: 1px solid var(--line);
+}
+
+.theme-option {
+  flex: 1 1 auto;
+  min-height: 44px;
+  padding: 0 10px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+
+.theme-option:hover {
+  color: var(--text);
+}
+
+.theme-option[aria-checked="true"] {
+  background: var(--accent);
+  color: #04130d;
+  border-color: var(--accent-border);
+}
+
+:root[data-theme="high-contrast"] .theme-option[aria-checked="true"] {
+  color: #000000;
+}

@@ -10,8 +10,8 @@ from typing import Any
 
 import pytest
 
-from free_claude_code.providers.deepseek.client import DeepSeekProvider
-from free_claude_code.providers.openai_chat.provider import OpenAIChatProvider
+from my_claude_code.providers.deepseek.client import DeepSeekProvider
+from my_claude_code.providers.openai_chat.provider import OpenAIChatProvider
 
 
 class _Usage:

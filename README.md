@@ -1,6 +1,6 @@
 <div align="center">
 
-# 🤖 Free Claude Code
+# 🤖 My Claude Code
 
 An Anthropic-compatible local proxy for Claude Code, Codex, Pi, and their IDE extensions — backed by 27 model providers, with multi-key rotation everywhere, built-in web search providers, and full request analytics.
 
@@ -19,25 +19,25 @@ Run your coding agents with free, paid, or local models. Choose and validate pro
 </div>
 
 <div align="center">
-  <img src="assets/pic.png" alt="Free Claude Code in action" width="700">
-  <p><em>Claude Code running through the Free Claude Code proxy.</em></p>
+  <img src="assets/pic.png" alt="My Claude Code in action" width="700">
+  <p><em>Claude Code running through the My Claude Code proxy.</em></p>
 </div>
 
 <div align="center">
-  <img src="assets/codex.png" alt="Codex CLI in action through Free Claude Code" width="700">
-  <p><em>Codex CLI using the local FCC Responses provider.</em></p>
+  <img src="assets/codex.png" alt="Codex CLI in action through My Claude Code" width="700">
+  <p><em>Codex CLI using the local MCC Responses provider.</em></p>
 </div>
 
 <a id="model-picker"></a>
 
 <div align="center">
   <img src="assets/cc-model-picker.png" alt="Claude Code model picker showing gateway models" width="700">
-  <p><em>Claude Code native <code>/model</code> picker with FCC gateway models — requires <code>fcc-claude --discover-models</code> (or <code>fcc-claude-old</code>).</em></p>
+  <p><em>Claude Code native <code>/model</code> picker with MCC gateway models — requires <code>fcc-claude --discover-models</code> (or <code>fcc-claude-old</code>).</em></p>
 </div>
 
 <div align="center">
-  <img src="assets/codex-model-picker.png" alt="Codex model picker showing generated FCC model catalog" width="700">
-  <p><em>Codex native <code>/model</code> picker with the generated FCC catalog.</em></p>
+  <img src="assets/codex-model-picker.png" alt="Codex model picker showing generated MCC model catalog" width="700">
+  <p><em>Codex native <code>/model</code> picker with the generated MCC catalog.</em></p>
 </div>
 
 <a id="features"></a>
@@ -46,7 +46,7 @@ Run your coding agents with free, paid, or local models. Choose and validate pro
 
 | Area | What you get |
 | --- | --- |
-| **Coding agents** | Launch Claude Code with `fcc-claude`, Codex with `fcc-codex`, or Pi with `fcc-pi`; Codex and Pi's native model pickers always list the FCC catalog, Claude Code's needs `fcc-claude --discover-models` (or `fcc-claude-old`). |
+| **Coding agents** | Launch Claude Code with `fcc-claude`, Codex with `fcc-codex`, or Pi with `fcc-pi`; Codex and Pi's native model pickers always list the MCC catalog, Claude Code's needs `fcc-claude --discover-models` (or `fcc-claude-old`). |
 | **Model providers** | 27 cloud and local providers, including Kimi For Coding and an experimental ChatGPT OAuth provider. Switch and validate providers from the Admin UI. |
 | **Model-tier routing** | Route Fable, Opus, Sonnet, Haiku, and fallback traffic to different models, each with an ordered fallback chain. |
 | **Vision adapter** | Image requests are diverted to a model that can see when the tier's own model cannot, with its own fallback chain. |
@@ -102,21 +102,21 @@ curl -fsSL "https://raw.githubusercontent.com/FiredMosquito831/free-claude-code/
 
 </details>
 
-**Then close and reopen your terminal.** The installer adds `~/.local/bin` to your `PATH`, and an already-open shell won't see it. This is the single most common reason `fcc-server` appears "not found" straight after a successful install.
+**Then close and reopen your terminal.** The installer adds `~/.local/bin` to your `PATH`, and an already-open shell won't see it. This is the single most common reason `mcc-server` appears "not found" straight after a successful install.
 
 Verify it worked:
 
 ```bash
-fcc-server --version
+mcc-server --version
 ```
 
 #### What the installer actually does
 
 1. Installs `uv` (the Python tool runner) if it's missing or too old.
 2. Looks up the **latest** release, downloads its wheel, and **verifies the SHA-256 that GitHub publishes for that asset** — a mismatch aborts rather than running unverified code.
-3. Installs Free Claude Code and puts `fcc-server`, `fcc-claude`, `fcc-claude-old`, `fcc-codex`, and `fcc-pi` on your `PATH`.
+3. Installs My Claude Code and puts `mcc-server`, `fcc-claude`, `fcc-claude-old`, `fcc-codex`, and `fcc-pi` on your `PATH`.
 
-That's all it does. **It does not install Claude Code, Codex, or Pi** — those are separate third-party tools, and Free Claude Code doesn't need any of them to run. Install whichever you actually use, yourself. The `fcc-*` launchers just point an agent you already have at the proxy.
+That's all it does. **It does not install Claude Code, Codex, or Pi** — those are separate third-party tools, and My Claude Code doesn't need any of them to run. Install whichever you actually use, yourself. The `fcc-*` launchers just point an agent you already have at the proxy.
 
 The command always installs the **newest** release, so re-running it is how you update from the command line. To install a specific release instead:
 
@@ -135,11 +135,11 @@ You don't need to re-run the install command. The Admin UI shows your version, a
 ### 2. Start The Server
 
 ```bash
-fcc-server
+mcc-server
 ```
 
-To print the installed Free Claude Code version without starting the server,
-run `fcc-server --version`.
+To print the installed My Claude Code version without starting the server,
+run `mcc-server --version`.
 
 Keep this process running. By default, the Admin UI opens in your browser once
 the server is healthy. Its address is always shown in the startup log:
@@ -174,7 +174,7 @@ fcc-claude
 
 `fcc-claude` sets only `ANTHROPIC_BASE_URL` and `ANTHROPIC_AUTH_TOKEN` on top of
 your inherited shell environment — nothing else is changed or stripped. This
-means its native model picker does **not** list the FCC catalog by default,
+means its native model picker does **not** list the MCC catalog by default,
 since that requires an extra request to the proxy on every launch; pass
 `fcc-claude --discover-models` to opt in without adopting the rest of the
 legacy behavior. If you want the previous behavior (also enables gateway
@@ -194,13 +194,13 @@ Pi:
 fcc-pi
 ```
 
-All three launchers use the current Admin UI settings. Codex and Pi's native model pickers always list the models FCC exposes; for Claude Code, add `--discover-models` to `fcc-claude` (or use `fcc-claude-old`) to populate its picker the same way — otherwise pick a model tier by name. Normal CLI arguments still work, for example:
+All three launchers use the current Admin UI settings. Codex and Pi's native model pickers always list the models MCC exposes; for Claude Code, add `--discover-models` to `fcc-claude` (or use `fcc-claude-old`) to populate its picker the same way — otherwise pick a model tier by name. Normal CLI arguments still work, for example:
 
 ```bash
 fcc-codex exec "hello"
 ```
 
-`fcc-pi` registers FCC only for that Pi process; your existing Pi settings, sessions, credentials, and extensions remain unchanged.
+`fcc-pi` registers MCC only for that Pi process; your existing Pi settings, sessions, credentials, and extensions remain unchanged.
 
 <a id="install-troubleshooting"></a>
 
@@ -208,12 +208,12 @@ fcc-codex exec "hello"
 
 | Symptom | Cause and fix |
 | --- | --- |
-| `fcc-server: command not found` right after installing | Your shell's `PATH` is stale. **Close and reopen the terminal.** If it persists, check that `~/.local/bin` (Windows: `%USERPROFILE%\.local\bin`) is on `PATH`. |
+| `mcc-server: command not found` right after installing | Your shell's `PATH` is stale. **Close and reopen the terminal.** If it persists, check that `~/.local/bin` (Windows: `%USERPROFILE%\.local\bin`) is on `PATH`. |
 | The install stopped partway with an error about `claude`, `codex`, or `pi` | An old installer tried to install those for you and aborted when one failed. The current installer doesn't touch them at all — just re-run the command above. |
 | I want Claude Code / Codex / Pi installed too | The installer no longer installs them. Install each from its own official installer; then `fcc-claude`, `fcc-codex`, and `fcc-pi` will launch them through the proxy. |
-| `FCC release wheel checksum mismatch; refusing to install` | The download was corrupted or incomplete. Re-run the command. This check is deliberate: it will not install a wheel it can't verify. |
+| `MCC release wheel checksum mismatch; refusing to install` | The download was corrupted or incomplete. Re-run the command. This check is deliberate: it will not install a wheel it can't verify. |
 | PowerShell refuses to run the script | `Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass`, then re-run. This only affects the current window. |
-| Admin UI won't open, or settings don't seem to apply | You probably installed in **both** PowerShell and WSL and are editing one config while the server reads the other. Run `fcc-server --version` in each and pick one environment. |
+| Admin UI won't open, or settings don't seem to apply | You probably installed in **both** PowerShell and WSL and are editing one config while the server reads the other. Run `mcc-server --version` in each and pick one environment. |
 | Server starts but the browser can't reach it | Use the exact URL from the startup log. In WSL, `http://127.0.0.1:8082/admin` works from a Windows browser via WSL's localhost forwarding. |
 | `address already in use` on startup | A server is already running on that port. Stop it first, or set `PORT` to something else. |
 
@@ -221,7 +221,7 @@ Still stuck? Run the installer with `--dry-run` (PowerShell: `-DryRun`) and shar
 
 ## Connect Claude Code (CLI & Desktop)
 
-Two ways to point Claude Code at your local FCC server (`http://127.0.0.1:8082`, auth token `freecc` — match these to the Admin UI if you changed them). FCC exposes native **Fable / Opus / Sonnet / Haiku** tier models, so no custom model overrides are needed either way — but Claude Code's built-in picker only *lists* them once model discovery is turned on (below).
+Two ways to point Claude Code at your local MCC server (`http://127.0.0.1:8082`, auth token `freecc` — match these to the Admin UI if you changed them). MCC exposes native **Fable / Opus / Sonnet / Haiku** tier models, so no custom model overrides are needed either way — but Claude Code's built-in picker only *lists* them once model discovery is turned on (below).
 
 ### Claude Code CLI
 
@@ -241,7 +241,7 @@ To do it by hand instead, edit `~/.claude/settings.json` (`%USERPROFILE%\.claude
 Notes:
 
 - Keep any other keys you already have in the file — just merge the `env` entries.
-- `ANTHROPIC_AUTH_TOKEN` sends the key as a bearer token (what FCC expects). The settings file wins over shell exports.
+- `ANTHROPIC_AUTH_TOKEN` sends the key as a bearer token (what MCC expects). The settings file wins over shell exports.
 - This gives you a working proxy connection, but the native `/model` picker stays empty until model discovery is on — add `"CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY": "1"` to the same `env` block, or launch with `fcc-claude --discover-models` instead of editing the file.
 - A `.claude/settings.json` or `.claude/settings.local.json` **inside a project directory** takes precedence over this user-level file. A user-level `settings.local.json` is *not* read — that scope is repository-root only.
 - Restart Claude Code after editing, then verify with `/status` — it should show `Anthropic base URL: http://127.0.0.1:8082` and your auth token.
@@ -271,22 +271,22 @@ The desktop app routes its **Code tab** through the same `~/.claude/settings.jso
 | **Model discovery** | on |
 
 <div align="center">
-  <img src="assets/claude-desktop-gateway-config.png" alt="Claude Desktop third-party inference settings filled in for Free Claude Code" width="760">
+  <img src="assets/claude-desktop-gateway-config.png" alt="Claude Desktop third-party inference settings filled in for My Claude Code" width="760">
 </div>
 
 Use the port from your server's startup log if it isn't `8082`, and match the API key to `AUTH_TOKEN` if you changed it from the default `freecc`.
 
 **4. Restart the app.**
 
-**Test connection** and **Test model discovery** in that dialog both hit your running FCC server, so use them to confirm the setup before restarting — the server must be running for either to succeed.
+**Test connection** and **Test model discovery** in that dialog both hit your running MCC server, so use them to confirm the setup before restarting — the server must be running for either to succeed.
 
-With **Model discovery** on, the app auto-populates its picker from FCC's `/v1/models` at launch; you can leave **Model list** empty. The **initial warning dialog can be safely ignored** — the picker fills in once discovery completes. One limitation: with a gateway active, the desktop app runs **local sessions only** (no Anthropic-hosted cloud environments).
+With **Model discovery** on, the app auto-populates its picker from MCC's `/v1/models` at launch; you can leave **Model list** empty. The **initial warning dialog can be safely ignored** — the picker fills in once discovery completes. One limitation: with a gateway active, the desktop app runs **local sessions only** (no Anthropic-hosted cloud environments).
 
 <a id="model-providers"></a>
 
 ## Model Providers
 
-Enter the listed setting in the Admin UI, open **Model Config**, then search the `MODEL` dropdown and select a model. FCC constructs each slug as `<provider-id>/<exact-provider-model-id>`; free-text entry remains available when a provider cannot list a model. Click **Validate** and **Apply**. Provider names link to their key, model, or setup pages.
+Enter the listed setting in the Admin UI, open **Model Config**, then search the `MODEL` dropdown and select a model. MCC constructs each slug as `<provider-id>/<exact-provider-model-id>`; free-text entry remains available when a provider cannot list a model. Click **Validate** and **Apply**. Provider names link to their key, model, or setup pages.
 
 | Provider | Admin UI setting | Example `MODEL` |
 | --- | --- | --- |
@@ -338,7 +338,7 @@ Important provider notes:
   you request is your **deployment name**, not the underlying model name.
 - Cloudflare requires both its API token and account ID.
 - Ollama Cloud connects directly to `ollama.com`; use the exact model IDs shown
-  by FCC's model picker. Local Ollama remains available through the separate
+  by MCC's model picker. Local Ollama remains available through the separate
   `ollama/` prefix.
 - Prefer tool-capable models for coding agents. Local models also need enough context for the agent's system prompt and tool definitions.
 
@@ -351,7 +351,7 @@ Start LM Studio's local server, load a tool-capable model, and use the model ide
 
 ### llama.cpp
 
-Start `llama-server` with its OpenAI-compatible Chat Completions API and enough context for the model. Use the local model ID with the `llamacpp/` prefix. `LLAMACPP_BASE_URL` defaults to `http://localhost:8080/v1`; FCC accepts either the server root or an explicit `/v1` suffix.
+Start `llama-server` with its OpenAI-compatible Chat Completions API and enough context for the model. Use the local model ID with the `llamacpp/` prefix. `LLAMACPP_BASE_URL` defaults to `http://localhost:8080/v1`; MCC accepts either the server root or an explicit `/v1` suffix.
 
 ### Ollama
 
@@ -360,7 +360,7 @@ ollama pull llama3.1
 ollama serve
 ```
 
-Use the tag shown by `ollama list` with the `ollama/` prefix. `OLLAMA_BASE_URL` defaults to `http://localhost:11434`; FCC accepts either the root URL or an explicit `/v1` suffix.
+Use the tag shown by `ollama list` with the `ollama/` prefix. `OLLAMA_BASE_URL` defaults to `http://localhost:11434`; MCC accepts either the root URL or an explicit `/v1` suffix.
 
 </details>
 
@@ -392,9 +392,9 @@ Rate limits (429) escalate the cooldown ladder but deliberately do **not** open 
 
 **Availability, not just health.** A key can be perfectly healthy and still unable to serve right now: rate-limited, or out of daily budget. Rotation skips those keys and picks one that can answer immediately, instead of queueing behind a throttled key while an idle key sits unused. If *every* key is unavailable the request still goes out rather than failing — a soft guardrail should never become a self-inflicted outage.
 
-**Provider-declared backoff.** On a 429, FCC reads the upstream's own `Retry-After`, `retry-after-ms`, and `X-RateLimit-Reset-*` headers (all the formats providers actually ship, including `6m0s` and `250ms`) and waits exactly that long, capped at an hour. Only when a provider says nothing does it fall back to a fixed minute.
+**Provider-declared backoff.** On a 429, MCC reads the upstream's own `Retry-After`, `retry-after-ms`, and `X-RateLimit-Reset-*` headers (all the formats providers actually ship, including `6m0s` and `250ms`) and waits exactly that long, capped at an hour. Only when a provider says nothing does it fall back to a fixed minute.
 
-**No invented ceilings.** FCC never caps a key at a number it made up. Every limit it applies comes from the provider's own response — the reset window on a 429, the status on a rejection. Providers change their limits without notice, so a hardcoded budget is wrong the moment it ships; reading what the upstream actually reports stays right.
+**No invented ceilings.** MCC never caps a key at a number it made up. Every limit it applies comes from the provider's own response — the reset window on a 429, the status on a rejection. Providers change their limits without notice, so a hardcoded budget is wrong the moment it ships; reading what the upstream actually reports stays right.
 
 **When rotation happens.** Only for errors another key could actually fix: authentication, rate limits, 5xx/overload, and transport failures. A plain 400 fails identically on every key and is not rotated. Failover happens before the first streamed chunk; once output has started, switching credentials would corrupt the response, so a mid-stream failure is recorded against the key but propagated to the client.
 
@@ -410,7 +410,7 @@ For example, route Opus to `nvidia_nim/moonshotai/kimi-k2.6`, Sonnet to `open_ro
 
 ### Fallback Chains
 
-Every tier can carry an ordered list of stand-ins. If the model a request routes to cannot serve it, FCC tries the next entry in that tier's chain, then the next, until one answers.
+Every tier can carry an ordered list of stand-ins. If the model a request routes to cannot serve it, MCC tries the next entry in that tier's chain, then the next, until one answers.
 
 | Setting | Chain used |
 | --- | --- |
@@ -445,7 +445,7 @@ Every attempt is recorded. **Analytics** shows the model that actually answered 
 
 ### Vision Adapter
 
-Set `MODEL_VISION` to a model that accepts images and FCC will route image-carrying requests to it whenever the model the tier picked is **known** not to read images — so a fast text-only default can stay in place without breaking screenshots and diagrams.
+Set `MODEL_VISION` to a model that accepts images and MCC will route image-carrying requests to it whenever the model the tier picked is **known** not to read images — so a fast text-only default can stay in place without breaking screenshots and diagrams.
 
 Capability is read from what each provider publishes about its own models (OpenRouter-dialect gateways report `input_modalities`; others are enriched from models.dev). A model whose provider reports nothing is left alone rather than diverted: most providers publish no modality data at all, and rerouting on silence would move traffic away from models that handle images perfectly well.
 
@@ -459,7 +459,7 @@ Capability metadata is topped up from the [models.dev](https://models.dev) catal
 
 ### Reasoning Control
 
-Open **Admin UI → Model Config → Reasoning** to choose how FCC handles client reasoning controls. The default **From client** option preserves reasoning effort sent by Claude Code, Codex, or Pi; when the client sends no control, the provider keeps its own default.
+Open **Admin UI → Model Config → Reasoning** to choose how MCC handles client reasoning controls. The default **From client** option preserves reasoning effort sent by Claude Code, Codex, or Pi; when the client sends no control, the provider keeps its own default.
 
 You can instead select **Off**, **Low**, **Medium**, **High**, **X-High**, or **Max**. Fable, Opus, Sonnet, and Haiku each have the same choices plus **Inherit**, which uses the root policy. Providers with named effort receive those names; numeric-budget providers map **Low=512**, **Medium=1,024**, **High=2,048**, **X-High=4,096**, and **Max=8,192** reasoning tokens; boolean providers receive on or off. Unsupported controls safely remain provider-defined.
 
@@ -472,7 +472,7 @@ You can instead select **Off**, **Low**, **Medium**, **High**, **X-High**, or **
 
 ## Web Search
 
-Claude Code's `web_search` is an Anthropic **server tool**: normally Anthropic's servers execute the search and bill you for it. FCC fulfills that server tool at the proxy level instead — the client emits a `web_search` tool-use block, FCC runs the search against a provider you choose (or the keyless default), and streams the results back as a regular text block. No Anthropic search credits are used, and the whole flow works with any model provider.
+Claude Code's `web_search` is an Anthropic **server tool**: normally Anthropic's servers execute the search and bill you for it. MCC fulfills that server tool at the proxy level instead — the client emits a `web_search` tool-use block, MCC runs the search against a provider you choose (or the keyless default), and streams the results back as a regular text block. No Anthropic search credits are used, and the whole flow works with any model provider.
 
 <div align="center">
   <img src="assets/admin-websearch.png" alt="Web search provider configuration and analytics" width="820">
@@ -481,7 +481,7 @@ Claude Code's `web_search` is an Anthropic **server tool**: normally Anthropic's
 
 ### Search Providers
 
-FCC supports 14 search backends, resolved by `WEB_SEARCH_PROVIDER`:
+MCC supports 14 search backends, resolved by `WEB_SEARCH_PROVIDER`:
 
 | Provider | Env var | Free tier | Get a key |
 | --- | --- | --- | --- |
@@ -598,7 +598,7 @@ Extracted text has its **own, larger cap** (`WEBSEARCH_DIGEST_CONTENT_CHARS`) ra
 
 ### Restricting searches to specific sites
 
-Claude Code declares `allowed_domains`, `blocked_domains`, and `max_uses` on its `web_search` tool definition. FCC reads them from the request and forwards them, so:
+Claude Code declares `allowed_domains`, `blocked_domains`, and `max_uses` on its `web_search` tool definition. MCC reads them from the request and forwards them, so:
 
 ```json
 { "type": "web_search_20250305", "name": "web_search",
@@ -656,7 +656,7 @@ Search failures come back to the client as a proper `web_search_tool_result_erro
 | `max_uses` budget leaves no room | `max_uses_exceeded` |
 | Anything else | `unavailable` |
 
-**Rate limits use the provider's own reset time.** When a provider returns 429 it usually says when the limit clears (`Retry-After`, `retry-after-ms`, `x-ratelimit-reset-*`); FCC honours that instead of assuming a fixed cooldown, so a key that resets in a second isn't benched for a minute and one that needs an hour isn't hammered. If the provider says nothing, a conservative default applies. Nothing is capped by an invented ceiling — the only bound is a 1-hour sanity limit on what a single header can request.
+**Rate limits use the provider's own reset time.** When a provider returns 429 it usually says when the limit clears (`Retry-After`, `retry-after-ms`, `x-ratelimit-reset-*`); MCC honours that instead of assuming a fixed cooldown, so a key that resets in a second isn't benched for a minute and one that needs an hour isn't hammered. If the provider says nothing, a conservative default applies. Nothing is capped by an invented ceiling — the only bound is a 1-hour sanity limit on what a single header can request.
 
 ### Web search analytics
 
@@ -693,7 +693,7 @@ The Admin UI (`http://127.0.0.1:8082/admin`, local-only) is the control center f
 
 ### Request Analytics
 
-FCC keeps a persistent log of every completed request (non-blocking background writer, SQLite at `~/.fcc/logs/requests.db`) and surfaces it in **Admin UI → Analytics**. Each record captures endpoint/protocol, requested and resolved model, provider, stream flag, input/output text (capped at 50k chars) with SHA-256 hashes and lengths, reasoning and params, token counts, TTFT and duration, status (success/error/cancelled), and error details. **Search** covers everything a request contains — prompt, reply, the model's reasoning, and its tool calls with their commands and arguments — and requires every word to appear somewhere in the request rather than as an exact phrase, so `proxy 8082` finds a request whose prompt mentions the proxy and whose reasoning mentions the port. Every filter (provider/model/status/endpoint/search/time range) applies consistently to metric cards, linearly interpolated p50/p95 latency, provider/model breakdowns, top errors, charts, and the request table. The dashboard adds race-safe auto-refresh, page-size controls, accessible chart legends, provider performance, JSON export, keyboard-friendly request details, explicit unavailable/stale states, and an unambiguous clear-all action (`/admin/api/requests*` endpoints back it).
+MCC keeps a persistent log of every completed request (non-blocking background writer, SQLite at `~/.fcc/logs/requests.db`) and surfaces it in **Admin UI → Analytics**. Each record captures endpoint/protocol, requested and resolved model, provider, stream flag, input/output text (capped at 50k chars) with SHA-256 hashes and lengths, reasoning and params, token counts, TTFT and duration, status (success/error/cancelled), and error details. **Search** covers everything a request contains — prompt, reply, the model's reasoning, and its tool calls with their commands and arguments — and requires every word to appear somewhere in the request rather than as an exact phrase, so `proxy 8082` finds a request whose prompt mentions the proxy and whose reasoning mentions the port. Every filter (provider/model/status/endpoint/search/time range) applies consistently to metric cards, linearly interpolated p50/p95 latency, provider/model breakdowns, top errors, charts, and the request table. The dashboard adds race-safe auto-refresh, page-size controls, accessible chart legends, provider performance, JSON export, keyboard-friendly request details, explicit unavailable/stale states, and an unambiguous clear-all action (`/admin/api/requests*` endpoints back it).
 
 ```bash
 REQUEST_LOG_ENABLED=true
@@ -709,7 +709,7 @@ REQUEST_LOG_CAPTURE_BODIES=true   # false stores only body lengths + SHA-256 has
 
 Sizing it is really a disk decision, because captured bodies dominate: they are **99% of the stored bytes**, at roughly 30 KB of request and response text against 332 bytes of metadata per row.
 
-So FCC compresses them. Request and response text is stored zstd-compressed in a side table rather than inline, against a dictionary trained on your own traffic — which matters because consecutive requests repeat a near-identical system prompt and conversation history, redundancy that per-row compression cannot see. Measured by replaying 4,000 real requests through both paths:
+So MCC compresses them. Request and response text is stored zstd-compressed in a side table rather than inline, against a dictionary trained on your own traffic — which matters because consecutive requests repeat a near-identical system prompt and conversation history, redundancy that per-row compression cannot see. Measured by replaying 4,000 real requests through both paths:
 
 | | database size | per row |
 | --- | --- | --- |
@@ -783,7 +783,7 @@ Credentials are identified by a masked `first4…last4` label and their pool ind
 
 The running version is always visible in the Admin UI sidebar. **Providers → Version** shows the current version, the latest published release, and when the check last ran.
 
-FCC checks the GitHub releases feed when the dashboard loads, caching the result for six hours so it never hammers the API. **Check for updates** forces a fresh check. If the machine is offline or GitHub is unreachable, the panel still shows your running version and notes that the check failed — it never blocks the dashboard.
+MCC checks the GitHub releases feed when the dashboard loads, caching the result for six hours so it never hammers the API. **Check for updates** forces a fresh check. If the machine is offline or GitHub is unreachable, the panel still shows your running version and notes that the check failed — it never blocks the dashboard.
 
 When a newer release exists, a banner announces it and carries the release notes inline. Expand **What changed** to read them without leaving the dashboard — a version number on its own rarely tells you whether an update is worth taking. The link to the full release page is still there for anything trimmed:
 
@@ -794,9 +794,9 @@ When a newer release exists, a banner announces it and carries the release notes
 
 **Update now** performs the same steps as the install script: download the release wheel, verify its SHA-256 against the digest GitHub publishes, and install it with `uv`. A checksum mismatch aborts the install. Any extras you originally installed (such as voice support) are detected and preserved, so upgrading never silently drops a feature.
 
-**Upgrading does not restart the server.** A running process keeps serving the code it already loaded, so an upgrade can never drop an in-flight Claude Code stream. Once the install finishes you get a *restart required* banner; restart `fcc-server` whenever it suits you and the new version takes effect.
+**Upgrading does not restart the server.** A running process keeps serving the code it already loaded, so an upgrade can never drop an in-flight Claude Code stream. Once the install finishes you get a *restart required* banner; restart `mcc-server` whenever it suits you and the new version takes effect.
 
-**On Windows the install is deferred until you stop the server.** Windows holds the running interpreter and its loaded DLLs open, so the environment cannot be replaced underneath a live process — attempting it fails partway through and leaves a broken install. Instead, **Update now** downloads and checksum-verifies the wheel, then hands it to a detached helper that waits for `fcc-server` to exit and installs it then. You'll see *"Update staged — stop the server to finish installing"*: stop the server, the update applies by itself, and you start it again on the new version. Your current install stays untouched and fully working until that moment, so a failed update can't strand you — and if the deferred install does fail, the dashboard tells you on the next start. WSL, Linux and macOS install in place as before, because they can replace files that are still open.
+**On Windows the install is deferred until you stop the server.** Windows holds the running interpreter and its loaded DLLs open, so the environment cannot be replaced underneath a live process — attempting it fails partway through and leaves a broken install. Instead, **Update now** downloads and checksum-verifies the wheel, then hands it to a detached helper that waits for `mcc-server` to exit and installs it then. You'll see *"Update staged — stop the server to finish installing"*: stop the server, the update applies by itself, and you start it again on the new version. Your current install stays untouched and fully working until that moment, so a failed update can't strand you — and if the deferred install does fail, the dashboard tells you on the next start. WSL, Linux and macOS install in place as before, because they can replace files that are still open.
 
 If `uv` is not on `PATH`, the upgrade declines and tells you to re-run the install script instead. These endpoints (`/admin/api/version*`) are loopback-only, like the rest of the Admin API.
 
@@ -808,20 +808,20 @@ Prefer the command line? Re-running the install command from [Quick Start](#inst
 
 ### ChatGPT OAuth Provider (experimental)
 
-FCC can talk directly to `chatgpt.com/backend-api/codex/responses` (OpenAI Responses API) using your ChatGPT subscription's OAuth tokens. Four login paths:
+MCC can talk directly to `chatgpt.com/backend-api/codex/responses` (OpenAI Responses API) using your ChatGPT subscription's OAuth tokens. Four login paths:
 
 1. **Admin UI → Log in with device code** — the default and recommended path; it works across Windows/WSL, SSH, containers, and other remote environments without a localhost callback.
-2. **Admin UI → Browser login (same device)** — browser PKCE for cases where the browser and FCC definitely share the same localhost. Do not use it when FCC runs in WSL and the browser runs on Windows.
+2. **Admin UI → Browser login (same device)** — browser PKCE for cases where the browser and MCC definitely share the same localhost. Do not use it when MCC runs in WSL and the browser runs on Windows.
 3. `fcc-chatgpt-oauth-login` — browser PKCE locally, with immediate device-code fallback under WSL/remote sessions or when the callback cannot start. `--device` forces device login; `--browser` explicitly confirms a same-localhost browser.
-4. **Import Codex CLI Tokens** — after `codex login`, copy the complete renewable credential bundle into FCC without modifying `~/.codex/auth.json`.
+4. **Import Codex CLI Tokens** — after `codex login`, copy the complete renewable credential bundle into MCC without modifying `~/.codex/auth.json`.
 
-FCC stores its renewable credentials separately at `~/.fcc/auth/chatgpt-oauth.json`. The Admin API and `.env` contain only a non-secret managed-credential reference. A raw `CHATGPT_OAUTH_ACCESS_TOKEN` remains supported as an advanced override, but it cannot be refreshed.
+MCC stores its renewable credentials separately at `~/.fcc/auth/chatgpt-oauth.json`. The Admin API and `.env` contain only a non-secret managed-credential reference. A raw `CHATGPT_OAUTH_ACCESS_TOKEN` remains supported as an advanced override, but it cannot be refreshed.
 
-**The model list is discovered, not hardcoded.** The Codex backend answers `401` on its own models endpoint for an OAuth session, so the catalog cannot come from the gateway. FCC reads the [models.dev](https://models.dev) `openai` catalog it already caches and filters it by the same allowlist the Codex CLI uses — so a new GPT-5.x release appears after a **Refresh models** rather than after a new FCC version. A static list is used when that cache is unavailable, so a fresh offline install still has a usable picker.
+**The model list is discovered, not hardcoded.** The Codex backend answers `401` on its own models endpoint for an OAuth session, so the catalog cannot come from the gateway. MCC reads the [models.dev](https://models.dev) `openai` catalog it already caches and filters it by the same allowlist the Codex CLI uses — so a new GPT-5.x release appears after a **Refresh models** rather than after a new MCC version. A static list is used when that cache is unavailable, so a fresh offline install still has a usable picker.
 
 Currently exposed: `gpt-5.5`, `gpt-5.4`, `gpt-5.4-mini`, `gpt-5.3-codex-spark`, `gpt-5.6-luna`, `gpt-5.6-sol`, and `gpt-5.6-terra`. Note that `gpt-5.6` is a family name rather than a callable id on this plan — the bare id returns 404, so only the three named variants are offered. Optional overrides: `CHATGPT_OAUTH_ACCOUNT_ID`, `CHATGPT_OAUTH_BASE_URL`, `CHATGPT_OAUTH_PROXY`.
 
-**ChatGPT OAuth is experimental and unsanctioned.** It is not an official OpenAI API product. The ChatGPT/Codex backend only exposes a limited set of built-in tools, so custom FCC tools may be rejected; use it at your own risk.
+**ChatGPT OAuth is experimental and unsanctioned.** It is not an official OpenAI API product. The ChatGPT/Codex backend only exposes a limited set of built-in tools, so custom MCC tools may be rejected; use it at your own risk.
 
 ### Kimi For Coding Provider
 
@@ -831,7 +831,7 @@ Moonshot's coding-plan endpoint, separate from the standard Kimi platform: OpenA
 
 ## Connect Your Client
 
-For terminal use, start `fcc-server`, then run `fcc-claude`, `fcc-codex`, or `fcc-pi`. Use the guides below for editor integrations.
+For terminal use, start `mcc-server`, then run `fcc-claude`, `fcc-codex`, or `fcc-pi`. Use the guides below for editor integrations.
 
 <details>
 <summary><strong>Claude Code in VS Code</strong></summary>
@@ -866,7 +866,7 @@ model_provider = "fcc"
 model = "nvidia_nim/nvidia/nemotron-3-super-120b-a12b"
 
 [model_providers.fcc]
-name = "Free Claude Code"
+name = "My Claude Code"
 base_url = "http://127.0.0.1:8082/v1"
 http_headers = { Authorization = "Bearer freecc" }
 wire_api = "responses"
@@ -906,7 +906,7 @@ Match the port and token to the Admin UI, then restart the IDE.
 <details>
 <summary><strong>Claude Code still asks you to log in</strong></summary>
 
-If Claude Code asks you to log in after you configure the FCC URL and token, open its state file:
+If Claude Code asks you to log in after you configure the MCC URL and token, open its state file:
 
 - Windows: `%USERPROFILE%\.claude.json`
 - macOS/Linux/WSL: `~/.claude.json`
@@ -971,7 +971,7 @@ Configure integrations from **Admin UI → Messaging**, then click **Validate** 
 | `/stats` | Show session state. |
 | Standalone `/stop` | Cancel all work. |
 | Reply with `/stop` | Cancel only the selected request while other queued requests continue. |
-| Standalone `/clear` | Reset all FCC state and remove every tracked message in that chat, including user prompts, voice notes, FCC replies, Telegram's online notice, and the clear command itself. |
+| Standalone `/clear` | Reset all MCC state and remove every tracked message in that chat, including user prompts, voice notes, MCC replies, Telegram's online notice, and the clear command itself. |
 | Reply with `/clear` | Delete the selected message and its literal platform reply subtree while preserving its ancestors and siblings. |
 
 <details>
@@ -1011,7 +1011,7 @@ Windows PowerShell:
 & ([scriptblock]::Create((irm "https://raw.githubusercontent.com/FiredMosquito831/free-claude-code/main/scripts/install.ps1"))) -VoiceLocal -TorchBackend cu130
 ```
 
-Restart `fcc-server`. In **Admin UI → Messaging → Voice**, enable voice notes, select `cpu`, `cuda`, or `nvidia_nim`, and choose the Whisper model. Local gated models need `HUGGINGFACE_API_KEY`; NVIDIA NIM transcription needs `NVIDIA_NIM_API_KEY`.
+Restart `mcc-server`. In **Admin UI → Messaging → Voice**, enable voice notes, select `cpu`, `cuda`, or `nvidia_nim`, and choose the Whisper model. Local gated models need `HUGGINGFACE_API_KEY`; NVIDIA NIM transcription needs `NVIDIA_NIM_API_KEY`.
 
 </details>
 
@@ -1023,7 +1023,7 @@ Re-run the matching command from [Install Or Update](#install).
 
 ### Uninstall
 
-Stop every running FCC command first. The uninstaller removes the FCC uv tool, verifies every FCC command is gone, and then deletes `~/.fcc/`. It leaves uv, Python, Claude Code, Codex, Pi, and shared PATH entries intact.
+Stop every running MCC command first. The uninstaller removes the MCC uv tool, verifies every MCC command is gone, and then deletes `~/.fcc/`. It leaves uv, Python, Claude Code, Codex, Pi, and shared PATH entries intact.
 
 macOS/Linux:
 

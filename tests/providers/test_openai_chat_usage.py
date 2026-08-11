@@ -8,18 +8,18 @@ import openai
 import pytest
 from httpx import Request, Response
 
-from free_claude_code.core.anthropic import ReasoningReplayMode
-from free_claude_code.core.anthropic.models import MessagesRequest
-from free_claude_code.core.anthropic.stream_contracts import parse_sse_text
-from free_claude_code.core.reasoning import DEFAULT_REASONING_POLICY, ReasoningPolicy
-from free_claude_code.providers.base import ProviderConfig
-from free_claude_code.providers.openai_chat import (
+from my_claude_code.core.anthropic import ReasoningReplayMode
+from my_claude_code.core.anthropic.models import MessagesRequest
+from my_claude_code.core.anthropic.stream_contracts import parse_sse_text
+from my_claude_code.core.reasoning import DEFAULT_REASONING_POLICY, ReasoningPolicy
+from my_claude_code.providers.base import ProviderConfig
+from my_claude_code.providers.openai_chat import (
     OpenAIChatProfile,
     OpenAIChatProvider,
     OpenAIChatRequestPolicy,
 )
-from free_claude_code.providers.openai_chat.reasoning import NO_REASONING
-from free_claude_code.providers.openai_chat.usage import (
+from my_claude_code.providers.openai_chat.reasoning import NO_REASONING
+from my_claude_code.providers.openai_chat.usage import (
     clone_without_stream_usage,
     is_stream_usage_rejection,
     request_stream_usage,

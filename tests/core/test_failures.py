@@ -4,7 +4,7 @@ from dataclasses import FrozenInstanceError, fields, is_dataclass
 
 import pytest
 
-from free_claude_code.core.failures import (
+from my_claude_code.core.failures import (
     ExecutionFailure,
     FailureKind,
     find_execution_failure,

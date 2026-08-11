@@ -6,21 +6,21 @@ from unittest.mock import AsyncMock
 import httpx
 import pytest
 
-from free_claude_code.application.errors import (
+from my_claude_code.application.errors import (
     InvalidRequestError,
 )
-from free_claude_code.config.provider_catalog import CHATGPT_OAUTH_DEFAULT_BASE
-from free_claude_code.core.anthropic.models import Message, MessagesRequest
-from free_claude_code.providers.base import ProviderConfig
-from free_claude_code.providers.chatgpt_oauth import ChatGPTOAuthProvider
-from free_claude_code.providers.chatgpt_oauth.conversion import (
+from my_claude_code.config.provider_catalog import CHATGPT_OAUTH_DEFAULT_BASE
+from my_claude_code.core.anthropic.models import Message, MessagesRequest
+from my_claude_code.providers.base import ProviderConfig
+from my_claude_code.providers.chatgpt_oauth import ChatGPTOAuthProvider
+from my_claude_code.providers.chatgpt_oauth.conversion import (
     build_chatgpt_oauth_request_body,
     chatgpt_tool_call_to_anthropic,
 )
-from free_claude_code.providers.chatgpt_oauth.credentials import (
+from my_claude_code.providers.chatgpt_oauth.credentials import (
     load_chatgpt_oauth_credentials,
 )
-from free_claude_code.providers.chatgpt_oauth.streaming import (
+from my_claude_code.providers.chatgpt_oauth.streaming import (
     ChatGPTOAuthStreamConverter,
 )
 from tests.providers.support import passthrough_rate_limiter
@@ -220,7 +220,7 @@ def test_chatgpt_tool_call_to_anthropic():
 
 
 def test_stream_converter_emits_text_delta():
-    from free_claude_code.core.anthropic.streaming import AnthropicStreamLedger
+    from my_claude_code.core.anthropic.streaming import AnthropicStreamLedger
 
     ledger = AnthropicStreamLedger("msg_1", "gpt-5", input_tokens=0)
     converter = ChatGPTOAuthStreamConverter(ledger)
@@ -234,7 +234,7 @@ def test_stream_converter_emits_text_delta():
 
 
 def test_stream_converter_emits_tool_call():
-    from free_claude_code.core.anthropic.streaming import AnthropicStreamLedger
+    from my_claude_code.core.anthropic.streaming import AnthropicStreamLedger
 
     ledger = AnthropicStreamLedger("msg_1", "gpt-5", input_tokens=0)
     converter = ChatGPTOAuthStreamConverter(ledger)
@@ -322,8 +322,8 @@ def test_load_credentials_prefers_explicit_token():
 
 
 def test_runtime_does_not_implicitly_read_codex_auth_file(tmp_path, monkeypatch):
-    from free_claude_code.providers.chatgpt_oauth import credentials as creds_module
-    from free_claude_code.providers.chatgpt_oauth.credentials import ChatGPTOAuthError
+    from my_claude_code.providers.chatgpt_oauth import credentials as creds_module
+    from my_claude_code.providers.chatgpt_oauth.credentials import ChatGPTOAuthError
 
     codex_home = tmp_path / ".codex"
     codex_home.mkdir()
@@ -352,7 +352,7 @@ def _jwt(payload_dict: dict) -> str:
 
 
 def _store_managed_credentials(tmp_path, monkeypatch, tokens):
-    from free_claude_code.providers.chatgpt_oauth import credentials as creds_module
+    from my_claude_code.providers.chatgpt_oauth import credentials as creds_module
 
     auth_path = tmp_path / ".fcc" / "auth" / "chatgpt-oauth.json"
     monkeypatch.setattr(
@@ -402,7 +402,7 @@ def test_load_credentials_falls_back_to_organization_id(tmp_path, monkeypatch):
 def test_refresh_persists_rotated_tokens_to_managed_auth_file(tmp_path, monkeypatch):
     import time
 
-    from free_claude_code.providers.chatgpt_oauth import credentials as creds_module
+    from my_claude_code.providers.chatgpt_oauth import credentials as creds_module
 
     expired_access = _jwt({"exp": int(time.time()) - 100})
     auth_path = _store_managed_credentials(
@@ -434,7 +434,7 @@ def test_refresh_persists_rotated_tokens_to_managed_auth_file(tmp_path, monkeypa
 
 
 def test_refresh_uses_current_origin_request_shape(monkeypatch):
-    from free_claude_code.providers.chatgpt_oauth import credentials as creds_module
+    from my_claude_code.providers.chatgpt_oauth import credentials as creds_module
 
     captured: dict = {}
 
@@ -470,7 +470,7 @@ def test_refresh_uses_current_origin_request_shape(monkeypatch):
 def test_import_codex_copies_renewable_bundle_without_modifying_source(
     tmp_path, monkeypatch
 ):
-    from free_claude_code.providers.chatgpt_oauth import credentials as creds_module
+    from my_claude_code.providers.chatgpt_oauth import credentials as creds_module
 
     codex_home = tmp_path / ".codex"
     codex_home.mkdir()
@@ -510,11 +510,11 @@ def test_import_codex_copies_renewable_bundle_without_modifying_source(
 def test_settings_references_managed_credentials_without_copying_secret(
     tmp_path, monkeypatch
 ):
-    from free_claude_code.config import settings as settings_module
-    from free_claude_code.config.constants import (
+    from my_claude_code.config import settings as settings_module
+    from my_claude_code.config.constants import (
         CHATGPT_OAUTH_MANAGED_CREDENTIAL_REFERENCE,
     )
-    from free_claude_code.config.settings import Settings
+    from my_claude_code.config.settings import Settings
 
     managed_path = tmp_path / ".fcc" / "auth" / "chatgpt-oauth.json"
     managed_path.parent.mkdir(parents=True)
@@ -536,7 +536,7 @@ def test_settings_references_managed_credentials_without_copying_secret(
 
 
 def test_rejected_refresh_removes_only_fcc_managed_credentials(tmp_path, monkeypatch):
-    from free_claude_code.providers.chatgpt_oauth import credentials as creds_module
+    from my_claude_code.providers.chatgpt_oauth import credentials as creds_module
 
     managed_path = _store_managed_credentials(
         tmp_path,
@@ -567,7 +567,7 @@ def test_rejected_refresh_removes_only_fcc_managed_credentials(tmp_path, monkeyp
 
 
 def test_write_managed_auth_file_stores_complete_bundle(tmp_path):
-    from free_claude_code.providers.chatgpt_oauth import oauth_login
+    from my_claude_code.providers.chatgpt_oauth import oauth_login
 
     auth_path = tmp_path / ".fcc" / "auth" / "chatgpt-oauth.json"
     oauth_login._write_managed_auth_file(
@@ -612,10 +612,10 @@ def test_load_credentials_extracts_account_id_from_jwt(tmp_path, monkeypatch):
 
 
 def test_build_headers_matches_opencode_shape(chatgpt_oauth_provider):
-    from free_claude_code.providers.chatgpt_oauth.credentials import (
+    from my_claude_code.providers.chatgpt_oauth.credentials import (
         ChatGPTOAuthCredentials,
     )
-    from free_claude_code.providers.chatgpt_oauth.provider import _build_headers
+    from my_claude_code.providers.chatgpt_oauth.provider import _build_headers
 
     credentials = ChatGPTOAuthCredentials(
         access_token="test_token",
@@ -632,7 +632,7 @@ def test_build_headers_matches_opencode_shape(chatgpt_oauth_provider):
 
 
 def test_session_id_is_stable_per_provider():
-    from free_claude_code.providers.base import ProviderConfig
+    from my_claude_code.providers.base import ProviderConfig
 
     config = ProviderConfig(
         api_key="x",
@@ -659,7 +659,7 @@ def test_session_id_is_stable_per_provider():
 
 
 def test_model_filter_logic():
-    from free_claude_code.providers.chatgpt_oauth.provider import (
+    from my_claude_code.providers.chatgpt_oauth.provider import (
         _is_chatgpt_oauth_model,
     )
 
@@ -679,7 +679,7 @@ def test_model_filter_logic():
 def test_perform_chatgpt_oauth_login_writes_managed_auth_file(tmp_path, monkeypatch):
     import base64
 
-    from free_claude_code.providers.chatgpt_oauth import oauth_login
+    from my_claude_code.providers.chatgpt_oauth import oauth_login
 
     monkeypatch.setattr(oauth_login, "CHATGPT_OAUTH_POLL_SAFETY_MS", 1)
     auth_file = tmp_path / ".fcc" / "auth" / "chatgpt-oauth.json"
@@ -787,11 +787,11 @@ async def test_stream_response_refreshes_managed_credentials_once_after_401(
 ):
     from unittest.mock import MagicMock
 
-    from free_claude_code.config.constants import (
+    from my_claude_code.config.constants import (
         CHATGPT_OAUTH_MANAGED_CREDENTIAL_REFERENCE,
     )
-    from free_claude_code.providers.chatgpt_oauth import provider as provider_module
-    from free_claude_code.providers.chatgpt_oauth.credentials import (
+    from my_claude_code.providers.chatgpt_oauth import provider as provider_module
+    from my_claude_code.providers.chatgpt_oauth.credentials import (
         ChatGPTOAuthCredentials,
     )
 
@@ -864,7 +864,7 @@ async def test_list_model_ids_discovers_new_models_from_models_dev(
     The backend's own models endpoint answers 401 for an OAuth session, which
     is why discovery reads the models.dev index FCC already caches.
     """
-    from free_claude_code.providers.chatgpt_oauth import provider as provider_module
+    from my_claude_code.providers.chatgpt_oauth import provider as provider_module
 
     monkeypatch.setattr(
         provider_module,
@@ -885,7 +885,7 @@ async def test_list_model_ids_discovers_new_models_from_models_dev(
 async def test_list_model_ids_falls_back_when_models_dev_is_unavailable(
     chatgpt_oauth_provider, monkeypatch
 ):
-    from free_claude_code.providers.chatgpt_oauth import provider as provider_module
+    from my_claude_code.providers.chatgpt_oauth import provider as provider_module
 
     monkeypatch.setattr(
         provider_module,

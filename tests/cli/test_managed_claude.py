@@ -1,7 +1,7 @@
 import os
 
-from free_claude_code.cli.claude_env import build_claude_proxy_env
-from free_claude_code.cli.managed.claude import (
+from my_claude_code.cli.claude_env import build_claude_proxy_env
+from my_claude_code.cli.managed.claude import (
     MANAGED_CLAUDE_MODEL_TIER,
     ManagedClaudeConfig,
     ManagedClaudeParseState,
@@ -11,7 +11,7 @@ from free_claude_code.cli.managed.claude import (
     extract_managed_claude_session_id,
     parse_managed_claude_stdout_line,
 )
-from free_claude_code.cli.managed.diagnostics import classify_managed_claude_stderr
+from my_claude_code.cli.managed.diagnostics import classify_managed_claude_stderr
 
 
 def _config(**overrides: object) -> ManagedClaudeConfig:

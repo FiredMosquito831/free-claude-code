@@ -6,20 +6,20 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
-from free_claude_code.application.model_metadata import (
+from my_claude_code.application.model_metadata import (
     ProviderModelInfo,
     ProviderModelRefreshResult,
 )
-from free_claude_code.application.release_updates import UpgradeResult
-from free_claude_code.config.admin.values import MASKED_SECRET
-from free_claude_code.config.server_urls import local_admin_url
-from free_claude_code.config.settings import Settings
-from free_claude_code.providers.base import BaseProvider, ProviderConfig
-from free_claude_code.providers.chatgpt_oauth.browser_login import (
+from my_claude_code.application.release_updates import UpgradeResult
+from my_claude_code.config.admin.values import MASKED_SECRET
+from my_claude_code.config.server_urls import local_admin_url
+from my_claude_code.config.settings import Settings
+from my_claude_code.providers.base import BaseProvider, ProviderConfig
+from my_claude_code.providers.chatgpt_oauth.browser_login import (
     ChatGPTOAuthBrowserUnavailableError,
 )
-from free_claude_code.providers.credential_rotation import CredentialRotationState
-from free_claude_code.providers.runtime.rotating import RotatingProvider
+from my_claude_code.providers.credential_rotation import CredentialRotationState
+from my_claude_code.providers.runtime.rotating import RotatingProvider
 from tests.api.support import create_test_app, provider_manager_for_app
 
 
@@ -38,7 +38,7 @@ async def test_successful_upgrade_schedules_process_restart_after_response(
         )
 
     monkeypatch.setattr(
-        "free_claude_code.api.admin_routes.perform_upgrade", successful_upgrade
+        "my_claude_code.api.admin_routes.perform_upgrade", successful_upgrade
     )
 
     with _local_client(app) as client:
@@ -59,7 +59,7 @@ async def test_failed_upgrade_does_not_restart(monkeypatch) -> None:
         return UpgradeResult(ok=False, message="checksum mismatch")
 
     monkeypatch.setattr(
-        "free_claude_code.api.admin_routes.perform_upgrade", failed_upgrade
+        "my_claude_code.api.admin_routes.perform_upgrade", failed_upgrade
     )
 
     with _local_client(app) as client:
@@ -186,7 +186,7 @@ def test_admin_unexpected_errors_are_never_cached(monkeypatch, tmp_path):
     )
 
     with patch(
-        "free_claude_code.api.admin_routes.load_config_response",
+        "my_claude_code.api.admin_routes.load_config_response",
         side_effect=RuntimeError("test error"),
     ):
         response = client.get("/admin/api/config")
@@ -205,7 +205,7 @@ def test_admin_cache_policy_does_not_match_similar_public_paths(monkeypatch, tmp
 
 
 def test_admin_api_fetches_bypass_browser_cache():
-    script = Path("src/free_claude_code/api/admin_static/admin.js").read_text(
+    script = Path("src/my_claude_code/api/admin_static/admin.js").read_text(
         encoding="utf-8"
     )
 
@@ -213,7 +213,7 @@ def test_admin_api_fetches_bypass_browser_cache():
 
 
 def test_admin_static_exposes_explicit_chatgpt_oauth_login_methods():
-    script = Path("src/free_claude_code/api/admin_static/admin.js").read_text(
+    script = Path("src/my_claude_code/api/admin_static/admin.js").read_text(
         encoding="utf-8"
     )
 
@@ -226,13 +226,13 @@ def test_admin_static_exposes_explicit_chatgpt_oauth_login_methods():
 
 
 def test_admin_static_exposes_professional_observability_controls():
-    html = Path("src/free_claude_code/api/admin_static/index.html").read_text(
+    html = Path("src/my_claude_code/api/admin_static/index.html").read_text(
         encoding="utf-8"
     )
-    script = Path("src/free_claude_code/api/admin_static/admin.js").read_text(
+    script = Path("src/my_claude_code/api/admin_static/admin.js").read_text(
         encoding="utf-8"
     )
-    styles = Path("src/free_claude_code/api/admin_static/admin.css").read_text(
+    styles = Path("src/my_claude_code/api/admin_static/admin.css").read_text(
         encoding="utf-8"
     )
 
@@ -318,7 +318,7 @@ def test_admin_page_no_longer_renders_global_status_header(monkeypatch, tmp_path
 
 
 def test_admin_static_no_longer_fetches_global_status_header():
-    script = Path("src/free_claude_code/api/admin_static/admin.js").read_text(
+    script = Path("src/my_claude_code/api/admin_static/admin.js").read_text(
         encoding="utf-8"
     )
 
@@ -330,7 +330,7 @@ def test_admin_static_no_longer_fetches_global_status_header():
 
 
 def test_admin_static_hides_managed_source_label():
-    script = Path("src/free_claude_code/api/admin_static/admin.js").read_text(
+    script = Path("src/my_claude_code/api/admin_static/admin.js").read_text(
         encoding="utf-8"
     )
 
@@ -341,7 +341,7 @@ def test_admin_static_hides_managed_source_label():
 
 
 def test_admin_static_places_reasoning_fields_in_model_config():
-    script = Path("src/free_claude_code/api/admin_static/admin.js").read_text(
+    script = Path("src/my_claude_code/api/admin_static/admin.js").read_text(
         encoding="utf-8"
     )
 
@@ -350,10 +350,10 @@ def test_admin_static_places_reasoning_fields_in_model_config():
 
 
 def test_admin_static_model_combobox_owns_dropdown_and_search_behavior():
-    script = Path("src/free_claude_code/api/admin_static/admin.js").read_text(
+    script = Path("src/my_claude_code/api/admin_static/admin.js").read_text(
         encoding="utf-8"
     )
-    styles = Path("src/free_claude_code/api/admin_static/admin.css").read_text(
+    styles = Path("src/my_claude_code/api/admin_static/admin.css").read_text(
         encoding="utf-8"
     )
 
@@ -376,7 +376,7 @@ def test_admin_static_model_combobox_owns_dropdown_and_search_behavior():
 
 
 def test_admin_static_model_combobox_preserves_custom_slugs_and_none_semantics():
-    script = Path("src/free_claude_code/api/admin_static/admin.js").read_text(
+    script = Path("src/my_claude_code/api/admin_static/admin.js").read_text(
         encoding="utf-8"
     )
 
@@ -725,7 +725,7 @@ def test_credential_key_management_rejects_duplicates_and_bad_input(
 
 
 def test_credential_key_management_masks_short_keys(monkeypatch, tmp_path):
-    from free_claude_code.api.admin_routes import _mask_credential_key
+    from my_claude_code.api.admin_routes import _mask_credential_key
 
     assert _mask_credential_key("ab") == "****"
     assert _mask_credential_key("abcdef") == "ab…ef"
@@ -1337,7 +1337,7 @@ def test_admin_local_provider_status_reports_reachable(monkeypatch, tmp_path):
         async def get(self, url: str):
             return httpx.Response(200, json={"data": []})
 
-    with patch("free_claude_code.api.admin_routes.httpx.AsyncClient", FakeAsyncClient):
+    with patch("my_claude_code.api.admin_routes.httpx.AsyncClient", FakeAsyncClient):
         response = _local_client(app).get("/admin/api/providers/local-status")
 
     assert response.status_code == 200
@@ -1371,7 +1371,7 @@ def test_admin_chatgpt_oauth_initiate_returns_device_code(monkeypatch, tmp_path)
         return ("device_1", "ABCD-EFGH", 5000)
 
     with patch(
-        "free_claude_code.api.admin_routes._initiate_device_auth",
+        "my_claude_code.api.admin_routes._initiate_device_auth",
         fake_initiate,
     ):
         response = _local_client(app).post("/admin/api/chatgpt-oauth/initiate")
@@ -1392,7 +1392,7 @@ def test_admin_chatgpt_oauth_browser_initiate_uses_remote_guard_by_default(
     app = create_test_app()
 
     with patch(
-        "free_claude_code.api.admin_routes.start_browser_login",
+        "my_claude_code.api.admin_routes.start_browser_login",
         side_effect=ChatGPTOAuthBrowserUnavailableError("device login required"),
     ) as start_login:
         response = _local_client(app).post("/admin/api/chatgpt-oauth/browser/initiate")
@@ -1415,7 +1415,7 @@ def test_admin_chatgpt_oauth_browser_initiate_allows_explicit_same_host_override
     }
 
     with patch(
-        "free_claude_code.api.admin_routes.start_browser_login",
+        "my_claude_code.api.admin_routes.start_browser_login",
         return_value=payload,
     ) as start_login:
         response = _local_client(app).post(
@@ -1440,7 +1440,7 @@ def test_admin_chatgpt_oauth_exchange_never_returns_bearer_token(monkeypatch, tm
         }
 
     with patch(
-        "free_claude_code.api.admin_routes.exchange_device_auth_for_tokens",
+        "my_claude_code.api.admin_routes.exchange_device_auth_for_tokens",
         fake_exchange,
     ):
         response = _local_client(app).post(
@@ -1465,7 +1465,7 @@ def test_admin_chatgpt_oauth_exchange_returns_pending(monkeypatch, tmp_path):
         return None
 
     with patch(
-        "free_claude_code.api.admin_routes.exchange_device_auth_for_tokens",
+        "my_claude_code.api.admin_routes.exchange_device_auth_for_tokens",
         fake_exchange,
     ):
         response = _local_client(app).post(
@@ -1496,7 +1496,7 @@ def test_admin_chatgpt_oauth_import_codex_returns_managed_reference(
     _clear_process_config(monkeypatch)
     app = create_test_app()
 
-    from free_claude_code.providers.chatgpt_oauth.credentials import (
+    from my_claude_code.providers.chatgpt_oauth.credentials import (
         ChatGPTOAuthCredentials,
     )
 
@@ -1509,7 +1509,7 @@ def test_admin_chatgpt_oauth_import_codex_returns_managed_reference(
         )
 
     with patch(
-        "free_claude_code.api.admin_routes.import_codex_cli_tokens",
+        "my_claude_code.api.admin_routes.import_codex_cli_tokens",
         fake_import,
     ):
         response = _local_client(app).post("/admin/api/chatgpt-oauth/import-codex")
@@ -1527,13 +1527,13 @@ def test_admin_chatgpt_oauth_import_codex_reports_missing_tokens(monkeypatch, tm
     _clear_process_config(monkeypatch)
     app = create_test_app()
 
-    from free_claude_code.providers.chatgpt_oauth.credentials import ChatGPTOAuthError
+    from my_claude_code.providers.chatgpt_oauth.credentials import ChatGPTOAuthError
 
     def fake_import():
         raise ChatGPTOAuthError("No Codex CLI access token found")
 
     with patch(
-        "free_claude_code.api.admin_routes.import_codex_cli_tokens",
+        "my_claude_code.api.admin_routes.import_codex_cli_tokens",
         fake_import,
     ):
         response = _local_client(app).post("/admin/api/chatgpt-oauth/import-codex")
@@ -1555,7 +1555,7 @@ def test_admin_static_keeps_every_field_input_in_the_document():
     has no DOM harness; this is the same guard-test approach the installers
     use for behaviour that cannot be executed in CI.
     """
-    script = Path("src/free_claude_code/api/admin_static/admin.js").read_text(
+    script = Path("src/my_claude_code/api/admin_static/admin.js").read_text(
         encoding="utf-8"
     )
 
@@ -1578,7 +1578,7 @@ def test_admin_static_styles_every_class_the_script_emits():
     Scoped to the feature prefixes rather than every class in the file, so it
     stays a real assertion instead of a list nobody maintains.
     """
-    static = Path("src/free_claude_code/api/admin_static")
+    static = Path("src/my_claude_code/api/admin_static")
     script = (static / "admin.js").read_text(encoding="utf-8")
     styles = (static / "admin.css").read_text(encoding="utf-8")
 
@@ -1680,7 +1680,7 @@ def test_admin_static_hides_the_raw_field_for_a_pooled_credential():
     It stays in the document so the shared dirty/apply machinery is untouched,
     which is why this asserts on how it is hidden rather than that it is absent.
     """
-    static = Path("src/free_claude_code/api/admin_static")
+    static = Path("src/my_claude_code/api/admin_static")
     script = (static / "admin.js").read_text(encoding="utf-8")
     styles = (static / "admin.css").read_text(encoding="utf-8")
 

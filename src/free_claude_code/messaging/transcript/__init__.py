@@ -1,6 +1,3 @@
-"""Public transcript API for messaging UI rendering."""
+"""Compatibility re-export of ``my_claude_code.messaging.transcript``."""
 
-from .buffer import TranscriptBuffer
-from .context import RenderCtx
-
-__all__ = ["RenderCtx", "TranscriptBuffer"]
+from my_claude_code.messaging.transcript import *  # noqa: F403

@@ -11,8 +11,8 @@ from typing import Any
 import httpx
 import pytest
 
-from free_claude_code.config.env_template import load_env_template
-from free_claude_code.config.provider_catalog import PROVIDER_CATALOG
+from my_claude_code.config.env_template import load_env_template
+from my_claude_code.config.provider_catalog import PROVIDER_CATALOG
 from smoke.lib.config import SmokeConfig
 from smoke.lib.server import RunningServer, start_server
 

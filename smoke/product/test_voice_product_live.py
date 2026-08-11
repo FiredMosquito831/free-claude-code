@@ -3,8 +3,8 @@ from pathlib import Path
 
 import pytest
 
-from free_claude_code.messaging.transcription import TranscriptionService
-from free_claude_code.providers.nvidia_nim.voice import NvidiaNimTranscriber
+from my_claude_code.messaging.transcription import TranscriptionService
+from my_claude_code.providers.nvidia_nim.voice import NvidiaNimTranscriber
 from smoke.lib.config import SmokeConfig
 from smoke.lib.e2e import VoiceFixtureDriver
 

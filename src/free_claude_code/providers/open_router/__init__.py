@@ -1,5 +1,3 @@
-"""OpenRouter provider exports."""
+"""Compatibility re-export of ``my_claude_code.providers.open_router``."""
 
-from .client import OpenRouterProvider
-
-__all__ = ["OpenRouterProvider"]
+from my_claude_code.providers.open_router import *  # noqa: F403

@@ -2,13 +2,13 @@
 
 import pytest
 
-from free_claude_code.config.settings import Settings
-from free_claude_code.websearch import registry
-from free_claude_code.websearch.errors import (
+from my_claude_code.config.settings import Settings
+from my_claude_code.websearch import registry
+from my_claude_code.websearch.errors import (
     WebSearchConfigError,
     WebSearchUpstreamError,
 )
-from free_claude_code.websearch.registry import (
+from my_claude_code.websearch.registry import (
     SearchOutcome,
     active_provider,
     build_provider,
@@ -332,7 +332,7 @@ class TestRecorderSeam:
         self, monkeypatch, tmp_path
     ) -> None:
         # Worker B landed: the seam resolves to websearch.analytics.record_search.
-        from free_claude_code.websearch.analytics import (
+        from my_claude_code.websearch.analytics import (
             default_websearch_db_path,
             record_search,
             record_search_route,

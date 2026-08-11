@@ -3,7 +3,7 @@
 import httpx
 import openai
 
-from free_claude_code.providers.stream_recovery import (
+from my_claude_code.providers.stream_recovery import (
     EARLY_TRANSPARENT_MAX_RETRIES,
     EARLY_TRANSPARENT_TOTAL_ATTEMPTS,
     MIDSTREAM_RECOVERY_ATTEMPTS,

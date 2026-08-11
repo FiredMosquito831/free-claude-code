@@ -1,5 +1,3 @@
-"""Nous Portal provider exports."""
+"""Compatibility re-export of ``my_claude_code.providers.nous_portal``."""
 
-from .client import NousPortalProvider
-
-__all__ = ["NousPortalProvider"]
+from my_claude_code.providers.nous_portal import *  # noqa: F403

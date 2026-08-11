@@ -1,4 +1,4 @@
-# Free Claude Code — Complete Usage Guide
+# My Claude Code — Complete Usage Guide
 
 From a fresh machine to a tuned setup: installing, connecting Claude Code and Claude Desktop, adding providers, routing models, web search, and analytics.
 
@@ -27,7 +27,7 @@ The [README](../README.md) is the overview. This is the long-form manual.
 
 ## 1. How it works
 
-Free Claude Code is a **local server that speaks Anthropic's API**. Your coding agent believes it is talking to Anthropic. The proxy receives that request, forwards it to whichever provider you configured — NVIDIA NIM, OpenRouter, a local Ollama, 27 of them — and translates the response back into Anthropic's wire format.
+My Claude Code is a **local server that speaks Anthropic's API**. Your coding agent believes it is talking to Anthropic. The proxy receives that request, forwards it to whichever provider you configured — NVIDIA NIM, OpenRouter, a local Ollama, 27 of them — and translates the response back into Anthropic's wire format.
 
 <div align="center">
   <img src="../assets/how-it-works.svg" alt="Request flow from agent through the proxy to a provider" width="760">
@@ -38,11 +38,11 @@ Because the translation happens at the protocol level, streaming, tool use, reas
 Three consequences worth internalising before you start:
 
 1. **The server must be running.** It's a daemon, not a library. Close the terminal and your agent stops working.
-2. **Your agent's model picker can list FCC's catalog**, not Anthropic's. Selecting "Sonnet" routes to whatever *you* mapped Sonnet to. Codex and Pi's pickers always do this; Claude Code's needs model discovery turned on (`fcc-claude --discover-models` or `fcc-claude-old`) — see [§4](#4-tutorial-connect-claude-code-cli).
+2. **Your agent's model picker can list MCC's catalog**, not Anthropic's. Selecting "Sonnet" routes to whatever *you* mapped Sonnet to. Codex and Pi's pickers always do this; Claude Code's needs model discovery turned on (`fcc-claude --discover-models` or `fcc-claude-old`) — see [§4](#4-tutorial-connect-claude-code-cli).
 3. **Credentials live server-side.** Your agent holds a token that only authenticates it to the proxy; the real provider keys never leave your machine.
 
 <div align="center">
-  <img src="../assets/pic.png" alt="Claude Code running through the Free Claude Code proxy" width="720">
+  <img src="../assets/pic.png" alt="Claude Code running through the My Claude Code proxy" width="720">
   <p><em>Claude Code, running normally, backed by a provider of your choosing.</em></p>
 </div>
 
@@ -76,19 +76,19 @@ curl -fsSL "https://raw.githubusercontent.com/FiredMosquito831/free-claude-code/
 
 ### Then reopen your terminal
 
-**This step catches almost everyone.** The installer appends `~/.local/bin` to your `PATH`, and an already-open shell will never see it. If `fcc-server` appears "not found" immediately after a successful install, this is why.
+**This step catches almost everyone.** The installer appends `~/.local/bin` to your `PATH`, and an already-open shell will never see it. If `mcc-server` appears "not found" immediately after a successful install, this is why.
 
 Verify:
 
 ```bash
-fcc-server --version
+mcc-server --version
 ```
 
 ### What the installer does — and doesn't
 
 1. Installs `uv` (the Python tool runner) if missing or too old.
 2. Looks up the **latest** release, downloads its wheel, and **verifies the SHA-256 that GitHub publishes for that asset**. A mismatch aborts rather than running unverified code.
-3. Installs the package and puts `fcc-server`, `fcc-claude`, `fcc-claude-old`, `fcc-codex` and `fcc-pi` on your `PATH`.
+3. Installs the package and puts `mcc-server`, `fcc-claude`, `fcc-claude-old`, `fcc-codex` and `fcc-pi` on your `PATH`.
 
 **It does not install Claude Code, Codex, or Pi.** Those are separate third-party tools and the proxy doesn't need any of them to run. Install whichever you actually use, yourself — the `fcc-*` launchers simply point an agent you already have at the proxy.
 
@@ -105,7 +105,7 @@ Add `--dry-run` (`-DryRun`) to print what it would do without changing anything.
 ## 3. First run
 
 ```bash
-fcc-server
+mcc-server
 ```
 
 Keep this process running. Once healthy, the Admin UI opens in your browser automatically (disable with `FCC_OPEN_BROWSER=0`). The address is always printed in the startup log — by default:
@@ -190,11 +190,11 @@ If it still shows Anthropic's own endpoint, the settings file wasn't picked up �
 
 ### Step 4 — pick a model
 
-No model overrides are needed — FCC exposes native **Fable / Opus / Sonnet / Haiku** tier models, so you can type a tier name at the `/model` prompt either way. Claude Code's built-in *picker*, though, only lists the FCC catalog once model discovery is on: add `"CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY": "1"` to the `env` block from Step 2, or use `fcc-claude --discover-models` from the Shortcut below.
+No model overrides are needed — MCC exposes native **Fable / Opus / Sonnet / Haiku** tier models, so you can type a tier name at the `/model` prompt either way. Claude Code's built-in *picker*, though, only lists the MCC catalog once model discovery is on: add `"CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY": "1"` to the `env` block from Step 2, or use `fcc-claude --discover-models` from the Shortcut below.
 
 <div align="center">
-  <img src="../assets/cc-model-picker.png" alt="Claude Code model picker showing FCC gateway models" width="720">
-  <p><em><code>/model</code> in Claude Code, listing the FCC catalog (model discovery on).</em></p>
+  <img src="../assets/cc-model-picker.png" alt="Claude Code model picker showing MCC gateway models" width="720">
+  <p><em><code>/model</code> in Claude Code, listing the MCC catalog (model discovery on).</em></p>
 </div>
 
 ### Shortcut
@@ -260,7 +260,7 @@ The app restarts and gains a **Developer** menu.
 | **Model discovery** | on |
 
 <div align="center">
-  <img src="../assets/claude-desktop-gateway-config.png" alt="Claude Desktop third-party inference settings filled in for Free Claude Code" width="780">
+  <img src="../assets/claude-desktop-gateway-config.png" alt="Claude Desktop third-party inference settings filled in for My Claude Code" width="780">
 </div>
 
 Then click **Apply Changes**.
@@ -269,11 +269,11 @@ Use the port from your server's startup log if it isn't `8082`, and match the AP
 
 ### Step 4 — test before restarting
 
-The dialog has **Test connection** and **Test model discovery**. Both hit your running FCC server, so use them to confirm the setup *before* restarting — **the server must be running** or they will fail.
+The dialog has **Test connection** and **Test model discovery**. Both hit your running MCC server, so use them to confirm the setup *before* restarting — **the server must be running** or they will fail.
 
 ### Step 5 — restart the app
 
-With **Model discovery** on, the app populates its picker from FCC's `/v1/models` at launch, so you can leave **Model list** empty.
+With **Model discovery** on, the app populates its picker from MCC's `/v1/models` at launch, so you can leave **Model list** empty.
 
 **Two things to expect:**
 
@@ -287,18 +287,18 @@ With **Model discovery** on, the app populates its picker from FCC's `/v1/models
 Both have launchers that configure the environment for you:
 
 ```bash
-fcc-codex      # Codex CLI against the local FCC Responses provider
+fcc-codex      # Codex CLI against the local MCC Responses provider
 fcc-pi         # Pi
 ```
 
-Codex reads a model catalog that FCC generates, so its own picker works normally:
+Codex reads a model catalog that MCC generates, so its own picker works normally:
 
 <div align="center">
-  <img src="../assets/codex-model-picker.png" alt="Codex model picker with the generated FCC catalog" width="720">
+  <img src="../assets/codex-model-picker.png" alt="Codex model picker with the generated MCC catalog" width="720">
 </div>
 
 <div align="center">
-  <img src="../assets/codex.png" alt="Codex CLI running through Free Claude Code" width="720">
+  <img src="../assets/codex.png" alt="Codex CLI running through My Claude Code" width="720">
 </div>
 
 **Editor integrations** work the same way — Claude Code and Codex in VS Code, or Claude Code through JetBrains ACP. Point them at the proxy address and they behave normally.
@@ -318,7 +318,7 @@ Open the **Providers** tab. Every provider is one card in a single searchable gr
 1. **Find the provider** — search by name or by variable name.
 2. **Press Configure.** The card expands and opens that provider's key pool.
 3. **Paste your key into "Add key"** and press it. Keys are saved immediately — you do not need **Apply** for them. To add several at once, paste them separated by commas; keys you already have are skipped rather than rejecting the whole paste.
-4. **Press Refresh models.** This makes a real API call to that provider. A model count means the key works *and* FCC can read that provider's catalog.
+4. **Press Refresh models.** This makes a real API call to that provider. A model count means the key works *and* MCC can read that provider's catalog.
 5. **Choose the model** on the **Model Config** tab. There is no "active provider" to select — the model ref you set there decides which provider serves a request.
 
 A provider holds a **pool** of keys, not a single value. Each key in the pool shows its own health (healthy, cooling down, locked out) and has its own **Remove**, which also takes effect immediately. If you added more than one key, pick a **Rotation** policy and press **Apply** — rotation is a restart-required setting, so the server restarts when you apply it.
@@ -345,7 +345,7 @@ NVIDIA_NIM_API_KEY="nvapi-..."
 OPEN_ROUTER_API_KEY="sk-or-..."
 ```
 
-Restart `fcc-server` afterwards.
+Restart `mcc-server` afterwards.
 
 ### Local providers
 
@@ -362,7 +362,7 @@ These take no credentials — the key field stays empty and validation just chec
 
 ## 8. Model tiers and routing
 
-FCC routes by **tier**, not by a single model. Fable, Opus, Sonnet, Haiku and a fallback each map to a real model on your provider.
+MCC routes by **tier**, not by a single model. Fable, Opus, Sonnet, Haiku and a fallback each map to a real model on your provider.
 
 <div align="center">
   <img src="../assets/admin-model-config.png" alt="Model tier configuration" width="860">
@@ -393,7 +393,7 @@ Each chain belongs to its own tier and they are never merged: a tier with its ow
 | halfway through streaming its answer | the request fails |
 | at any point, for a **non-streaming** request | the next model takes over — nothing reached you yet |
 
-A chain rescues the failures that happen before the first word, not the ones that happen at word five hundred. Switching models mid-answer would splice two different replies together, so FCC refuses to.
+A chain rescues the failures that happen before the first word, not the ones that happen at word five hundred. Switching models mid-answer would splice two different replies together, so MCC refuses to.
 
 **A model that goes quiet is a failure too.** Accepting a request and then producing nothing looks, to a proxy with no deadline, exactly like thinking hard — so without a limit it holds the request until the transport gives up, and the chain gets its turn minutes later. Three settings on the **Limits** tab bound that:
 
@@ -403,7 +403,7 @@ A chain rescues the failures that happen before the first word, not the ones tha
 | Total request budget | `600s` | The whole request, across every attempt and retry. A stream that already started cannot be replaced, but it can be stopped. |
 | Bench a model after / for | `3` / `30s` | Skip a model that just failed repeatedly instead of re-paying its timeout on every request. |
 
-If every model on a route is benched, FCC tries them in order anyway — skipping a bad model is an optimisation, refusing to try anything is an outage.
+If every model on a route is benched, MCC tries them in order anyway — skipping a bad model is an optimisation, refusing to try anything is an outage.
 
 Requests that name a provider and model directly (`open_router/…`) are never redirected. An explicit choice is honoured as given.
 
@@ -417,13 +417,13 @@ The adapter is a route like any other, so it gets its own **Add fallback** chain
 
 ### Reasoning control
 
-Providers expose reasoning differently. FCC resolves your intent once at the boundary and each provider adapter translates it, so you configure it in one place rather than per provider. See the Model Config tab.
+Providers expose reasoning differently. MCC resolves your intent once at the boundary and each provider adapter translates it, so you configure it in one place rather than per provider. See the Model Config tab.
 
 ---
 
 ## 9. Web search
 
-Claude Code's `web_search` is an Anthropic **server tool**: normally Anthropic executes the search and bills you for it. FCC intercepts and fulfils it locally against a provider you choose, so **no Anthropic search credits are used**, and it works with any model provider.
+Claude Code's `web_search` is an Anthropic **server tool**: normally Anthropic executes the search and bills you for it. MCC intercepts and fulfils it locally against a provider you choose, so **no Anthropic search credits are used**, and it works with any model provider.
 
 <div align="center">
   <img src="../assets/admin-websearch.png" alt="Web search configuration and analytics" width="860">
@@ -467,7 +467,7 @@ Extracted text has its **own cap**, separate from the snippet cap, so opting in 
 
 ### Restricting searches to specific sites
 
-Claude Code declares `allowed_domains`, `blocked_domains` and `max_uses` on its `web_search` tool. FCC reads them and forwards them:
+Claude Code declares `allowed_domains`, `blocked_domains` and `max_uses` on its `web_search` tool. MCC reads them and forwards them:
 
 ```json
 {
@@ -719,7 +719,7 @@ So on Windows, **Update now** downloads and verifies the wheel, then hands it to
 
 > *Update staged — stop the server to finish installing*
 
-Stop `fcc-server`, the update applies itself, start it again on the new version. **Your working install is untouched until that moment**, so a failed update can't strand you. If the deferred install does fail, the dashboard reports it on the next start.
+Stop `mcc-server`, the update applies itself, start it again on the new version. **Your working install is untouched until that moment**, so a failed update can't strand you. If the deferred install does fail, the dashboard reports it on the next start.
 
 WSL, Linux and macOS install in place, because they can replace files that are still open.
 
@@ -758,7 +758,7 @@ Provider API keys are never sent to your agent, never written to the analytics s
 
 ## 14. Troubleshooting
 
-**`fcc-server: command not found` right after installing.**
+**`mcc-server: command not found` right after installing.**
 Close and reopen your terminal. The installer extends `PATH`; an existing shell won't see it. This is the single most common install issue.
 
 **Two configs on Windows.**

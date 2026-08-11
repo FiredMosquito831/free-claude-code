@@ -6,13 +6,13 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
-from free_claude_code.application.errors import (
+from my_claude_code.application.errors import (
     ApplicationError,
     ApplicationUnavailableError,
     InvalidRequestError,
     UnknownProviderError,
 )
-from free_claude_code.config.settings import Settings
+from my_claude_code.config.settings import Settings
 from tests.api.support import create_test_app
 
 _PRODUCT_REQUESTS = (
@@ -168,7 +168,7 @@ def test_unknown_provider_is_protocol_specific_400_without_terminal_header(
 
     with (
         patch(
-            "free_claude_code.api.routes.resolve_provider",
+            "my_claude_code.api.routes.resolve_provider",
             side_effect=UnknownProviderError(message),
         ),
         TestClient(app) as client,
@@ -201,7 +201,7 @@ def test_preflight_rejection_is_protocol_specific_400_without_terminal_header(
 
     with (
         patch(
-            "free_claude_code.api.routes.resolve_provider",
+            "my_claude_code.api.routes.resolve_provider",
             return_value=provider,
         ),
         TestClient(app) as client,

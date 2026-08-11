@@ -11,8 +11,8 @@ from typing import Any
 
 import pytest
 
-from free_claude_code.api.request_capture import RequestCapture
-from free_claude_code.core.request_log import RequestLogStore
+from my_claude_code.api.request_capture import RequestCapture
+from my_claude_code.core.request_log import RequestLogStore
 
 
 @pytest.fixture

@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 
 import pytest
 
-from free_claude_code.websearch.analytics import (
+from my_claude_code.websearch.analytics import (
     WebSearchLogStore,
     default_websearch_db_path,
     get_shared_store,
@@ -14,7 +14,7 @@ from free_claude_code.websearch.analytics import (
     record_search_route,
     reset_analytics_state,
 )
-from free_claude_code.websearch.registry import (
+from my_claude_code.websearch.registry import (
     SearchOutcome,
     SearchRouteOutcome,
     search,

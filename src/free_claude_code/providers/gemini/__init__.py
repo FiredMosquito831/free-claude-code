@@ -1,5 +1,3 @@
-"""Google AI Studio Gemini (OpenAI-compat) adapter."""
+"""Compatibility re-export of ``my_claude_code.providers.gemini``."""
 
-from .client import GeminiProvider
-
-__all__ = ["GeminiProvider"]
+from my_claude_code.providers.gemini import *  # noqa: F403

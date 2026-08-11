@@ -1,5 +1,3 @@
-"""NVIDIA NIM provider package."""
+"""Compatibility re-export of ``my_claude_code.providers.nvidia_nim``."""
 
-from .client import NvidiaNimProvider
-
-__all__ = ["NvidiaNimProvider"]
+from my_claude_code.providers.nvidia_nim import *  # noqa: F403

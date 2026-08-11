@@ -6,16 +6,16 @@ import httpx
 import openai
 import pytest
 
-from free_claude_code.config.nim import NimSettings
-from free_claude_code.core.failures import ExecutionFailure, FailureKind
-from free_claude_code.providers.base import ProviderConfig
-from free_claude_code.providers.failure_policy import (
+from my_claude_code.config.nim import NimSettings
+from my_claude_code.core.failures import ExecutionFailure, FailureKind
+from my_claude_code.providers.base import ProviderConfig
+from my_claude_code.providers.failure_policy import (
     overloaded_provider_failure,
     retryable_upstream_status,
 )
-from free_claude_code.providers.nvidia_nim import NvidiaNimProvider
-from free_claude_code.providers.open_router import OpenRouterProvider
-from free_claude_code.providers.rate_limit import (
+from my_claude_code.providers.nvidia_nim import NvidiaNimProvider
+from my_claude_code.providers.open_router import OpenRouterProvider
+from my_claude_code.providers.rate_limit import (
     DEFAULT_UPSTREAM_MAX_RETRIES,
     UPSTREAM_TRANSIENT_TOTAL_ATTEMPTS,
     ProviderRateLimiter,
@@ -104,7 +104,7 @@ async def test_degraded_function_retries_unchanged_request_then_succeeds() -> No
         ) as create,
         patch.object(limiter, "extend_reactive_block") as extend_block,
         patch(
-            "free_claude_code.providers.rate_limit.asyncio.sleep",
+            "my_claude_code.providers.rate_limit.asyncio.sleep",
             new_callable=AsyncMock,
         ) as sleep,
     ):
@@ -145,10 +145,10 @@ async def test_degraded_function_exhaustion_is_detailed_redacted_overload() -> N
         ) as create,
         patch.object(limiter, "extend_reactive_block") as extend_block,
         patch(
-            "free_claude_code.providers.rate_limit.asyncio.sleep",
+            "my_claude_code.providers.rate_limit.asyncio.sleep",
             new_callable=AsyncMock,
         ) as sleep,
-        patch("free_claude_code.providers.openai_chat.provider.trace_event") as trace,
+        patch("my_claude_code.providers.openai_chat.provider.trace_event") as trace,
         pytest.raises(ExecutionFailure) as exc_info,
     ):
         [
@@ -207,7 +207,7 @@ async def test_unrelated_nim_bad_request_is_not_retried(detail: str) -> None:
         ) as create,
         patch.object(limiter, "extend_reactive_block") as extend_block,
         patch(
-            "free_claude_code.providers.rate_limit.asyncio.sleep",
+            "my_claude_code.providers.rate_limit.asyncio.sleep",
             new_callable=AsyncMock,
         ) as sleep,
         pytest.raises(ExecutionFailure) as exc_info,
@@ -241,7 +241,7 @@ async def test_degraded_wording_remains_non_retryable_for_other_providers() -> N
         ) as create,
         patch.object(limiter, "extend_reactive_block") as extend_block,
         patch(
-            "free_claude_code.providers.rate_limit.asyncio.sleep",
+            "my_claude_code.providers.rate_limit.asyncio.sleep",
             new_callable=AsyncMock,
         ) as sleep,
         pytest.raises(ExecutionFailure) as exc_info,
@@ -271,7 +271,7 @@ async def test_limiter_override_preserves_raw_exception_after_exhaustion() -> No
     with (
         patch.object(limiter, "extend_reactive_block"),
         patch(
-            "free_claude_code.providers.rate_limit.asyncio.sleep",
+            "my_claude_code.providers.rate_limit.asyncio.sleep",
             new_callable=AsyncMock,
         ),
         pytest.raises(openai.BadRequestError) as exc_info,

@@ -7,9 +7,9 @@ from unittest.mock import MagicMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
-from free_claude_code.core.anthropic.stream_contracts import parse_sse_text
-from free_claude_code.core.anthropic.streaming import format_sse_event
-from free_claude_code.core.failures import ExecutionFailure, FailureKind
+from my_claude_code.core.anthropic.stream_contracts import parse_sse_text
+from my_claude_code.core.anthropic.streaming import format_sse_event
+from my_claude_code.core.failures import ExecutionFailure, FailureKind
 from tests.api.support import create_test_app
 
 _PARTIAL_CONTENT = "PARTIAL_ASSISTANT_CONTENT"
@@ -117,7 +117,7 @@ def _partial_anthropic_stream(*, close_block: bool) -> list[str]:
 def _client_for(provider: CanonicalFailureProvider):
     app = create_test_app()
     return (
-        patch("free_claude_code.api.routes.resolve_provider", return_value=provider),
+        patch("my_claude_code.api.routes.resolve_provider", return_value=provider),
         TestClient(app),
     )
 
@@ -128,7 +128,7 @@ def _terminal_trace(trace_mock: MagicMock) -> dict[str, Any]:
             call.kwargs
             for call in trace_mock.call_args_list
             if call.kwargs.get("event")
-            == "free_claude_code.api.response.terminal_execution_error"
+            == "my_claude_code.api.response.terminal_execution_error"
         )
     )
 
@@ -161,7 +161,7 @@ def test_grouped_pre_start_execution_failure_keeps_canonical_wire_error(
 
     with (
         resolver_patch,
-        patch("free_claude_code.api.response_streams.trace_event") as trace_mock,
+        patch("my_claude_code.api.response_streams.trace_event") as trace_mock,
         client,
     ):
         response = client.post(path, json=payload)
@@ -193,7 +193,7 @@ def test_grouped_post_start_execution_failure_keeps_canonical_terminal_event(
 
     with (
         resolver_patch,
-        patch("free_claude_code.api.response_streams.trace_event") as trace_mock,
+        patch("my_claude_code.api.response_streams.trace_event") as trace_mock,
         client,
     ):
         response = client.post(path, json=payload)
@@ -220,7 +220,7 @@ def test_grouped_stream_false_execution_failure_discards_partial_content() -> No
 
     with (
         resolver_patch,
-        patch("free_claude_code.api.response_streams.trace_event") as trace_mock,
+        patch("my_claude_code.api.response_streams.trace_event") as trace_mock,
         client,
     ):
         response = client.post("/v1/messages", json=_messages_payload(stream=False))
@@ -310,7 +310,7 @@ def test_messages_post_start_execution_failure_follows_closed_block() -> None:
 
     with (
         resolver_patch,
-        patch("free_claude_code.api.response_streams.trace_event") as trace_mock,
+        patch("my_claude_code.api.response_streams.trace_event") as trace_mock,
         client,
     ):
         response = client.post("/v1/messages", json=_messages_payload(stream=True))
@@ -333,7 +333,7 @@ def test_messages_post_start_execution_failure_follows_closed_block() -> None:
     assert "message_stop" not in response.text
     assert _terminal_trace(trace_mock) == {
         "stage": "egress",
-        "event": "free_claude_code.api.response.terminal_execution_error",
+        "event": "my_claude_code.api.response.terminal_execution_error",
         "source": "api",
         "wire_api": "messages",
         "request_id": request_id,
@@ -358,7 +358,7 @@ def test_responses_post_start_execution_failure_retains_id_after_block_close() -
 
     with (
         resolver_patch,
-        patch("free_claude_code.api.response_streams.trace_event") as trace_mock,
+        patch("my_claude_code.api.response_streams.trace_event") as trace_mock,
         client,
     ):
         response = client.post("/v1/responses", json=_responses_payload())
@@ -387,7 +387,7 @@ def test_responses_post_start_execution_failure_retains_id_after_block_close() -
     }
     assert _terminal_trace(trace_mock) == {
         "stage": "egress",
-        "event": "free_claude_code.api.response.terminal_execution_error",
+        "event": "my_claude_code.api.response.terminal_execution_error",
         "source": "api",
         "wire_api": "responses",
         "request_id": request_id,

@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 FCC_VERSION = "9.9.9"
-FCC_WHEEL_NAME = f"free_claude_code-{FCC_VERSION}-py3-none-any.whl"
+FCC_WHEEL_NAME = f"my_claude_code-{FCC_VERSION}-py3-none-any.whl"
 FCC_WHEEL_URL = (
     "https://github.com/FiredMosquito831/free-claude-code/releases/download/"
     f"v{FCC_VERSION}/{FCC_WHEEL_NAME}"
@@ -20,8 +20,8 @@ _SHELL_HELPER_NAMES = frozenset(
     {
         "resolve_release",
         "download_verified_release_wheel",
-        "install_free_claude_code",
-        "configure_and_verify_free_claude_code",
+        "install_my_claude_code",
+        "configure_and_verify_my_claude_code",
         "ensure_uv",
         "verify_uv",
         "current_uv_version",

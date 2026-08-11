@@ -1,5 +1,3 @@
-"""CLI integration for installed launchers and managed Claude Code."""
+"""Compatibility re-export of ``my_claude_code.cli``."""
 
-from .managed import ManagedClaudeSession, ManagedClaudeSessionManager
-
-__all__ = ["ManagedClaudeSession", "ManagedClaudeSessionManager"]
+from my_claude_code.cli import *  # noqa: F403

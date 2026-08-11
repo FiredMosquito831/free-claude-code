@@ -14,7 +14,7 @@ class TestMessagingModels:
 
     def test_incoming_message_creation(self):
         """Test IncomingMessage dataclass."""
-        from free_claude_code.messaging.models import IncomingMessage
+        from my_claude_code.messaging.models import IncomingMessage
 
         msg = IncomingMessage(
             text="Hello",
@@ -30,7 +30,7 @@ class TestMessagingModels:
 
     def test_incoming_message_with_reply(self):
         """Test IncomingMessage as a reply."""
-        from free_claude_code.messaging.models import IncomingMessage
+        from my_claude_code.messaging.models import IncomingMessage
 
         msg = IncomingMessage(
             text="Reply text",
@@ -49,7 +49,7 @@ class TestMessagingPorts:
 
     def test_components_bundle_runtime_and_outbound(self):
         """Verify the factory handoff shape is explicit."""
-        from free_claude_code.messaging.platforms.ports import (
+        from my_claude_code.messaging.platforms.ports import (
             MessagingPlatformComponents,
         )
 
@@ -79,7 +79,7 @@ class TestSessionStore:
 
     def test_session_store_init(self, tmp_path):
         """Test SessionStore initialization."""
-        from free_claude_code.messaging.session import SessionStore
+        from my_claude_code.messaging.session import SessionStore
 
         store = SessionStore(storage_path=str(tmp_path / "sessions.json"))
         assert store.load_conversation_snapshot().is_empty
@@ -88,9 +88,9 @@ class TestSessionStore:
 
     def test_save_and_get_tree(self, tmp_path):
         """Test saving and retrieving trees."""
-        from free_claude_code.messaging.models import MessageScope
-        from free_claude_code.messaging.session import SessionStore
-        from free_claude_code.messaging.trees import TreeIdentity, TreeSnapshot
+        from my_claude_code.messaging.models import MessageScope
+        from my_claude_code.messaging.session import SessionStore
+        from my_claude_code.messaging.trees import TreeIdentity, TreeSnapshot
 
         store = SessionStore(storage_path=str(tmp_path / "sessions.json"))
         scope = MessageScope(platform="telegram", chat_id="chat")
@@ -117,9 +117,9 @@ class TestSessionStore:
 
     def test_load_existing_file_with_trees(self, tmp_path):
         """Test loading file with trees (legacy sessions ignored)."""
-        from free_claude_code.messaging.models import MessageScope
-        from free_claude_code.messaging.session import SessionStore
-        from free_claude_code.messaging.trees import TreeIdentity
+        from my_claude_code.messaging.models import MessageScope
+        from my_claude_code.messaging.session import SessionStore
+        from my_claude_code.messaging.trees import TreeIdentity
 
         data = {
             "sessions": {},
@@ -158,7 +158,7 @@ class TestSessionStore:
         with open(p, "w") as f:
             f.write("{invalid json")
 
-        from free_claude_code.messaging.session import SessionStore
+        from my_claude_code.messaging.session import SessionStore
 
         # Should log error and start empty, avoiding crash
         store = SessionStore(storage_path=str(p))
@@ -166,9 +166,9 @@ class TestSessionStore:
 
     def test_save_error_handling(self, tmp_path):
         """Test error during save."""
-        from free_claude_code.messaging.models import MessageScope
-        from free_claude_code.messaging.session import SessionStore
-        from free_claude_code.messaging.trees import TreeIdentity, TreeSnapshot
+        from my_claude_code.messaging.models import MessageScope
+        from my_claude_code.messaging.session import SessionStore
+        from my_claude_code.messaging.trees import TreeIdentity, TreeSnapshot
 
         store = SessionStore(storage_path=str(tmp_path / "sessions.json"))
         scope = MessageScope(platform="telegram", chat_id="chat")
@@ -177,7 +177,7 @@ class TestSessionStore:
 
         with (
             patch(
-                "free_claude_code.messaging.session.persistence.os.replace",
+                "my_claude_code.messaging.session.persistence.os.replace",
                 side_effect=OSError("Disk full"),
             ),
             pytest.raises(OSError, match="Disk full"),
@@ -193,7 +193,7 @@ class TestTreeQueueManager:
     """Test TreeQueueManager."""
 
     def test_tree_queue_manager_init(self):
-        from free_claude_code.messaging.trees import TreeQueueManager
+        from my_claude_code.messaging.trees import TreeQueueManager
 
         async def process(_claim):
             return None
@@ -203,8 +203,8 @@ class TestTreeQueueManager:
 
     @pytest.mark.asyncio
     async def test_admit_creates_tree_and_claim(self):
-        from free_claude_code.messaging.models import IncomingMessage
-        from free_claude_code.messaging.trees import TreeQueueManager
+        from my_claude_code.messaging.models import IncomingMessage
+        from my_claude_code.messaging.trees import TreeQueueManager
 
         processed = asyncio.Event()
 
@@ -229,8 +229,8 @@ class TestTreeQueueManager:
 
     @pytest.mark.asyncio
     async def test_cancel_unknown_node_is_empty(self):
-        from free_claude_code.messaging.models import MessageScope
-        from free_claude_code.messaging.trees import TreeQueueManager
+        from my_claude_code.messaging.models import MessageScope
+        from my_claude_code.messaging.trees import TreeQueueManager
 
         async def process(_claim):
             return None

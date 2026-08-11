@@ -3,15 +3,15 @@
 from collections.abc import Callable
 from typing import Any
 
-from free_claude_code.application.reasoning import client_reasoning_policy
-from free_claude_code.core.anthropic.models import MessagesRequest
-from free_claude_code.core.reasoning import ReasoningPolicy
-from free_claude_code.providers.base import ProviderConfig
-from free_claude_code.providers.openai_chat import (
+from my_claude_code.application.reasoning import client_reasoning_policy
+from my_claude_code.core.anthropic.models import MessagesRequest
+from my_claude_code.core.reasoning import ReasoningPolicy
+from my_claude_code.providers.base import ProviderConfig
+from my_claude_code.providers.openai_chat import (
     OpenAIChatProvider,
     create_openai_chat_provider,
 )
-from free_claude_code.providers.rate_limit import ProviderRateLimiter
+from my_claude_code.providers.rate_limit import ProviderRateLimiter
 
 REASONING_DEFAULT = ReasoningPolicy.provider_default()
 REASONING_ON = ReasoningPolicy.on()

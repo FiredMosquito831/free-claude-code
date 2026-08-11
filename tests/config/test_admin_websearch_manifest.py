@@ -2,22 +2,22 @@
 
 from types import SimpleNamespace
 
-from free_claude_code.config.admin import websearch_manifest
-from free_claude_code.config.admin.manifest import (
+from my_claude_code.config.admin import websearch_manifest
+from my_claude_code.config.admin.manifest import (
     FIELD_BY_KEY,
     SECTIONS,
     ConfigFieldSpec,
     ConfigOptionSpec,
 )
-from free_claude_code.config.admin.websearch_manifest import (
+from my_claude_code.config.admin.websearch_manifest import (
     ROTATION_POLICY_OPTIONS,
     websearch_field_specs,
 )
-from free_claude_code.config.websearch_catalog import (
+from my_claude_code.config.websearch_catalog import (
     SUPPORTED_WEBSEARCH_PROVIDER_IDS,
     WEBSEARCH_CATALOG,
 )
-from free_claude_code.websearch.rotation import ROTATION_POLICIES
+from my_claude_code.websearch.rotation import ROTATION_POLICIES
 
 
 def _option_values(field) -> tuple[str, ...]:

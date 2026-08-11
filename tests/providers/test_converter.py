@@ -2,13 +2,13 @@ import json
 
 import pytest
 
-from free_claude_code.core.anthropic import (
+from my_claude_code.core.anthropic import (
     AnthropicToOpenAIConverter,
     OpenAIConversionError,
     ReasoningReplayMode,
     build_base_request_body,
 )
-from free_claude_code.core.anthropic.models import MessagesRequest
+from my_claude_code.core.anthropic.models import MessagesRequest
 
 # --- Mock Classes ---
 
@@ -786,7 +786,7 @@ def test_convert_mixed_blocks_and_types_and_roles():
 
 def test_get_block_attr_defaults():
     # Test helper directly
-    from free_claude_code.core.anthropic import get_block_attr
+    from my_claude_code.core.anthropic import get_block_attr
 
     assert get_block_attr({}, "missing", "default") == "default"
     assert get_block_attr(object(), "missing", "default") == "default"

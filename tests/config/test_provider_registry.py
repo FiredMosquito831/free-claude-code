@@ -7,8 +7,8 @@ from typing import Any
 
 import pytest
 
-from free_claude_code.config.provider_catalog import PROVIDER_CATALOG
-from free_claude_code.config.provider_registry import (
+from my_claude_code.config.provider_catalog import PROVIDER_CATALOG
+from my_claude_code.config.provider_registry import (
     CUSTOM_PROVIDERS_FILENAME,
     CustomProviderEntry,
     ProviderRegistry,
@@ -221,7 +221,7 @@ def test_singleton_roundtrip() -> None:
 
 
 def test_default_storage_path_uses_config_dir(monkeypatch, tmp_path: Path) -> None:
-    import free_claude_code.config.provider_registry as module
+    import my_claude_code.config.provider_registry as module
 
     monkeypatch.setattr(module, "config_dir_path", lambda: tmp_path)
     registry = ProviderRegistry()

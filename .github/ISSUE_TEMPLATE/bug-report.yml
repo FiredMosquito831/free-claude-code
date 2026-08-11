@@ -1,15 +1,15 @@
 name: Bug report
-description: Report something that is not working in Free Claude Code.
+description: Report something that is not working in My Claude Code.
 title: "[Bug]: "
 labels:
   - bug
 body:
   - type: input
-    id: fcc-version
+    id: app-version
     attributes:
-      label: FCC version
-      description: Run `fcc-server --version` and enter only the version number, such as `4.6.1`. If FCC did not install, enter `None`.
-      placeholder: "4.6.1 or None"
+      label: App version
+      description: Run `mcc-server --version` and enter only the version number, such as `5.0.0`. If MCC did not install, enter `None`.
+      placeholder: "5.0.0 or None"
     validations:
       required: true
 

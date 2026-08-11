@@ -3,8 +3,8 @@
 import pytest
 from pydantic import ValidationError
 
-from free_claude_code.config.settings import Settings
-from free_claude_code.config.websearch_catalog import WEBSEARCH_CATALOG
+from my_claude_code.config.settings import Settings
+from my_claude_code.config.websearch_catalog import WEBSEARCH_CATALOG
 
 
 def _settings(monkeypatch, **env: str) -> Settings:

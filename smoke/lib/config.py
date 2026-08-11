@@ -5,12 +5,12 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
-from free_claude_code.config.model_refs import parse_model_name, parse_provider_type
-from free_claude_code.config.provider_catalog import (
+from my_claude_code.config.model_refs import parse_model_name, parse_provider_type
+from my_claude_code.config.provider_catalog import (
     PROVIDER_CATALOG,
     SUPPORTED_PROVIDER_IDS,
 )
-from free_claude_code.config.settings import Settings, get_settings
+from my_claude_code.config.settings import Settings, get_settings
 
 DEFAULT_TARGETS = frozenset(
     {

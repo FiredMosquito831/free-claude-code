@@ -1,6 +1,6 @@
 """Tests for Anthropic protocol response models."""
 
-from free_claude_code.core.anthropic.models import (
+from my_claude_code.core.anthropic.models import (
     ContentBlockText,
     ContentBlockThinking,
     ContentBlockToolUse,

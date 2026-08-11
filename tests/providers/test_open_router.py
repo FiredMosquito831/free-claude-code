@@ -5,16 +5,16 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from free_claude_code.application.errors import InvalidRequestError
-from free_claude_code.config.constants import ANTHROPIC_DEFAULT_MAX_OUTPUT_TOKENS
-from free_claude_code.core.anthropic.models import MessagesRequest
-from free_claude_code.core.anthropic.stream_contracts import (
+from my_claude_code.application.errors import InvalidRequestError
+from my_claude_code.config.constants import ANTHROPIC_DEFAULT_MAX_OUTPUT_TOKENS
+from my_claude_code.core.anthropic.models import MessagesRequest
+from my_claude_code.core.anthropic.stream_contracts import (
     parse_sse_text,
     text_content,
 )
-from free_claude_code.providers.base import ProviderConfig
-from free_claude_code.providers.open_router import OpenRouterProvider
-from free_claude_code.providers.openai_chat import OpenAIChatProvider
+from my_claude_code.providers.base import ProviderConfig
+from my_claude_code.providers.open_router import OpenRouterProvider
+from my_claude_code.providers.openai_chat import OpenAIChatProvider
 from tests.providers.request_factory import make_messages_request
 from tests.providers.support import (
     REASONING_OFF,

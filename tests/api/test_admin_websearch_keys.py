@@ -6,11 +6,11 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from fastapi.testclient import TestClient
 
-from free_claude_code.core.websearch.models import (
+from my_claude_code.core.websearch.models import (
     WebSearchResponse,
     WebSearchResultItem,
 )
-from free_claude_code.websearch.errors import (
+from my_claude_code.websearch.errors import (
     WebSearchConfigError,
     WebSearchRateLimitError,
 )
@@ -211,10 +211,10 @@ def test_websearch_provider_test_reports_latency_and_titles(monkeypatch, tmp_pat
         return_value=_test_response("Alpha", "Beta", "Gamma")
     )
     monkeypatch.setattr(
-        "free_claude_code.api.admin_routes.runtime_provider", runtime_provider
+        "my_claude_code.api.admin_routes.runtime_provider", runtime_provider
     )
     monkeypatch.setattr(
-        "free_claude_code.api.admin_routes.search_with_logging", search_with_logging
+        "my_claude_code.api.admin_routes.search_with_logging", search_with_logging
     )
 
     response = _local_client(app).post("/admin/api/websearch/providers/exa/test")
@@ -233,11 +233,11 @@ def test_websearch_provider_test_reports_structured_error(monkeypatch, tmp_path)
     _set_home(monkeypatch, tmp_path)
     app = create_test_app()
     monkeypatch.setattr(
-        "free_claude_code.api.admin_routes.runtime_provider",
+        "my_claude_code.api.admin_routes.runtime_provider",
         AsyncMock(return_value=MagicMock()),
     )
     monkeypatch.setattr(
-        "free_claude_code.api.admin_routes.search_with_logging",
+        "my_claude_code.api.admin_routes.search_with_logging",
         AsyncMock(
             side_effect=WebSearchRateLimitError("exa", "slow down", status_code=429)
         ),
@@ -260,7 +260,7 @@ def test_websearch_provider_test_reports_config_error(monkeypatch, tmp_path):
     _set_home(monkeypatch, tmp_path)
     app = create_test_app()
     monkeypatch.setattr(
-        "free_claude_code.api.admin_routes.runtime_provider",
+        "my_claude_code.api.admin_routes.runtime_provider",
         AsyncMock(
             side_effect=WebSearchConfigError("exa", "EXA_API_KEY is not configured")
         ),

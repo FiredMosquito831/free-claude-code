@@ -1,6 +1,3 @@
-"""Managed Claude Code sessions used by messaging."""
+"""Compatibility re-export of ``my_claude_code.cli.managed``."""
 
-from .manager import ManagedClaudeSessionManager
-from .session import ManagedClaudeSession
-
-__all__ = ["ManagedClaudeSession", "ManagedClaudeSessionManager"]
+from my_claude_code.cli.managed import *  # noqa: F403

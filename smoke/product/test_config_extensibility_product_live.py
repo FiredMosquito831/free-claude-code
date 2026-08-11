@@ -2,12 +2,12 @@ import os
 
 import pytest
 
-from free_claude_code.config.provider_catalog import PROVIDER_CATALOG
-from free_claude_code.config.settings import Settings
-from free_claude_code.messaging.platforms.factory import create_messaging_components
-from free_claude_code.providers.runtime import build_provider_config
+from my_claude_code.config.provider_catalog import PROVIDER_CATALOG
+from my_claude_code.config.settings import Settings
+from my_claude_code.messaging.platforms.factory import create_messaging_components
+from my_claude_code.providers.runtime import build_provider_config
 from smoke.lib.child_process import (
-    cmd_free_claude_code_serve,
+    cmd_my_claude_code_serve,
     cmd_python_c,
     run_captured_text,
 )
@@ -29,7 +29,7 @@ def test_env_precedence_e2e(smoke_config: SmokeConfig, tmp_path) -> None:
     env["MODEL"] = "nvidia_nim/process-model"
     env["ANTHROPIC_AUTH_TOKEN"] = "process-token"
     script = (
-        "from free_claude_code.config.settings import get_settings; "
+        "from my_claude_code.config.settings import get_settings; "
         "s=get_settings(); "
         "print(s.model); print(s.anthropic_auth_token)"
     )
@@ -52,9 +52,7 @@ def test_removed_env_migration_e2e(smoke_config: SmokeConfig, tmp_path) -> None:
     env = os.environ.copy()
     env["FCC_ENV_FILE"] = str(env_file)
     result = run_captured_text(
-        cmd_python_c(
-            "from free_claude_code.config.settings import Settings; Settings()"
-        ),
+        cmd_python_c("from my_claude_code.config.settings import Settings; Settings()"),
         cwd=smoke_config.root,
         env=env,
         timeout=smoke_config.timeout_s,
@@ -77,8 +75,8 @@ def test_route_reasoning_config_e2e(smoke_config: SmokeConfig, tmp_path) -> None
     env = os.environ.copy()
     env["FCC_ENV_FILE"] = str(env_file)
     script = (
-        "from free_claude_code.application.routing import ModelRouter; "
-        "from free_claude_code.config.settings import Settings; "
+        "from my_claude_code.application.routing import ModelRouter; "
+        "from my_claude_code.config.settings import Settings; "
         "s=Settings(); "
         "r=ModelRouter(s); "
         "print(r.resolve('claude-fable-5').reasoning_preference.value); "
@@ -119,9 +117,9 @@ def test_proxy_timeout_config_e2e(smoke_config: SmokeConfig, tmp_path) -> None:
     env = os.environ.copy()
     env["FCC_ENV_FILE"] = str(env_file)
     script = (
-        "from free_claude_code.config.settings import Settings; "
-        "from free_claude_code.config.provider_catalog import PROVIDER_CATALOG; "
-        "from free_claude_code.providers.runtime import build_provider_config; "
+        "from my_claude_code.config.settings import Settings; "
+        "from my_claude_code.config.provider_catalog import PROVIDER_CATALOG; "
+        "from my_claude_code.providers.runtime import build_provider_config; "
         "s=Settings(); c=build_provider_config(PROVIDER_CATALOG['open_router'], s); "
         "print(c.proxy); print(c.http_read_timeout); "
         "print(c.http_connect_timeout); print(c.http_write_timeout)"
@@ -178,7 +176,7 @@ def test_entrypoint_server_e2e(smoke_config: SmokeConfig) -> None:
     with SmokeServerDriver(
         smoke_config,
         name="product-entrypoint",
-        command=cmd_free_claude_code_serve(),
+        command=cmd_my_claude_code_serve(),
         env_overrides={"MESSAGING_PLATFORM": "none"},
     ).run() as server:
         assert server.process.poll() is None

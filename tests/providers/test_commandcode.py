@@ -7,22 +7,22 @@ from unittest.mock import AsyncMock, MagicMock
 import httpx
 import pytest
 
-from free_claude_code.config.provider_catalog import (
+from my_claude_code.config.provider_catalog import (
     COMMANDCODE_DEFAULT_BASE,
     PROVIDER_CATALOG,
 )
-from free_claude_code.core.anthropic.models import Message, MessagesRequest
-from free_claude_code.core.reasoning import ReasoningPolicy
-from free_claude_code.providers.base import ProviderConfig
-from free_claude_code.providers.commandcode import (
+from my_claude_code.core.anthropic.models import Message, MessagesRequest
+from my_claude_code.core.reasoning import ReasoningPolicy
+from my_claude_code.providers.base import ProviderConfig
+from my_claude_code.providers.commandcode import (
     CommandCodeProvider,
     extract_commandcode_model_infos,
     is_anthropic_messages_model,
 )
-from free_claude_code.providers.model_listing import ModelListResponseError
-from free_claude_code.providers.rate_limit import ProviderRateLimiter
-from free_claude_code.providers.runtime.factory import create_provider
-from free_claude_code.providers.runtime.rotating import RotatingProvider
+from my_claude_code.providers.model_listing import ModelListResponseError
+from my_claude_code.providers.rate_limit import ProviderRateLimiter
+from my_claude_code.providers.runtime.factory import create_provider
+from my_claude_code.providers.runtime.rotating import RotatingProvider
 
 
 def _provider() -> CommandCodeProvider:
@@ -68,7 +68,7 @@ def test_catalog_descriptor_and_base_url() -> None:
 
 
 def test_factory_preserves_key_pool_rotation_and_proxy(monkeypatch) -> None:
-    from free_claude_code.config.settings import Settings
+    from my_claude_code.config.settings import Settings
 
     monkeypatch.setenv("COMMANDCODE_API_KEY_ROTATION", "round_robin")
     settings = Settings.model_validate(

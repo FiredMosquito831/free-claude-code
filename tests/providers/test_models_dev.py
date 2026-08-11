@@ -7,9 +7,9 @@ from pathlib import Path
 
 import pytest
 
-from free_claude_code.application.model_metadata import ProviderModelInfo
-from free_claude_code.providers.runtime import models_dev
-from free_claude_code.providers.runtime.models_dev import (
+from my_claude_code.application.model_metadata import ProviderModelInfo
+from my_claude_code.providers.runtime import models_dev
+from my_claude_code.providers.runtime.models_dev import (
     enrich_model_infos,
     enrich_provider_model_infos,
     read_models_dev_cache,

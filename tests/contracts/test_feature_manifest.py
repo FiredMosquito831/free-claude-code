@@ -1,22 +1,22 @@
 import re
 from pathlib import Path
 
-from free_claude_code.config.provider_catalog import PROVIDER_CATALOG
-from free_claude_code.messaging.platforms.factory import create_messaging_components
-from free_claude_code.providers.base import BaseProvider
-from free_claude_code.providers.chatgpt_oauth import ChatGPTOAuthProvider
-from free_claude_code.providers.cloudflare import CloudflareProvider
-from free_claude_code.providers.commandcode import CommandCodeProvider
-from free_claude_code.providers.deepseek import DeepSeekProvider
-from free_claude_code.providers.gemini import GeminiProvider
-from free_claude_code.providers.github_models import GitHubModelsProvider
-from free_claude_code.providers.kilo import KiloProvider
-from free_claude_code.providers.lmstudio import LMStudioProvider
-from free_claude_code.providers.mistral import MistralProvider
-from free_claude_code.providers.nous_portal import NousPortalProvider
-from free_claude_code.providers.nvidia_nim import NvidiaNimProvider
-from free_claude_code.providers.open_router import OpenRouterProvider
-from free_claude_code.providers.openai_chat import (
+from my_claude_code.config.provider_catalog import PROVIDER_CATALOG
+from my_claude_code.messaging.platforms.factory import create_messaging_components
+from my_claude_code.providers.base import BaseProvider
+from my_claude_code.providers.chatgpt_oauth import ChatGPTOAuthProvider
+from my_claude_code.providers.cloudflare import CloudflareProvider
+from my_claude_code.providers.commandcode import CommandCodeProvider
+from my_claude_code.providers.deepseek import DeepSeekProvider
+from my_claude_code.providers.gemini import GeminiProvider
+from my_claude_code.providers.github_models import GitHubModelsProvider
+from my_claude_code.providers.kilo import KiloProvider
+from my_claude_code.providers.lmstudio import LMStudioProvider
+from my_claude_code.providers.mistral import MistralProvider
+from my_claude_code.providers.nous_portal import NousPortalProvider
+from my_claude_code.providers.nvidia_nim import NvidiaNimProvider
+from my_claude_code.providers.open_router import OpenRouterProvider
+from my_claude_code.providers.openai_chat import (
     OPENAI_CHAT_PROFILES,
     OpenAIChatProvider,
 )

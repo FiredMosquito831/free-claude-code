@@ -4,13 +4,13 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from free_claude_code.application.errors import ApplicationUnavailableError
-from free_claude_code.application.model_metadata import ProviderModelInfo
-from free_claude_code.config.settings import Settings
-from free_claude_code.providers.base import BaseProvider
-from free_claude_code.providers.nvidia_nim import NvidiaNimProvider
-from free_claude_code.providers.runtime import ProviderRuntime
-from free_claude_code.runtime.provider_manager import ProviderRuntimeManager
+from my_claude_code.application.errors import ApplicationUnavailableError
+from my_claude_code.application.model_metadata import ProviderModelInfo
+from my_claude_code.config.settings import Settings
+from my_claude_code.providers.base import BaseProvider
+from my_claude_code.providers.nvidia_nim import NvidiaNimProvider
+from my_claude_code.providers.runtime import ProviderRuntime
+from my_claude_code.runtime.provider_manager import ProviderRuntimeManager
 
 
 class FakeRuntime(ProviderRuntime):
@@ -118,7 +118,7 @@ async def test_real_hot_replacement_owns_a_limiter_per_provider_generation() -> 
         return client
 
     with patch(
-        "free_claude_code.providers.openai_chat.provider.AsyncOpenAI",
+        "my_claude_code.providers.openai_chat.provider.AsyncOpenAI",
         side_effect=create_client,
     ):
         manager = ProviderRuntimeManager(first_settings)
@@ -623,7 +623,7 @@ async def test_replacement_prunes_and_rejects_removed_remote_provider_cache() ->
 async def test_generation_lifecycle_traces_contain_minimal_correlation_fields() -> None:
     factory = RuntimeFactory()
 
-    with patch("free_claude_code.runtime.provider_manager.trace_event") as trace:
+    with patch("my_claude_code.runtime.provider_manager.trace_event") as trace:
         manager = ProviderRuntimeManager(
             _settings("nvidia_nim/one"),
             runtime_factory=factory,

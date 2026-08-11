@@ -8,27 +8,27 @@ import httpx
 import openai
 import pytest
 
-from free_claude_code.config.nim import NimSettings
-from free_claude_code.core.anthropic.stream_contracts import (
+from my_claude_code.config.nim import NimSettings
+from my_claude_code.core.anthropic.stream_contracts import (
     parse_sse_text,
 )
-from free_claude_code.core.anthropic.streaming import (
+from my_claude_code.core.anthropic.streaming import (
     AnthropicStreamLedger,
     make_text_recovery_body,
 )
-from free_claude_code.core.failures import ExecutionFailure
-from free_claude_code.core.reasoning import DEFAULT_REASONING_POLICY, ReasoningPolicy
-from free_claude_code.providers.base import ProviderConfig
-from free_claude_code.providers.nvidia_nim import NvidiaNimProvider
-from free_claude_code.providers.openai_chat.provider import (
+from my_claude_code.core.failures import ExecutionFailure
+from my_claude_code.core.reasoning import DEFAULT_REASONING_POLICY, ReasoningPolicy
+from my_claude_code.providers.base import ProviderConfig
+from my_claude_code.providers.nvidia_nim import NvidiaNimProvider
+from my_claude_code.providers.openai_chat.provider import (
     _OpenAIChatStreamRunner,
 )
-from free_claude_code.providers.openai_chat.tool_calls import (
+from my_claude_code.providers.openai_chat.tool_calls import (
     OpenAIToolCallAssembler,
     has_committed_sse_output,
     iter_heuristic_tool_use_sse,
 )
-from free_claude_code.providers.stream_recovery import (
+from my_claude_code.providers.stream_recovery import (
     MIDSTREAM_RECOVERY_ATTEMPTS,
     TruncatedProviderStreamError,
 )
@@ -1145,7 +1145,7 @@ class TestProcessToolCall:
 
     def test_heuristic_tool_use_sse_marks_committed_tool_output(self):
         """Heuristic tool blocks are emitted content, even without OpenAI tool state."""
-        from free_claude_code.core.anthropic import AnthropicStreamLedger
+        from my_claude_code.core.anthropic import AnthropicStreamLedger
 
         ledger = AnthropicStreamLedger("msg_test", "test-model")
         events = list(
@@ -1167,7 +1167,7 @@ class TestProcessToolCall:
     def test_tool_call_with_id(self):
         """Tool call with id starts a tool block."""
         provider = _make_provider()
-        from free_claude_code.core.anthropic import AnthropicStreamLedger
+        from my_claude_code.core.anthropic import AnthropicStreamLedger
 
         sse = AnthropicStreamLedger("msg_test", "test-model")
         tc = {
@@ -1184,7 +1184,7 @@ class TestProcessToolCall:
     def test_tool_call_id_arrives_before_name_still_emits_id_and_name(self):
         """Split-stream tool: id (no name) then name then args; id preserved on start."""
         provider = _make_provider()
-        from free_claude_code.core.anthropic import AnthropicStreamLedger
+        from my_claude_code.core.anthropic import AnthropicStreamLedger
 
         sse = AnthropicStreamLedger("msg_test", "test-model")
         t1 = {
@@ -1213,7 +1213,7 @@ class TestProcessToolCall:
     def test_tool_call_arguments_buffered_until_name(self):
         """Argument deltas before tool name are emitted after the block starts."""
         provider = _make_provider()
-        from free_claude_code.core.anthropic import AnthropicStreamLedger
+        from my_claude_code.core.anthropic import AnthropicStreamLedger
 
         sse = AnthropicStreamLedger("msg_test", "test-model")
         t1 = {
@@ -1237,7 +1237,7 @@ class TestProcessToolCall:
     def test_tool_call_without_id_generates_uuid(self):
         """Tool call without id generates a uuid-based id."""
         provider = _make_provider()
-        from free_claude_code.core.anthropic import AnthropicStreamLedger
+        from my_claude_code.core.anthropic import AnthropicStreamLedger
 
         sse = AnthropicStreamLedger("msg_test", "test-model")
         tc = {
@@ -1252,7 +1252,7 @@ class TestProcessToolCall:
     def test_task_tool_forces_background_false(self):
         """Task tool with run_in_background=true is forced to false."""
         provider = _make_provider()
-        from free_claude_code.core.anthropic import AnthropicStreamLedger
+        from my_claude_code.core.anthropic import AnthropicStreamLedger
 
         sse = AnthropicStreamLedger("msg_test", "test-model")
         args = json.dumps({"run_in_background": True, "prompt": "test"})
@@ -1269,7 +1269,7 @@ class TestProcessToolCall:
     def test_task_tool_chunked_args_forces_background_false(self):
         """Chunked Task args are buffered until valid JSON, then forced to false."""
         provider = _make_provider()
-        from free_claude_code.core.anthropic import AnthropicStreamLedger
+        from my_claude_code.core.anthropic import AnthropicStreamLedger
 
         sse = AnthropicStreamLedger("msg_test", "test-model")
         tc1 = {
@@ -1294,7 +1294,7 @@ class TestProcessToolCall:
     def test_task_tool_invalid_json_logs_warning_on_flush(self, caplog):
         """Invalid JSON args for Task tool emits {} on flush and logs a warning."""
         provider = _make_provider()
-        from free_claude_code.core.anthropic import AnthropicStreamLedger
+        from my_claude_code.core.anthropic import AnthropicStreamLedger
 
         sse = AnthropicStreamLedger("msg_test", "test-model")
         tc = {
@@ -1314,7 +1314,7 @@ class TestProcessToolCall:
     def test_negative_tool_index_fallback(self):
         """tc_index < 0 uses len(tool_indices) as fallback."""
         provider = _make_provider()
-        from free_claude_code.core.anthropic import AnthropicStreamLedger
+        from my_claude_code.core.anthropic import AnthropicStreamLedger
 
         sse = AnthropicStreamLedger("msg_test", "test-model")
         tc = {
@@ -1329,7 +1329,7 @@ class TestProcessToolCall:
     def test_none_tool_index_defaults_to_zero(self):
         """Gemini may stream tool_call deltas with a null index."""
         provider = _make_provider()
-        from free_claude_code.core.anthropic import AnthropicStreamLedger
+        from my_claude_code.core.anthropic import AnthropicStreamLedger
 
         sse = AnthropicStreamLedger("msg_test", "test-model")
         tc = {
@@ -1346,7 +1346,7 @@ class TestProcessToolCall:
     def test_tool_args_emitted_as_delta(self):
         """Arguments are emitted as input_json_delta events."""
         provider = _make_provider()
-        from free_claude_code.core.anthropic import AnthropicStreamLedger
+        from my_claude_code.core.anthropic import AnthropicStreamLedger
 
         sse = AnthropicStreamLedger("msg_test", "test-model")
         tc = {
@@ -1463,7 +1463,7 @@ class TestStreamChunkEdgeCases:
     def test_stream_malformed_tool_args_chunked(self):
         """Chunked tool args that never form valid JSON are flushed with {}."""
         provider = _make_provider()
-        from free_claude_code.core.anthropic import AnthropicStreamLedger
+        from my_claude_code.core.anthropic import AnthropicStreamLedger
 
         sse = AnthropicStreamLedger("msg_test", "test-model")
         tc1 = {

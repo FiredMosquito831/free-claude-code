@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from free_claude_code.config.settings import Settings
+from my_claude_code.config.settings import Settings
 from tests.providers.support import passthrough_rate_limiter
 
 # Set mock environment BEFORE any imports that use Settings
@@ -32,7 +32,7 @@ def _isolate_from_dotenv(monkeypatch):
 @pytest.fixture(autouse=True)
 def _isolate_request_log(monkeypatch, tmp_path):
     """Keep request-log writes out of the real ~/.fcc directory during tests."""
-    from free_claude_code.core import request_log
+    from my_claude_code.core import request_log
 
     monkeypatch.setattr(
         request_log,
@@ -46,8 +46,8 @@ def _isolate_request_log(monkeypatch, tmp_path):
 @pytest.fixture(autouse=True)
 def _isolate_provider_registry(monkeypatch, tmp_path):
     """Keep custom provider registry state out of the real ~/.fcc directory."""
-    from free_claude_code.config import provider_registry
-    from free_claude_code.providers.runtime import models_dev
+    from my_claude_code.config import provider_registry
+    from my_claude_code.providers.runtime import models_dev
 
     config_dir = tmp_path / "fcc-config"
     monkeypatch.setattr(provider_registry, "config_dir_path", lambda: config_dir)
@@ -59,7 +59,7 @@ def _isolate_provider_registry(monkeypatch, tmp_path):
 
 @pytest.fixture
 def provider_config():
-    from free_claude_code.providers.base import ProviderConfig
+    from my_claude_code.providers.base import ProviderConfig
 
     return ProviderConfig(
         api_key="test_key",
@@ -71,8 +71,8 @@ def provider_config():
 
 @pytest.fixture
 def nim_provider(provider_config):
-    from free_claude_code.config.nim import NimSettings
-    from free_claude_code.providers.nvidia_nim import NvidiaNimProvider
+    from my_claude_code.config.nim import NimSettings
+    from my_claude_code.providers.nvidia_nim import NvidiaNimProvider
 
     return NvidiaNimProvider(
         provider_config,
@@ -83,15 +83,15 @@ def nim_provider(provider_config):
 
 @pytest.fixture
 def open_router_provider(provider_config):
-    from free_claude_code.providers.open_router import OpenRouterProvider
+    from my_claude_code.providers.open_router import OpenRouterProvider
 
     return OpenRouterProvider(provider_config, rate_limiter=passthrough_rate_limiter())
 
 
 @pytest.fixture
 def lmstudio_provider(provider_config):
-    from free_claude_code.providers.base import ProviderConfig
-    from free_claude_code.providers.lmstudio import LMStudioProvider
+    from my_claude_code.providers.base import ProviderConfig
+    from my_claude_code.providers.lmstudio import LMStudioProvider
 
     lmstudio_config = ProviderConfig(
         api_key="lm-studio",
@@ -104,8 +104,8 @@ def lmstudio_provider(provider_config):
 
 @pytest.fixture
 def llamacpp_provider(provider_config):
-    from free_claude_code.providers.base import ProviderConfig
-    from free_claude_code.providers.openai_chat import create_openai_chat_provider
+    from my_claude_code.providers.base import ProviderConfig
+    from my_claude_code.providers.openai_chat import create_openai_chat_provider
 
     llamacpp_config = ProviderConfig(
         api_key="llamacpp",
@@ -122,7 +122,7 @@ def llamacpp_provider(provider_config):
 
 @pytest.fixture
 def mock_cli_session():
-    from free_claude_code.messaging.managed_protocols import (
+    from my_claude_code.messaging.managed_protocols import (
         ManagedClaudeSessionProtocol,
     )
 
@@ -134,7 +134,7 @@ def mock_cli_session():
 
 @pytest.fixture
 def mock_cli_manager():
-    from free_claude_code.messaging.managed_protocols import (
+    from my_claude_code.messaging.managed_protocols import (
         ManagedClaudeSessionManagerProtocol,
     )
 
@@ -149,7 +149,7 @@ def mock_cli_manager():
 
 @pytest.fixture
 def mock_platform():
-    from free_claude_code.messaging.platforms.ports import OutboundMessenger
+    from my_claude_code.messaging.platforms.ports import OutboundMessenger
 
     platform = MagicMock(spec=OutboundMessenger)
     platform.send_message = AsyncMock(return_value="msg_123")
@@ -174,7 +174,7 @@ def mock_platform():
 
 @pytest.fixture
 def mock_session_store():
-    from free_claude_code.messaging.session import SessionStore
+    from my_claude_code.messaging.session import SessionStore
 
     store = MagicMock(spec=SessionStore)
     store.save_tree = MagicMock()
@@ -206,7 +206,7 @@ def incoming_message_factory():
     )
 
     def _create(**kwargs):
-        from free_claude_code.messaging.models import IncomingMessage
+        from my_claude_code.messaging.models import IncomingMessage
 
         defaults: dict[str, Any] = {
             "text": "hello",

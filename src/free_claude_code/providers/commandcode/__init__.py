@@ -1,10 +1,3 @@
-"""Command Code Provider API exports."""
+"""Compatibility re-export of ``my_claude_code.providers.commandcode``."""
 
-from .client import CommandCodeProvider
-from .models import extract_commandcode_model_infos, is_anthropic_messages_model
-
-__all__ = [
-    "CommandCodeProvider",
-    "extract_commandcode_model_infos",
-    "is_anthropic_messages_model",
-]
+from my_claude_code.providers.commandcode import *  # noqa: F403

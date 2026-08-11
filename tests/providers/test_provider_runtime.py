@@ -5,12 +5,12 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from free_claude_code.application.errors import (
+from my_claude_code.application.errors import (
     ApplicationUnavailableError,
     UnknownProviderError,
 )
-from free_claude_code.config.nim import NimSettings
-from free_claude_code.config.provider_catalog import (
+from my_claude_code.config.nim import NimSettings
+from my_claude_code.config.provider_catalog import (
     COHERE_DEFAULT_BASE,
     GITHUB_MODELS_DEFAULT_BASE,
     HUGGINGFACE_DEFAULT_BASE,
@@ -21,24 +21,24 @@ from free_claude_code.config.provider_catalog import (
     VERCEL_AI_GATEWAY_DEFAULT_BASE,
     ZAI_DEFAULT_BASE,
 )
-from free_claude_code.providers.chatgpt_oauth import ChatGPTOAuthProvider
-from free_claude_code.providers.cloudflare import CloudflareProvider
-from free_claude_code.providers.commandcode import CommandCodeProvider
-from free_claude_code.providers.deepseek import DeepSeekProvider
-from free_claude_code.providers.gemini import GeminiProvider
-from free_claude_code.providers.github_models import GitHubModelsProvider
-from free_claude_code.providers.kilo import KiloProvider
-from free_claude_code.providers.lmstudio import LMStudioProvider
-from free_claude_code.providers.mistral import MistralProvider
-from free_claude_code.providers.nous_portal import NousPortalProvider
-from free_claude_code.providers.nvidia_nim import NvidiaNimProvider
-from free_claude_code.providers.open_router import OpenRouterProvider
-from free_claude_code.providers.openai_chat import (
+from my_claude_code.providers.chatgpt_oauth import ChatGPTOAuthProvider
+from my_claude_code.providers.cloudflare import CloudflareProvider
+from my_claude_code.providers.commandcode import CommandCodeProvider
+from my_claude_code.providers.deepseek import DeepSeekProvider
+from my_claude_code.providers.gemini import GeminiProvider
+from my_claude_code.providers.github_models import GitHubModelsProvider
+from my_claude_code.providers.kilo import KiloProvider
+from my_claude_code.providers.lmstudio import LMStudioProvider
+from my_claude_code.providers.mistral import MistralProvider
+from my_claude_code.providers.nous_portal import NousPortalProvider
+from my_claude_code.providers.nvidia_nim import NvidiaNimProvider
+from my_claude_code.providers.open_router import OpenRouterProvider
+from my_claude_code.providers.openai_chat import (
     OPENAI_CHAT_PROFILES,
     OpenAIChatProvider,
 )
-from free_claude_code.providers.rate_limit import ProviderRateLimiter
-from free_claude_code.providers.runtime import (
+from my_claude_code.providers.rate_limit import ProviderRateLimiter
+from my_claude_code.providers.runtime import (
     ProviderRuntime,
     build_provider_config,
     create_provider,
@@ -148,8 +148,8 @@ def test_importing_runtime_does_not_eager_load_other_adapters() -> None:
     """Runtime metadata must not import every provider adapter up front."""
     code = (
         "import sys\n"
-        "import free_claude_code.providers.runtime\n"
-        "assert 'free_claude_code.providers.open_router' not in sys.modules\n"
+        "import my_claude_code.providers.runtime\n"
+        "assert 'my_claude_code.providers.open_router' not in sys.modules\n"
     )
     proc = subprocess.run(
         [sys.executable, "-c", code],
@@ -214,7 +214,7 @@ def test_local_provider_factory_resolves_catalog_static_credential(
     settings = _make_settings()
 
     config = build_provider_config(descriptor, settings)
-    with patch("free_claude_code.providers.openai_chat.provider.AsyncOpenAI"):
+    with patch("my_claude_code.providers.openai_chat.provider.AsyncOpenAI"):
         provider = create_provider(provider_id, settings)
 
     assert config.api_key == expected_api_key
@@ -260,7 +260,7 @@ def test_create_cloudflare_provider_uses_account_scoped_base_url():
         cloudflare_account_id="test-account",
     )
 
-    with patch("free_claude_code.providers.openai_chat.provider.AsyncOpenAI"):
+    with patch("my_claude_code.providers.openai_chat.provider.AsyncOpenAI"):
         provider = create_provider("cloudflare", settings)
 
     assert isinstance(provider, CloudflareProvider)
@@ -380,7 +380,7 @@ def test_build_provider_config_github_models_uses_token_and_proxy() -> None:
 
 
 def test_create_provider_uses_openai_chat_openrouter_by_default():
-    with patch("free_claude_code.providers.openai_chat.provider.AsyncOpenAI"):
+    with patch("my_claude_code.providers.openai_chat.provider.AsyncOpenAI"):
         provider = create_provider("open_router", _make_settings())
 
     assert isinstance(provider, OpenRouterProvider)
@@ -464,10 +464,10 @@ def test_create_provider_instantiates_each_builtin():
     sentinel_limiter = MagicMock(spec=ProviderRateLimiter)
 
     with (
-        patch("free_claude_code.providers.openai_chat.provider.AsyncOpenAI"),
+        patch("my_claude_code.providers.openai_chat.provider.AsyncOpenAI"),
         patch("httpx.AsyncClient"),
         patch(
-            "free_claude_code.providers.runtime.factory.ProviderRateLimiter",
+            "my_claude_code.providers.runtime.factory.ProviderRateLimiter",
             return_value=sentinel_limiter,
         ) as limiter_factory,
     ):
@@ -491,7 +491,7 @@ def test_create_provider_instantiates_each_builtin():
 def test_provider_runtime_caches_by_provider_id():
     runtime = ProviderRuntime(_make_settings())
 
-    with patch("free_claude_code.providers.openai_chat.provider.AsyncOpenAI"):
+    with patch("my_claude_code.providers.openai_chat.provider.AsyncOpenAI"):
         first = runtime.resolve_provider("nvidia_nim")
         second = runtime.resolve_provider("nvidia_nim")
 
@@ -501,7 +501,7 @@ def test_provider_runtime_caches_by_provider_id():
 def test_provider_runtime_provider_owns_one_limiter() -> None:
     runtime = ProviderRuntime(_make_settings())
 
-    with patch("free_claude_code.providers.openai_chat.provider.AsyncOpenAI"):
+    with patch("my_claude_code.providers.openai_chat.provider.AsyncOpenAI"):
         first = runtime.resolve_provider("nvidia_nim")
         second = runtime.resolve_provider("nvidia_nim")
 
@@ -514,7 +514,7 @@ def test_separate_provider_runtimes_never_share_limiters() -> None:
     first_runtime = ProviderRuntime(_make_settings())
     second_runtime = ProviderRuntime(_make_settings())
 
-    with patch("free_claude_code.providers.openai_chat.provider.AsyncOpenAI"):
+    with patch("my_claude_code.providers.openai_chat.provider.AsyncOpenAI"):
         first = first_runtime.resolve_provider("nvidia_nim")
         second = second_runtime.resolve_provider("nvidia_nim")
 
@@ -527,7 +527,7 @@ def test_separate_provider_runtimes_never_share_limiters() -> None:
 def test_different_providers_in_one_runtime_have_independent_limiters() -> None:
     runtime = ProviderRuntime(_make_settings())
 
-    with patch("free_claude_code.providers.openai_chat.provider.AsyncOpenAI"):
+    with patch("my_claude_code.providers.openai_chat.provider.AsyncOpenAI"):
         nim = runtime.resolve_provider("nvidia_nim")
         open_router = runtime.resolve_provider("open_router")
 

@@ -4,15 +4,15 @@ from unittest.mock import patch
 
 import pytest
 
-from free_claude_code.core.anthropic.stream_contracts import parse_sse_text
-from free_claude_code.core.anthropic.streaming import format_sse_event
-from free_claude_code.core.async_iterators import AsyncCloseable
-from free_claude_code.core.failures import ExecutionFailure, FailureKind
-from free_claude_code.core.openai_responses import (
+from my_claude_code.core.anthropic.stream_contracts import parse_sse_text
+from my_claude_code.core.anthropic.streaming import format_sse_event
+from my_claude_code.core.async_iterators import AsyncCloseable
+from my_claude_code.core.failures import ExecutionFailure, FailureKind
+from my_claude_code.core.openai_responses import (
     OpenAIResponsesAdapter,
     OpenAIResponsesRequest,
 )
-from free_claude_code.core.openai_responses.anthropic_sse import (
+from my_claude_code.core.openai_responses.anthropic_sse import (
     AnthropicSseEvent,
     iter_sse_events,
 )
@@ -121,7 +121,7 @@ async def test_responses_transform_closes_direct_event_source_on_early_close() -
         ]
     )
     with patch(
-        "free_claude_code.core.openai_responses.stream.iter_sse_events",
+        "my_claude_code.core.openai_responses.stream.iter_sse_events",
         return_value=events,
     ):
         stream = _responses_sse(
@@ -145,7 +145,7 @@ async def test_responses_transform_preserves_direct_source_failure() -> None:
     )
     with (
         patch(
-            "free_claude_code.core.openai_responses.stream.iter_sse_events",
+            "my_claude_code.core.openai_responses.stream.iter_sse_events",
             return_value=events,
         ),
         pytest.raises(RuntimeError) as exc_info,

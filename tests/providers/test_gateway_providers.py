@@ -10,17 +10,17 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from free_claude_code.config.provider_catalog import (
+from my_claude_code.config.provider_catalog import (
     CLINE_DEFAULT_BASE,
     KILO_DEFAULT_BASE,
     NOUS_PORTAL_DEFAULT_BASE,
     PROVIDER_CATALOG,
 )
-from free_claude_code.core.anthropic import ReasoningReplayMode
-from free_claude_code.providers.base import ProviderConfig
-from free_claude_code.providers.kilo import KiloProvider
-from free_claude_code.providers.nous_portal import NousPortalProvider
-from free_claude_code.providers.open_router import OpenRouterProvider
+from my_claude_code.core.anthropic import ReasoningReplayMode
+from my_claude_code.providers.base import ProviderConfig
+from my_claude_code.providers.kilo import KiloProvider
+from my_claude_code.providers.nous_portal import NousPortalProvider
+from my_claude_code.providers.open_router import OpenRouterProvider
 from tests.providers.request_factory import make_messages_request
 from tests.providers.support import passthrough_rate_limiter, profiled_provider
 
@@ -61,7 +61,7 @@ def _config(base_url: str) -> ProviderConfig:
 
 @pytest.fixture
 def nous_provider():
-    with patch("free_claude_code.providers.openai_chat.provider.AsyncOpenAI"):
+    with patch("my_claude_code.providers.openai_chat.provider.AsyncOpenAI"):
         return NousPortalProvider(
             _config(NOUS_PORTAL_DEFAULT_BASE),
             rate_limiter=passthrough_rate_limiter(),
@@ -70,7 +70,7 @@ def nous_provider():
 
 @pytest.fixture
 def kilo_provider():
-    with patch("free_claude_code.providers.openai_chat.provider.AsyncOpenAI"):
+    with patch("my_claude_code.providers.openai_chat.provider.AsyncOpenAI"):
         return KiloProvider(
             _config(KILO_DEFAULT_BASE), rate_limiter=passthrough_rate_limiter()
         )
@@ -111,7 +111,7 @@ def test_catalog_descriptors(provider_id, credential_env, credential_attr, proxy
 
 def test_settings_expose_new_credentials():
     """Each descriptor's credential/proxy attribute must exist on Settings."""
-    from free_claude_code.config.settings import Settings
+    from my_claude_code.config.settings import Settings
 
     for provider_id in ("nous_portal", "kilo", "cline"):
         descriptor = PROVIDER_CATALOG[provider_id]
@@ -163,7 +163,7 @@ def test_gateways_share_openrouter_reasoning_dialect(fixture_name, request):
 
 def test_openrouter_dialect_is_shared_not_copied():
     """The refactor must leave OpenRouter on the same shared implementation."""
-    from free_claude_code.providers.openrouter_gateway import OpenRouterGatewayProvider
+    from my_claude_code.providers.openrouter_gateway import OpenRouterGatewayProvider
 
     assert issubclass(OpenRouterProvider, OpenRouterGatewayProvider)
     assert issubclass(NousPortalProvider, OpenRouterGatewayProvider)
@@ -172,7 +172,7 @@ def test_openrouter_dialect_is_shared_not_copied():
 
 def test_provider_names_are_distinct():
     """Log lines and error messages must not conflate the three gateways."""
-    with patch("free_claude_code.providers.openai_chat.provider.AsyncOpenAI"):
+    with patch("my_claude_code.providers.openai_chat.provider.AsyncOpenAI"):
         names = {
             OpenRouterProvider(
                 _config("https://openrouter.ai/api/v1"),

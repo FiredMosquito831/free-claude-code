@@ -2,7 +2,7 @@ from dataclasses import FrozenInstanceError
 
 import pytest
 
-from free_claude_code.config.provider_catalog import (
+from my_claude_code.config.provider_catalog import (
     CUSTOM_PROVIDER_GROUP,
     PROVIDER_CATALOG,
     PROVIDER_GROUP_IDS,

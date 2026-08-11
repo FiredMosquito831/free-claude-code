@@ -3,9 +3,9 @@ import json
 
 import pytest
 
-from free_claude_code.messaging.models import MessageScope
-from free_claude_code.messaging.platforms.ports import MessagingStartupNotice
-from free_claude_code.messaging.trees import MessageState, TreeIdentity
+from my_claude_code.messaging.models import MessageScope
+from my_claude_code.messaging.platforms.ports import MessagingStartupNotice
+from my_claude_code.messaging.trees import MessageState, TreeIdentity
 from smoke.lib.e2e import FakeCLISession, FakePlatformDriver, default_cli_events
 
 pytestmark = [pytest.mark.live, pytest.mark.smoke_target("messaging")]

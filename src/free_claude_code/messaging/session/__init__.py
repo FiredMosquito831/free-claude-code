@@ -1,5 +1,3 @@
-"""Public messaging session persistence API."""
+"""Compatibility re-export of ``my_claude_code.messaging.session``."""
 
-from .store import SessionStore
-
-__all__ = ["SessionStore"]
+from my_claude_code.messaging.session import *  # noqa: F403

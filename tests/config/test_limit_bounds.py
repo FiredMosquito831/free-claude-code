@@ -4,10 +4,10 @@ from typing import Any
 
 import pytest
 
-from free_claude_code.config.admin.manifest import FIELDS
-from free_claude_code.config.admin.validation import range_errors
-from free_claude_code.config.limits import LIMIT_RANGES, ZSTD_MAX_LEVEL, range_for
-from free_claude_code.config.settings import Settings
+from my_claude_code.config.admin.manifest import FIELDS
+from my_claude_code.config.admin.validation import range_errors
+from my_claude_code.config.limits import LIMIT_RANGES, ZSTD_MAX_LEVEL, range_for
+from my_claude_code.config.settings import Settings
 
 LIMIT_ATTRS = tuple(LIMIT_RANGES)
 

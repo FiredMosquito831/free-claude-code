@@ -7,8 +7,8 @@ import urllib.parse
 import httpx
 import pytest
 
-from free_claude_code.providers.chatgpt_oauth import browser_login
-from free_claude_code.providers.chatgpt_oauth.browser_login import (
+from my_claude_code.providers.chatgpt_oauth import browser_login
+from my_claude_code.providers.chatgpt_oauth.browser_login import (
     _BrowserLoginFlow,
     _CallbackHTTPServer,
     _generate_pkce,

@@ -1,12 +1,12 @@
 import pytest
 
-from free_claude_code.application.reasoning import (
+from my_claude_code.application.reasoning import (
     client_reasoning_policy,
     resolve_reasoning_policy,
 )
-from free_claude_code.config.reasoning import ReasoningPreference
-from free_claude_code.core.anthropic.models import MessagesRequest
-from free_claude_code.core.reasoning import (
+from my_claude_code.config.reasoning import ReasoningPreference
+from my_claude_code.core.anthropic.models import MessagesRequest
+from my_claude_code.core.reasoning import (
     ReasoningControl,
     ReasoningEffort,
     ReasoningPolicy,

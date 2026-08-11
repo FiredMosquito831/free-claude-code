@@ -1,7 +1,7 @@
 from fastapi.testclient import TestClient
 
-from free_claude_code.application.model_metadata import ProviderModelInfo
-from free_claude_code.config.settings import Settings
+from my_claude_code.application.model_metadata import ProviderModelInfo
+from my_claude_code.config.settings import Settings
 from tests.api.support import create_test_app, provider_manager_for_app
 
 

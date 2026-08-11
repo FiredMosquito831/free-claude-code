@@ -30,9 +30,7 @@ def test_architecture_document_relative_links_resolve() -> None:
 def test_root_env_example_is_the_single_template_source() -> None:
     repo_root = Path(__file__).resolve().parents[2]
     root_example = repo_root / ".env.example"
-    duplicate_example = (
-        repo_root / "src" / "free_claude_code" / "config" / "env.example"
-    )
+    duplicate_example = repo_root / "src" / "my_claude_code" / "config" / "env.example"
 
     assert root_example.is_file()
     assert not duplicate_example.exists()
@@ -46,7 +44,7 @@ def test_root_env_example_is_packaged_for_config_template_loader() -> None:
         "force-include"
     ]
 
-    assert force_include[".env.example"] == "free_claude_code/config/env.example"
+    assert force_include[".env.example"] == "my_claude_code/config/env.example"
 
 
 def test_pyproject_first_party_packages_match_packaged_roots() -> None:
@@ -60,5 +58,5 @@ def test_pyproject_first_party_packages_match_packaged_roots() -> None:
         for item in match.group("items").split(",")
         if item.strip()
     }
-    expected = {"free_claude_code", "smoke"}
+    expected = {"my_claude_code", "smoke"}
     assert configured == expected

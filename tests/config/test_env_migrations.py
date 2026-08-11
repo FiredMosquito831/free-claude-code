@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from free_claude_code.config.env_migrations import (
+from my_claude_code.config.env_migrations import (
     HUGGINGFACE_API_KEY_ENV,
     HUGGINGFACE_TOKEN_MIGRATION,
     LEGACY_HUGGINGFACE_TOKEN_ENV,

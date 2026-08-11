@@ -1,5 +1,3 @@
-"""Kilo AI Gateway provider exports."""
+"""Compatibility re-export of ``my_claude_code.providers.kilo``."""
 
-from .client import KiloProvider
-
-__all__ = ["KiloProvider"]
+from my_claude_code.providers.kilo import *  # noqa: F403

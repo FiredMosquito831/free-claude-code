@@ -2,7 +2,7 @@ from typing import Any
 
 import pytest
 
-from free_claude_code.core.openai_responses import (
+from my_claude_code.core.openai_responses import (
     OpenAIResponsesAdapter,
     OpenAIResponsesRequest,
 )

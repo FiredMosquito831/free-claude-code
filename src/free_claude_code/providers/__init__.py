@@ -1,12 +1,3 @@
-"""Shared provider lifecycle contracts.
+"""Compatibility re-export of ``my_claude_code.providers``."""
 
-Ordinary OpenAI-compatible vendors are immutable profiles. Concrete adapter
-classes exist only for providers with stateful or algorithmic behavior.
-"""
-
-from .base import BaseProvider, ProviderConfig
-
-__all__ = [
-    "BaseProvider",
-    "ProviderConfig",
-]
+from my_claude_code.providers import *  # noqa: F403
