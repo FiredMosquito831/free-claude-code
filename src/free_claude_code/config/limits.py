@@ -64,6 +64,17 @@ LIMIT_RANGES: dict[str, LimitRange] = {
     # Below a few hundred a burst drops records; the queue is a buffer, not a
     # throttle.
     "request_log_queue_max_size": LimitRange(100, 10_000_000),
+    # Graceful shutdown budget for one server generation: how long in-flight
+    # requests get to finish before the supervisor force-drops them on a
+    # reload/replace. The default sits just over the measured p99.9 whole-request
+    # budget (255.7s) so most healthy requests drain; longer ones (up to the 600s
+    # total budget) can still be force-cut. The
+    # floor is 1s because uvicorn treats 0 as an immediate, no-drain shutdown.
+    "server_graceful_shutdown_seconds": LimitRange(
+        1.0,
+        600.0,
+        "1s minimum drain before connections are force-closed; uvicorn treats 0 as immediate shutdown, not infinite",
+    ),
 }
 
 

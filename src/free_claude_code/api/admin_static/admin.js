@@ -4193,7 +4193,13 @@ async function checkForUpdates(button) {
 }
 
 async function waitForUpdatedServer(expectedVersion) {
-  const deadline = Date.now() + 120000;
+  // The reconnect window comes from the server (the install + graceful-drain +
+  // startup budget), not a hard-coded two minutes: a slow upgrade must not be
+  // abandoned mid-handoff. Fall back to 120s if the status lacks the field.
+  const reconnectSeconds =
+    (state.versionInfo && state.versionInfo.dashboard_reconnect_timeout_seconds) ||
+    120;
+  const deadline = Date.now() + reconnectSeconds * 1000;
   let sawDisconnect = false;
   while (Date.now() < deadline) {
     try {

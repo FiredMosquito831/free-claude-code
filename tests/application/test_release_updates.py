@@ -665,3 +665,53 @@ def test_creation_time_lookup_keys_off_the_real_platform(monkeypatch) -> None:
     monkeypatch.setattr(release_updates, "_WINDOWS", True)
     monkeypatch.setattr(release_updates.os, "name", "posix")
     assert release_updates._process_creation_filetime() == 0
+
+
+@pytest.mark.asyncio
+async def test_status_exposes_the_dashboard_reconnect_timeout(monkeypatch) -> None:
+    """The dashboard reads the reconnect window from the version payload."""
+    monkeypatch.setattr(release_updates, "current_version", lambda: "4.15.0")
+
+    async def _fetch():
+        return _release("v4.15.0"), None
+
+    monkeypatch.setattr(release_updates, "_fetch_latest_release", _fetch)
+    status = await get_release_status()
+    payload = status.as_dict()
+    assert "dashboard_reconnect_timeout_seconds" in payload
+    assert payload["dashboard_reconnect_timeout_seconds"] > 0
+
+
+@pytest.mark.asyncio
+async def test_reconnect_timeout_tracks_the_configured_graceful_budget(
+    monkeypatch,
+) -> None:
+    """The window uses the live graceful-shutdown setting, not the default."""
+    from free_claude_code.config.settings import Settings
+
+    monkeypatch.setattr(release_updates, "current_version", lambda: "4.15.0")
+    graceful = 42.0
+    monkeypatch.setattr(
+        release_updates,
+        "get_settings",
+        lambda: Settings.model_construct(
+            host="0.0.0.0",
+            port=8082,
+            anthropic_auth_token="freecc",
+            model="nvidia_nim/test-model",
+            open_admin_browser=False,
+            server_graceful_shutdown_seconds=graceful,
+        ),
+    )
+
+    async def _fetch():
+        return _release("v4.15.0"), None
+
+    monkeypatch.setattr(release_updates, "_fetch_latest_release", _fetch)
+    status = await get_release_status()
+    # install budget (900) + configured graceful (42) + startup margin (120).
+    assert status.dashboard_reconnect_timeout_seconds == (
+        release_updates._UPGRADE_TIMEOUT_SECONDS
+        + graceful
+        + release_updates._DASHBOARD_RECONNECT_STARTUP_MARGIN_SECONDS
+    )

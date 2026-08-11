@@ -20,6 +20,7 @@ from .constants import (
     REQUEST_LOG_COMPRESSION_LEVEL_DEFAULT,
     REQUEST_LOG_QUEUE_MAX_SIZE_DEFAULT,
     REQUEST_LOG_TEXT_MAX_CHARS_DEFAULT,
+    SERVER_GRACEFUL_SHUTDOWN_SECONDS_DEFAULT,
     STREAM_COMMIT_HOLDBACK_SECONDS_DEFAULT,
     STREAM_EARLY_RETRY_ATTEMPTS_DEFAULT,
     STREAM_MIDSTREAM_RECOVERY_ATTEMPTS_DEFAULT,
@@ -624,6 +625,15 @@ class Settings(BaseSettings):
     # Set via env `ANTHROPIC_AUTH_TOKEN`. When empty, no auth is required.
     anthropic_auth_token: str = Field(
         default="", validation_alias="ANTHROPIC_AUTH_TOKEN"
+    )
+    # Seconds each server generation is given to finish in-flight requests during
+    # a RELOAD or REPLACE_PROCESS handoff before the supervisor force-drops them.
+    # A bounded, configurable field surfaced through the Limits manifest. The
+    # floor is 1s because uvicorn treats 0 as an immediate, no-drain shutdown
+    # rather than waiting indefinitely for in-flight work to drain.
+    server_graceful_shutdown_seconds: float = Field(
+        default=SERVER_GRACEFUL_SHUTDOWN_SECONDS_DEFAULT,
+        validation_alias="SERVER_GRACEFUL_SHUTDOWN_SECONDS",
     )
 
     # Handle empty strings for optional string fields
