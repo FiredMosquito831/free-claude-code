@@ -1,5 +1,6 @@
 """Implementations for installed Free Claude Code commands."""
 
+import errno
 import os
 import shutil
 import subprocess
@@ -14,6 +15,12 @@ import uvicorn
 from loguru import logger
 
 from free_claude_code.cli.launchers.common import preflight_proxy
+from free_claude_code.cli.port_diagnostics import (
+    diagnose_port_owner,
+    is_address_in_use,
+    probe_port_available,
+    wait_for_port_free,
+)
 from free_claude_code.cli.process_registry import kill_all_best_effort
 from free_claude_code.config.env_migrations import (
     explicit_env_file_migration_warning,
@@ -30,7 +37,6 @@ from free_claude_code.config.settings import Settings, get_settings
 from free_claude_code.core.process_handoff import external_upgrade_helper_pending
 from free_claude_code.runtime.bootstrap import build_asgi_app
 
-SERVER_GRACEFUL_SHUTDOWN_SECONDS = 5
 _WINDOWS = os.name == "nt"
 
 
@@ -40,6 +46,17 @@ class ServerExitAction(Enum):
     STOP = "stop"
     RELOAD = "reload"
     REPLACE_PROCESS = "replace_process"
+
+
+# Higher priority wins, so a later, weaker request cannot downgrade a more
+# severe one already in flight. REPLACE_PROCESS (a self-update) must not be
+# quietly turned into a RELOAD by a config-driven restart that arrives while
+# the runtime is shutting down.
+_ACTION_PRIORITY = {
+    ServerExitAction.STOP: 0,
+    ServerExitAction.RELOAD: 1,
+    ServerExitAction.REPLACE_PROCESS: 2,
+}
 
 
 def _server_launcher() -> str | None:
@@ -91,7 +108,68 @@ def _replace_server_process() -> None:
     logger.info("Restarting with the updated server...")
     logger.complete()
     kill_all_best_effort()
-    os.execv(launcher, [launcher, *sys.argv[1:]])
+    recovery_command = " ".join([launcher, *sys.argv[1:]])
+    try:
+        os.execv(launcher, [launcher, *sys.argv[1:]])
+    except OSError as exc:
+        # The new image failed to launch in place. Flush the notice and leave a
+        # recovery command the operator can run by hand.
+        logger.error(
+            "Updated server launch failed ({}). Run the updated server manually: {}",
+            exc,
+            recovery_command,
+        )
+        logger.complete()
+        return
+
+
+def _address_in_use_error(settings: Settings) -> OSError:
+    """A synthetic EADDRINUSE describing this server's configured bind address."""
+
+    return OSError(
+        errno.EADDRINUSE,
+        f"{settings.host}:{settings.port} is already in use",
+    )
+
+
+def _log_bind_failure(settings: Settings, exc: OSError) -> None:
+    """Explain a failing bind without touching the process that holds it."""
+    if is_address_in_use(exc):
+        owner = diagnose_port_owner(settings.host, settings.port)
+        if owner is not None and owner.pid is not None:
+            logger.error(
+                "Cannot bind {host}:{port} ({err}); held by PID {pid} ({name}). "
+                "Stop that process or change host/port in settings.",
+                host=settings.host,
+                port=settings.port,
+                err=exc,
+                pid=owner.pid,
+                name=owner.name or "unknown",
+            )
+            return
+        if owner is not None:
+            logger.error(
+                "Cannot bind {host}:{port} ({err}); another process holds it "
+                "(owner unresolved). Stop it or change host/port in settings.",
+                host=settings.host,
+                port=settings.port,
+                err=exc,
+            )
+            return
+        logger.error(
+            "Cannot bind {host}:{port} ({err}). The port is already in use; "
+            "stop the owner or change host/port in settings.",
+            host=settings.host,
+            port=settings.port,
+            err=exc,
+        )
+        return
+    logger.error(
+        "Server failed to start on {host}:{port}: {err}",
+        host=settings.host,
+        port=settings.port,
+        err=exc,
+    )
 
 
 def serve() -> None:
@@ -151,7 +229,10 @@ def _run_supervised_server(
 
     def request(action: ServerExitAction) -> None:
         nonlocal requested
-        requested = action
+        # Only escalate: a later, weaker action (e.g. RELOAD) must not
+        # downgrade an already-requested REPLACE_PROCESS.
+        if _ACTION_PRIORITY[action] > _ACTION_PRIORITY[requested]:
+            requested = action
         if server := server_holder.get("server"):
             server.should_exit = True
 
@@ -171,16 +252,59 @@ def _run_supervised_server(
         host=settings.host,
         port=settings.port,
         log_level="debug",
-        timeout_graceful_shutdown=SERVER_GRACEFUL_SHUTDOWN_SECONDS,
+        timeout_graceful_shutdown=round(settings.server_graceful_shutdown_seconds),
     )
     server = uvicorn.Server(config)
     server_holder["server"] = server
     if open_admin_browser:
         _schedule_open_admin_browser(settings)
-    server.run()
+    # A held port is the usual reason a start fails. During a restart the
+    # previous generation may still own the socket for a beat, so wait a bounded
+    # moment for it to free before declaring a genuine conflict. Never kills the
+    # owner; at worst it is diagnosed and the start is abandoned.
+    if not probe_port_available(
+        settings.host, settings.port
+    ) and not wait_for_port_free(settings.host, settings.port):
+        _log_bind_failure(settings, _address_in_use_error(settings))
+        raise SystemExit(1)
+    try:
+        server.run()
+    except (OSError, SystemExit) as exc:
+        # uvicorn turns a bind failure into SystemExit(1), but it can also exit
+        # for other reasons (SSL, etc.), and those surface as OSError. Only
+        # claim a port conflict when the port is still actually unavailable;
+        # otherwise re-raise without a false owner claim.
+        if not probe_port_available(settings.host, settings.port):
+            _log_bind_failure(settings, _address_in_use_error(settings))
+        else:
+            logger.error(
+                "Server failed to start on {host}:{port}: {err}",
+                host=settings.host,
+                port=settings.port,
+                err=exc,
+            )
+        raise
     if requested is ServerExitAction.STOP:
         return requested
-    return requested if asgi_app.runtime.is_closed else ServerExitAction.STOP
+    if asgi_app.runtime.is_closed:
+        return requested
+    # The runtime did not finish closing in-flight requests within the graceful
+    # shutdown budget. A process replacement would execv into the new image
+    # while the old generation still owns live connections, so refuse it loudly
+    # and exit as a failure rather than silently degrading to a plain stop. The
+    # update is already installed; the service must be restarted by hand to run
+    # the new version.
+    if requested is ServerExitAction.REPLACE_PROCESS:
+        logger.error(
+            "Process replacement refused: the previous runtime did not finish "
+            "closing in-flight requests within the graceful shutdown budget "
+            "(SERVER_GRACEFUL_SHUTDOWN_SECONDS={}). The updated server is "
+            "already installed; restart the service to run it.",
+            settings.server_graceful_shutdown_seconds,
+        )
+        raise SystemExit(1)
+    # Any other pending action falls back to a clean stop, as before.
+    return ServerExitAction.STOP
 
 
 def init() -> None:

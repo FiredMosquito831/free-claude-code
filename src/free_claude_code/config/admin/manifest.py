@@ -839,6 +839,23 @@ _NON_PROVIDER_FIELDS: tuple[ConfigFieldSpec, ...] = (
         ),
     ),
     ConfigFieldSpec(
+        "SERVER_GRACEFUL_SHUTDOWN_SECONDS",
+        "Graceful shutdown budget",
+        "limits",
+        "number",
+        settings_attr="server_graceful_shutdown_seconds",
+        default="300",
+        restart_required=True,
+        description=(
+            "Seconds a closing process gives in-flight requests to finish "
+            "before the supervisor force-drops them during a reload or process "
+            "replace. Sits just over the measured p99.9 whole-request budget so "
+            "a healthy long request usually drains; longer ones (up to the 600s total "
+            "budget) may still be cut. 1s is the floor; "
+            "0 would be an immediate, no-drain shutdown rather than waiting."
+        ),
+    ),
+    ConfigFieldSpec(
         "FALLBACK_EJECT_AFTER_FAILURES",
         "Bench a model after",
         "limits",

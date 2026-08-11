@@ -37,6 +37,31 @@ STREAM_COMMIT_HOLDBACK_MAX_BYTES_DEFAULT = 65_536
 RATE_LIMIT_COOLDOWN_SECONDS_DEFAULT = 60.0
 CREDENTIAL_CIRCUIT_THRESHOLD_DEFAULT = 3
 
+# Graceful shutdown budget (seconds) handed to the supervisor for each server
+# generation. It bounds how long in-flight requests get to finish while the
+# runtime is closing (RELOAD or REPLACE_PROCESS) before the supervisor force-drops
+# them. This is a deployment choice, not a protocol fact, so it is a configurable,
+# bounded Settings field (see config/limits.py) rather than a fixed module value.
+#
+# Grounding for the default and bounds: the same ~51,000-request log behind the
+# fallback budgets shows whole-request durations at p50 7.5s and p99.9 255.7s. The
+# default sits just over that p99.9 (300s) so an update/reload handoff lets nearly
+# all healthy requests drain; only requests longer than the budget (up to the 600s
+# total-request budget) can still be force-cut. The floor is 1s because uvicorn
+# treats 0 as an immediate, no-drain shutdown rather than "wait forever".
+SERVER_GRACEFUL_SHUTDOWN_SECONDS_DEFAULT = 300.0
+
+# Dashboard reconnect budget (seconds) the admin UI waits for the server to come
+# back after a self-triggered update. Composed from the real phases of the handoff
+# rather than a bare number: the install (uv tool install --force, up to 900s), the
+# graceful drain of the old process (SERVER_GRACEFUL_SHUTDOWN_SECONDS_DEFAULT), and a
+# startup/bind margin for the new process to come back. The old fixed 120s abandoned
+# a healthy update mid-handoff, so the dashboard now reads this from the version
+# status instead of hard-coding it.
+DASHBOARD_RECONNECT_TIMEOUT_SECONDS = (
+    900.0 + SERVER_GRACEFUL_SHUTDOWN_SECONDS_DEFAULT + 120.0
+)
+
 # Request log storage.
 REQUEST_LOG_MAX_ROWS_DEFAULT = 50_000
 REQUEST_LOG_TEXT_MAX_CHARS_DEFAULT = 50_000

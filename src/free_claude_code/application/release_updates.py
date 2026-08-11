@@ -35,7 +35,11 @@ from typing import Any
 import httpx
 from loguru import logger
 
+from free_claude_code.config.constants import (
+    DASHBOARD_RECONNECT_TIMEOUT_SECONDS,
+)
 from free_claude_code.config.paths import config_dir_path
+from free_claude_code.config.settings import get_settings
 from free_claude_code.core.process_handoff import (
     reset_process_handoff_for_tests,
     set_external_upgrade_helper_pending,
@@ -55,6 +59,9 @@ _PENDING_RESULT_FILENAME = "pending-upgrade.json"
 # Bound on how long the helper waits for this process to exit before giving up,
 # so a server left running forever does not leave a helper resident forever.
 _HELPER_WAIT_SECONDS = 3600
+# Extra seconds the dashboard waits beyond install + graceful drain for the
+# new process to bind and come back online.
+_DASHBOARD_RECONNECT_STARTUP_MARGIN_SECONDS = 120.0
 
 
 def current_version() -> str:
@@ -113,6 +120,11 @@ class ReleaseStatus:
     # Outcome of a deferred (Windows) install that ran after a shutdown.
     pending_upgrade: dict[str, Any] | None = None
     error: str | None = None
+    # Seconds the admin UI should wait for this server to come back after a
+    # self-triggered upgrade. Composed from the install + graceful-drain +
+    # startup budget (not a fixed client constant), so the dashboard's
+    # reconnect window tracks the real cost of the handoff.
+    dashboard_reconnect_timeout_seconds: float = DASHBOARD_RECONNECT_TIMEOUT_SECONDS
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -128,6 +140,9 @@ class ReleaseStatus:
             "staged_install": self.staged_install,
             "pending_upgrade": self.pending_upgrade,
             "error": self.error,
+            "dashboard_reconnect_timeout_seconds": (
+                self.dashboard_reconnect_timeout_seconds
+            ),
         }
 
 
@@ -219,6 +234,14 @@ async def get_release_status(*, force: bool = False) -> ReleaseStatus:
         restart_required=_CACHE.restart_required,
         staged_install=_CACHE.staged_install,
         pending_upgrade=pending,
+    )
+    # Track the real handoff cost: install budget + the operator's configured
+    # graceful-drain budget + a startup margin, so the dashboard's reconnect
+    # window follows the live setting rather than the default constant.
+    status.dashboard_reconnect_timeout_seconds = (
+        _UPGRADE_TIMEOUT_SECONDS
+        + get_settings().server_graceful_shutdown_seconds
+        + _DASHBOARD_RECONNECT_STARTUP_MARGIN_SECONDS
     )
     # A deferred helper writes this after the old process has exited. The first
     # version-status response from the relaunched server carries the outcome to

@@ -344,6 +344,8 @@ def test_serve_supervisor_restarts_when_app_requests_restart() -> None:
         patch.object(commands, "build_asgi_app", side_effect=build_asgi_app),
         patch.object(commands, "_schedule_open_admin_browser") as schedule_open_admin,
         patch.object(commands, "kill_all_best_effort") as kill_all,
+        patch.object(commands, "probe_port_available", return_value=True),
+        patch.object(commands, "wait_for_port_free", return_value=True),
     ):
         commands.serve()
 
@@ -391,6 +393,8 @@ def test_serve_supervisor_replaces_process_after_update() -> None:
         patch.object(commands, "_schedule_open_admin_browser"),
         patch.object(commands, "_replace_server_process") as replace_process,
         patch.object(commands, "kill_all_best_effort") as kill_all,
+        patch.object(commands, "probe_port_available", return_value=True),
+        patch.object(commands, "wait_for_port_free", return_value=True),
     ):
         commands.serve()
 
@@ -491,6 +495,8 @@ def test_serve_supervisor_refuses_restart_after_incomplete_shutdown() -> None:
         patch.object(commands, "build_asgi_app", side_effect=build_asgi_app),
         patch.object(commands, "_schedule_open_admin_browser"),
         patch.object(commands, "kill_all_best_effort") as kill_all,
+        patch.object(commands, "probe_port_available", return_value=True),
+        patch.object(commands, "wait_for_port_free", return_value=True),
     ):
         commands.serve()
 
@@ -1438,3 +1444,284 @@ def test_compact_log_refuses_when_there_is_no_log(tmp_path, monkeypatch, capsys)
         commands.compact_log()
     assert exit_info.value.code == 1
     assert "No request log" in capsys.readouterr().err
+
+
+def _fake_config(app, **kwargs):
+    return SimpleNamespace(app=app, kwargs=kwargs)
+
+
+def test_graceful_shutdown_budget_comes_from_settings() -> None:
+    """The supervisor hands the configured (not hard-coded) budget to uvicorn."""
+    from free_claude_code.cli import commands
+
+    settings = Settings.model_construct(
+        host="0.0.0.0",
+        port=8082,
+        anthropic_auth_token="freecc",
+        model="nvidia_nim/test-model",
+        open_admin_browser=False,
+        server_graceful_shutdown_seconds=300,
+    )
+    get_settings = MagicMock(return_value=settings)
+    get_settings.cache_clear = MagicMock()
+    captured: dict = {}
+
+    def build_asgi_app(_settings, restart_callback, process_restart_callback):
+        return SimpleNamespace(runtime=SimpleNamespace(is_closed=True))
+
+    class FakeServer:
+        def __init__(self, config):
+            self.config = config
+            self.should_exit = False
+
+        def run(self):
+            self.config.app.runtime.is_closed = True
+
+    with (
+        patch.object(commands, "get_settings", get_settings),
+        patch.object(
+            commands.uvicorn,
+            "Config",
+            side_effect=lambda app, **kw: (
+                captured.update(kw) or _fake_config(app, **kw)
+            ),
+        ),
+        patch.object(commands.uvicorn, "Server", side_effect=FakeServer),
+        patch.object(commands, "build_asgi_app", side_effect=build_asgi_app),
+        patch.object(commands, "_schedule_open_admin_browser"),
+        patch.object(commands, "kill_all_best_effort"),
+        patch.object(commands, "probe_port_available", return_value=True),
+        patch.object(commands, "wait_for_port_free", return_value=True),
+    ):
+        commands.serve()
+
+    assert captured["timeout_graceful_shutdown"] == 300
+
+
+def test_graceful_shutdown_budget_tracks_a_configured_override() -> None:
+    """A non-default configured value reaches uvicorn, not the old constant."""
+    from free_claude_code.cli import commands
+
+    settings = Settings.model_construct(
+        host="0.0.0.0",
+        port=8082,
+        anthropic_auth_token="freecc",
+        model="nvidia_nim/test-model",
+        open_admin_browser=False,
+        server_graceful_shutdown_seconds=45,
+    )
+    get_settings = MagicMock(return_value=settings)
+    get_settings.cache_clear = MagicMock()
+    captured: dict = {}
+
+    def build_asgi_app(_settings, restart_callback, process_restart_callback):
+        return SimpleNamespace(runtime=SimpleNamespace(is_closed=True))
+
+    class FakeServer:
+        def __init__(self, config):
+            self.config = config
+            self.should_exit = False
+
+        def run(self):
+            self.config.app.runtime.is_closed = True
+
+    with (
+        patch.object(commands, "get_settings", get_settings),
+        patch.object(
+            commands.uvicorn,
+            "Config",
+            side_effect=lambda app, **kw: (
+                captured.update(kw) or _fake_config(app, **kw)
+            ),
+        ),
+        patch.object(commands.uvicorn, "Server", side_effect=FakeServer),
+        patch.object(commands, "build_asgi_app", side_effect=build_asgi_app),
+        patch.object(commands, "_schedule_open_admin_browser"),
+        patch.object(commands, "kill_all_best_effort"),
+        patch.object(commands, "probe_port_available", return_value=True),
+        patch.object(commands, "wait_for_port_free", return_value=True),
+    ):
+        commands.serve()
+
+    assert captured["timeout_graceful_shutdown"] == 45
+
+
+def test_process_replace_is_not_downgraded_by_a_later_reload() -> None:
+    """A REPLACE_PROCESS in flight must outrank a config-driven RELOAD."""
+    from free_claude_code.cli import commands
+
+    settings = _launcher_settings()
+    get_settings = MagicMock(return_value=settings)
+    get_settings.cache_clear = MagicMock()
+    process_callbacks: list[Callable[[], None]] = []
+    restart_callbacks: list[Callable[[], None]] = []
+
+    def build_asgi_app(
+        _settings: Settings,
+        restart_callback: Callable[[], None],
+        process_restart_callback: Callable[[], None],
+    ):
+        process_callbacks.append(process_restart_callback)
+        restart_callbacks.append(restart_callback)
+        return SimpleNamespace(runtime=SimpleNamespace(is_closed=False))
+
+    class FakeServer:
+        def __init__(self, config):
+            self.config = config
+            self.should_exit = False
+
+        def run(self):
+            # Self-update requests a process replace; then a config change
+            # arrives and requests a reload before the runtime fully closes.
+            process_callbacks[-1]()
+            restart_callbacks[-1]()
+            assert self.should_exit is True
+            self.config.app.runtime.is_closed = True
+
+    with (
+        patch.object(commands, "get_settings", get_settings),
+        patch.object(commands.uvicorn, "Config", side_effect=_fake_config),
+        patch.object(commands.uvicorn, "Server", side_effect=FakeServer),
+        patch.object(commands, "build_asgi_app", side_effect=build_asgi_app),
+        patch.object(commands, "_schedule_open_admin_browser"),
+        patch.object(commands, "_replace_server_process") as replace_process,
+        patch.object(commands, "kill_all_best_effort") as kill_all,
+        patch.object(commands, "probe_port_available", return_value=True),
+        patch.object(commands, "wait_for_port_free", return_value=True),
+    ):
+        commands.serve()
+
+    replace_process.assert_called_once()
+    kill_all.assert_called_once()
+
+
+def test_process_replace_is_refused_when_runtime_did_not_close() -> None:
+    """An incomplete close must not silently become a plain stop."""
+    from free_claude_code.cli import commands
+
+    settings = _launcher_settings()
+    get_settings = MagicMock(return_value=settings)
+    get_settings.cache_clear = MagicMock()
+    process_callbacks: list[Callable[[], None]] = []
+
+    def build_asgi_app(
+        _settings: Settings,
+        restart_callback: Callable[[], None],
+        process_restart_callback: Callable[[], None],
+    ):
+        process_callbacks.append(process_restart_callback)
+        return SimpleNamespace(runtime=SimpleNamespace(is_closed=False))
+
+    class FakeServer:
+        def __init__(self, config):
+            self.config = config
+            self.should_exit = False
+
+        def run(self):
+            process_callbacks[-1]()
+            assert self.should_exit is True
+            # The runtime never reaches is_closed: a real in-flight drain.
+
+    errors: list[str] = []
+
+    # The runtime never closes, so the supervisor must refuse the process
+    # replacement and surface a clear error rather than silently stopping.
+    with (
+        pytest.raises(SystemExit),
+        patch.object(commands, "get_settings", get_settings),
+        patch.object(commands.uvicorn, "Config", side_effect=_fake_config),
+        patch.object(commands.uvicorn, "Server", side_effect=FakeServer),
+        patch.object(commands, "build_asgi_app", side_effect=build_asgi_app),
+        patch.object(commands, "_schedule_open_admin_browser"),
+        patch.object(commands, "_replace_server_process") as replace_process,
+        patch.object(commands, "kill_all_best_effort") as kill_all,
+        patch.object(commands, "probe_port_available", return_value=True),
+        patch.object(commands, "wait_for_port_free", return_value=True),
+        patch.object(
+            commands.logger,
+            "error",
+            side_effect=lambda *a, **k: errors.append(str(a[0])),
+        ),
+    ):
+        commands.serve()
+
+    replace_process.assert_not_called()
+    kill_all.assert_called_once()
+    assert any("refused" in message for message in errors)
+
+
+def test_process_replacement_logs_recovery_command_when_execv_fails() -> None:
+    """When execv cannot launch the new image, the recovery command is logged."""
+    from free_claude_code.cli import commands
+
+    with (
+        patch.object(commands, "_WINDOWS", False),
+        patch.object(commands, "external_upgrade_helper_pending", return_value=False),
+        patch.object(commands, "_server_launcher", return_value="/stable/fcc-server"),
+        patch.object(commands.logger, "complete"),
+        patch.object(commands, "kill_all_best_effort"),
+        patch.object(
+            commands.os, "execv", side_effect=OSError(13, "Permission denied")
+        ),
+        patch.object(commands.sys, "argv", ["fcc-server", "--example"]),
+        patch.object(commands.logger, "error") as error,
+    ):
+        commands._replace_server_process()
+
+    error.assert_called_once()
+    recovery = " ".join(str(arg) for arg in error.call_args.args)
+    assert "/stable/fcc-server --example" in recovery
+
+
+def test_bind_failure_surfaces_the_port_owner() -> None:
+    """uvicorn's SystemExit(1) on a held port is diagnosed, not a bare crash."""
+    from free_claude_code.cli import commands
+    from free_claude_code.cli.port_diagnostics import PortOwner
+
+    settings = _launcher_settings(port=8099)
+    get_settings = MagicMock(return_value=settings)
+    get_settings.cache_clear = MagicMock()
+
+    def build_asgi_app(
+        _settings: Settings,
+        restart_callback: Callable[[], None],
+        process_restart_callback: Callable[[], None],
+    ):
+        return SimpleNamespace(runtime=SimpleNamespace(is_closed=True))
+
+    class FakeServer:
+        def __init__(self, config):
+            self.config = config
+            self.should_exit = False
+
+        def run(self):
+            raise SystemExit(1)
+
+    errors: list = []
+
+    # The port is genuinely unavailable here: the probe is forced False and the
+    # waiter gives up, so the failure is diagnosed as a held port with an owner.
+    with (
+        pytest.raises(SystemExit),
+        patch.object(commands, "get_settings", get_settings),
+        patch.object(commands.uvicorn, "Config", side_effect=_fake_config),
+        patch.object(commands.uvicorn, "Server", side_effect=FakeServer),
+        patch.object(commands, "build_asgi_app", side_effect=build_asgi_app),
+        patch.object(commands, "_schedule_open_admin_browser"),
+        patch.object(commands, "probe_port_available", return_value=False),
+        patch.object(commands, "wait_for_port_free", return_value=False),
+        patch.object(
+            commands,
+            "diagnose_port_owner",
+            return_value=PortOwner(pid=4242, name="intruder", command=None),
+        ),
+        patch.object(commands, "kill_all_best_effort"),
+        patch.object(
+            commands.logger, "error", side_effect=lambda *a, **k: errors.append((a, k))
+        ),
+    ):
+        commands.serve()
+
+    # The owner PID is reported as a structured field, not buried in text.
+    assert any(kw.get("pid") == 4242 for _args, kw in errors)
+    assert any("Cannot bind" in str(args[0]) for args, _kw in errors)
