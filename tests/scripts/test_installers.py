@@ -872,6 +872,25 @@ def test_installers_use_native_clients_and_single_python_selection() -> None:
     assert "https://astral.sh/uv/install.ps1" in powershell
 
 
+def test_install_ps1_single_running_launcher_does_not_break_strict_count() -> None:
+    """A single running launcher must not trip `.Count` under Set-StrictMode.
+
+    Get-RunningLaunchers must emit matches to the pipeline (a `return $running`
+    would unwrap a single Process object into a scalar, and a later
+    `$running.Count` on that scalar throws "The property 'Count' cannot be
+    found" under Set-StrictMode -Version Latest). The caller must wrap the call
+    in @(...) so 0, 1, or many results are always an array.
+    """
+    powershell = (_repo_root() / "scripts" / "install.ps1").read_text(encoding="utf-8")
+
+    # The function emits matches to the pipeline, not `return $running`.
+    assert "foreach ($process in $running) {" in powershell
+    assert "return $running" not in powershell
+    assert "return ,$running" not in powershell
+    # The caller wraps the result so .Count is always valid.
+    assert "$running = @(Get-RunningLaunchers)" in powershell
+
+
 def test_installers_allow_install_while_running_and_lead_with_mcc() -> None:
     """Install-while-running must keep working; Windows defers; message is mcc.
 
