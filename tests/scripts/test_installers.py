@@ -872,30 +872,34 @@ def test_installers_use_native_clients_and_single_python_selection() -> None:
     assert "https://astral.sh/uv/install.ps1" in powershell
 
 
-def test_installers_guard_running_launchers_and_lead_with_mcc() -> None:
-    """Installers refuse a live launcher before uv, and advertise mcc commands.
+def test_installers_allow_install_while_running_and_lead_with_mcc() -> None:
+    """Install-while-running must keep working; Windows defers; message is mcc.
 
-    ``uv tool install --force`` replaces every launcher shim in the tool bin
-    directory; Windows cannot overwrite a running .exe, so a live launcher makes
-    uv fail mid-install with a cryptic os error 32. The installer must detect it
-    up front. The post-install message leads with the native mcc command family
+    POSIX unlinks open files, so uv tool install --force works while the app
+    runs (the new version is picked up on restart) -- the sh installer must not
+    hard-block. Windows cannot overwrite a running .exe, so the PS installer
+    detects running launchers and defers the install to a detached helper that
+    completes it after the app stops, rather than refusing or dying with os
+    error 32. The post-install message leads with the native mcc command family
     and does not advertise the legacy fcc names.
     """
     shell = (_repo_root() / "scripts" / "install.sh").read_text(encoding="utf-8")
     powershell = (_repo_root() / "scripts" / "install.ps1").read_text(encoding="utf-8")
 
-    # Guard present in both, before the install step.
-    assert "pgrep" in shell
+    # POSIX install-while-running is native: no running-process guard in sh.
+    assert "assert_no_running_launchers" not in shell
+    assert "launcher_is_running" not in shell
+    assert "still running" not in shell
+
+    # Windows defers: detect launchers (Get-Process), stage, and hand to a
+    # detached helper -- it must not throw "is still running".
     assert "Get-Process" in powershell
-    assert "is still running" in shell
-    assert "is still running" in powershell
+    assert "Start-DeferredInstall" in powershell
+    assert "Get-RunningLaunchers" in powershell
+    assert "staged" in powershell
+    assert "is still running" not in powershell
     for name in ("fcc-server", "fcc-claude", "fcc-codex", "mcc-server", "mcc-claude"):
-        assert name in shell
         assert name in powershell
-    # The guard is invoked from the main flow before the install step.
-    assert "assert_no_running_launchers" in shell
-    assert "Assert-NoLauncherRunning" in powershell
-    assert "install_my_claude_code" in shell
     assert "Install-FreeClaudeCode" in powershell
 
     # The success message leads with mcc and does not advertise legacy commands.
