@@ -77,6 +77,7 @@ IMPORT_EXCEPTIONS: dict[tuple[str, str], str] = {
 
 FACADE_ONLY_BOUNDARIES = {
     "free_claude_code.core.openai_responses",
+    "free_claude_code.core.identity",
     "free_claude_code.messaging.trees",
     "free_claude_code.providers.openai_chat",
 }
