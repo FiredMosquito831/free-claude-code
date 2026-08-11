@@ -44,8 +44,13 @@ from my_claude_code.core.process_handoff import (
     reset_process_handoff_for_tests,
     set_external_upgrade_helper_pending,
 )
+from my_claude_code.core.version import (
+    LEGACY_DISTRIBUTION,
+    NATIVE_DISTRIBUTION,
+)
 
-PACKAGE_NAME = "my-claude-code"
+# The canonical distribution this release installs.
+PACKAGE_NAME = NATIVE_DISTRIBUTION
 # Kept in step with the URLs in scripts/install.sh and scripts/install.ps1.
 RELEASE_REPO = "FiredMosquito831/free-claude-code"
 _LATEST_RELEASE_URL = f"https://api.github.com/repos/{RELEASE_REPO}/releases/latest"
@@ -65,11 +70,20 @@ _DASHBOARD_RECONNECT_STARTUP_MARGIN_SECONDS = 120.0
 
 
 def current_version() -> str:
-    """Version of the running package, or ``unknown`` outside an install."""
-    try:
-        return installed_version(PACKAGE_NAME)
-    except PackageNotFoundError:
-        return "unknown"
+    """Version of the running package, or ``unknown`` outside an install.
+
+    The migration leaves either owner installed (a legacy ``free-claude-code``
+    tool or the native ``my-claude-code`` tool), and an install that is midway
+    between the two can even hold a stale copy under the other name. Try the
+    native distribution first, then the legacy one, so the running server always
+    reports its real version instead of "unknown".
+    """
+    for distribution in (NATIVE_DISTRIBUTION, LEGACY_DISTRIBUTION):
+        try:
+            return installed_version(distribution)
+        except PackageNotFoundError:
+            continue
+    return "unknown"
 
 
 def parse_version(text: str | None) -> tuple[int, ...]:
@@ -311,12 +325,23 @@ def _server_launcher(uv_executable: str | None = None) -> Path | None:
 
 
 def _receipt_path(uv_executable: str | None = None) -> Path:
+    """The uv receipt for the installed owner, native first, legacy fallback.
+
+    The migration can leave either ``my-claude-code`` (native) or
+    ``free-claude-code`` (legacy) owning the tool environment; a mid-migration
+    upgrade may even find the old name still installed. Return the first receipt
+    that exists so extras/Python are carried from whichever owner is real.
+    """
     root = _uv_tool_dir(uv_executable)
     if root is None:
         # Last-resort compatibility path for an old uv install or tests which
         # deliberately run without uv on PATH.
         root = Path.home() / ".local" / "share" / "uv" / "tools"
-    return root / PACKAGE_NAME / "uv-receipt.toml"
+    for distribution in (NATIVE_DISTRIBUTION, LEGACY_DISTRIBUTION):
+        candidate = root / distribution / "uv-receipt.toml"
+        if candidate.is_file():
+            return candidate
+    return root / NATIVE_DISTRIBUTION / "uv-receipt.toml"
 
 
 def _wsl_windows_mount_tool_dir(uv_executable: str | None = None) -> bool:
@@ -357,7 +382,8 @@ def _installed_extras_and_python(
         for requirement in requirements:
             if (
                 isinstance(requirement, dict)
-                and requirement.get("name") == PACKAGE_NAME
+                and requirement.get("name")
+                in (NATIVE_DISTRIBUTION, LEGACY_DISTRIBUTION)
                 and isinstance(requirement.get("extras"), list)
             ):
                 extras = [str(extra) for extra in requirement["extras"]]

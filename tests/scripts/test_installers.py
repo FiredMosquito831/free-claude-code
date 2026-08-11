@@ -872,6 +872,44 @@ def test_installers_use_native_clients_and_single_python_selection() -> None:
     assert "https://astral.sh/uv/install.ps1" in powershell
 
 
+def test_installers_guard_running_launchers_and_lead_with_mcc() -> None:
+    """Installers refuse a live launcher before uv, and advertise mcc commands.
+
+    ``uv tool install --force`` replaces every launcher shim in the tool bin
+    directory; Windows cannot overwrite a running .exe, so a live launcher makes
+    uv fail mid-install with a cryptic os error 32. The installer must detect it
+    up front. The post-install message leads with the native mcc command family
+    and does not advertise the legacy fcc names.
+    """
+    shell = (_repo_root() / "scripts" / "install.sh").read_text(encoding="utf-8")
+    powershell = (_repo_root() / "scripts" / "install.ps1").read_text(encoding="utf-8")
+
+    # Guard present in both, before the install step.
+    assert "pgrep" in shell
+    assert "Get-Process" in powershell
+    assert "is still running" in shell
+    assert "is still running" in powershell
+    for name in ("fcc-server", "fcc-claude", "fcc-codex", "mcc-server", "mcc-claude"):
+        assert name in shell
+        assert name in powershell
+    # The guard is invoked from the main flow before the install step.
+    assert "assert_no_running_launchers" in shell
+    assert "Assert-NoLauncherRunning" in powershell
+    assert "install_my_claude_code" in shell
+    assert "Install-FreeClaudeCode" in powershell
+
+    # The success message leads with mcc and does not advertise legacy commands.
+    assert "Start the proxy" in shell and "Start the proxy" in powershell
+    assert "mcc-server" in shell and "mcc-server" in powershell
+    assert "mcc-claude" in shell and "mcc-claude" in powershell
+    assert "Start the proxy with: fcc-server" not in shell
+    assert "Start the proxy with: fcc-server" not in powershell
+    assert "with fcc-claude, fcc-codex, or fcc-pi" not in shell
+    assert "with fcc-claude, fcc-codex, or fcc-pi" not in powershell
+    assert "Use fcc-claude-old instead" not in shell
+    assert "Use fcc-claude-old instead" not in powershell
+
+
 def test_readme_install_section_has_no_manual_git_prerequisite() -> None:
     readme = (_repo_root() / "README.md").read_text(encoding="utf-8")
     install_section = readme.split("### 1. Install Or Update", 1)[1].split(
