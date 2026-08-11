@@ -19,6 +19,9 @@ $FccLatestReleaseUrl = "https://api.github.com/repos/$FccRepo/releases/latest"
 $PythonVersion = "3.14.0"
 $MinUvVersion = "0.11.0"
 $UvInstallUrl = "https://astral.sh/uv/install.ps1"
+# Set by Start-DeferredInstall when the app was running and the install was
+# staged for completion after the user stops it.
+$script:Deferred = $false
 
 function Show-Usage {
     @"
@@ -520,21 +523,37 @@ function Install-FreeClaudeCode {
     }
     $arguments += $packageSpec
 
-    $uvPath = "uv"
-    if (-not $DryRun) {
-        $uvCommand = Get-ApplicationCommand "uv"
-        if (-not $uvCommand) {
-            throw "uv is not available for the Free Claude Code installation."
-        }
-        $uvPath = $uvCommand.Source
+    if ($DryRun) {
+        return $release.Version
     }
+
+    $uvCommand = Get-ApplicationCommand "uv"
+    if (-not $uvCommand) {
+        throw "uv is not available for the Free Claude Code installation."
+    }
+    $uvPath = $uvCommand.Source
+
+    $running = Get-RunningLaunchers
+    if ($running.Count -gt 0) {
+        # The app is live. Windows cannot replace the tool environment while a
+        # process runs from it, so stage the verified wheel and let a detached
+        # helper finish the install after the launchers exit. The user restarts
+        # the app; the new version is picked up then. This mirrors how the
+        # dashboard updater defers on Windows (release_updates.py) and how a
+        # POSIX install already behaves (uv unlinks open files).
+        return Start-DeferredInstall `
+            -UvPath $uvPath `
+            -Arguments $arguments `
+            -WheelPath $wheelPath `
+            -Running $running `
+            -Version $release.Version
+    }
+
     try {
         Invoke-NativeCommand -FilePath $uvPath -Arguments $arguments
     }
     finally {
-        if (-not $DryRun) {
-            Remove-Item -LiteralPath (Split-Path -Parent $wheelPath) -Recurse -Force -ErrorAction SilentlyContinue
-        }
+        Remove-Item -LiteralPath (Split-Path -Parent $wheelPath) -Recurse -Force -ErrorAction SilentlyContinue
     }
     return $release.Version
 }
@@ -587,14 +606,10 @@ function Configure-AndConfirmFreeClaudeCode {
     }
 }
 
-function Assert-NoLauncherRunning {
-    # ``uv tool install --force`` overwrites every launcher shim in the tool bin
-    # directory. Windows cannot overwrite a running .exe, so a live launcher
-    # (the proxy itself, or an fcc-claude/fcc-codex/fcc-pi child) makes uv fail
-    # mid-install with a cryptic os error 32. Refuse up front, before uv mutates
-    # anything, naming every running launcher. Checks both command families whose
-    # shims live in the same bin dir.
-    $LauncherCommands = @(
+function Get-LauncherCommands {
+    # Both command families share the tool bin directory, so any of them holds
+    # the shim uv must replace.
+    return @(
         "fcc-server", "fcc-claude", "fcc-claude-old", "fcc-codex", "fcc-pi",
         "fcc-init", "fcc-chatgpt-oauth-login", "fcc-compact-log",
         "free-claude-code",
@@ -602,16 +617,119 @@ function Assert-NoLauncherRunning {
         "mcc-init", "mcc-chatgpt-oauth-login", "mcc-compact-log",
         "my-claude-code"
     )
+}
+
+function Get-RunningLaunchers {
+    # Return the process objects of any launcher currently running. These are the
+    # processes whose shims uv must replace, so an install cannot proceed while
+    # they live. We defer rather than refuse: the update completes after the app
+    # is restarted, exactly as on POSIX.
     $running = @()
-    foreach ($commandName in $LauncherCommands) {
+    foreach ($commandName in Get-LauncherCommands) {
         $processes = @(Get-Process -Name $commandName -ErrorAction SilentlyContinue)
-        if ($processes.Count -gt 0) {
-            $running += $commandName
+        foreach ($process in $processes) {
+            $running += $process
         }
     }
-    if ($running.Count -gt 0) {
-        throw "My Claude Code is still running ($($running -join ', ')). Stop those processes, then rerun install."
+    return $running
+}
+
+function Start-DeferredInstall {
+    param(
+        [Parameter(Mandatory = $true)] [string] $UvPath,
+        [Parameter(Mandatory = $true)] [string[]] $Arguments,
+        [Parameter(Mandatory = $true)] [string] $WheelPath,
+        [Parameter(Mandatory = $true)] [object[]] $Running,
+        [Parameter(Mandatory = $true)] [string] $Version
+    )
+
+    # Keep the verified wheel where a detached helper can reach it. The wheel
+    # directory must survive this process exiting, so stage under TEMP, not a
+    # tempfile that is deleted on scope exit.
+    $stageDir = Join-Path ([IO.Path]::GetTempPath()) ("mcc-deferred-" + [guid]::NewGuid().ToString("N"))
+    New-Item -ItemType Directory -Path $stageDir | Out-Null
+    $stagedWheel = Join-Path $stageDir (Split-Path -Leaf $WheelPath)
+    Copy-Item -LiteralPath $WheelPath -Destination $stagedWheel -Force
+    Remove-Item -LiteralPath (Split-Path -Parent $WheelPath) -Recurse -Force -ErrorAction SilentlyContinue
+
+    # The last argument is the package spec ("my-claude-code[...] @ file:///...").
+    # Point it at the staged wheel so the detached helper installs the verified
+    # artifact, not the temp copy we just deleted. Preserve any extras prefix
+    # (voice / voice_local) by reusing the part before " @ ".
+    $stagedUrl = ([Uri]::new($stagedWheel)).AbsoluteUri
+    if ($Arguments.Count -gt 0) {
+        $last = $Arguments[-1]
+        $packagePrefix = ($last -split " @ ", 2)[0]
+        $stagedSpec = "$packagePrefix @ $stagedUrl"
+        $Arguments = $Arguments[0..($Arguments.Count - 2)] + $stagedSpec
     }
+
+    # Wait for every running launcher to exit (bounded), then install the staged
+    # wheel. The user restarts the app themselves; we must NOT start it, or we
+    # would replace the same processes we waited for. Retry the install with
+    # backoff because handle release is not instantaneous on Windows.
+    $pidsLiteral = ($Running | ForEach-Object {
+        "'" + ($_.Id.ToString() -replace "'", "''") + "'"
+    }) -join ", "
+    $uvLiteral = "'" + ($UvPath -replace "'", "''") + "'"
+    $stageDirLiteral = "'" + ($stageDir -replace "'", "''") + "'"
+    $argumentsLiteral = "& $uvLiteral @(" + (($Arguments | ForEach-Object {
+        "'" + ($_ -replace "'", "''") + "'"
+    }) -join ", ") + ")"
+
+    $script = @"
+`$ErrorActionPreference = 'Stop'
+`$deadline = (Get-Date).AddHours(6)
+`$pids = @($pidsLiteral)
+while ((Get-Date) -lt `$deadline) {
+    `$alive = `$pids | Where-Object { Get-Process -Id `$_ -ErrorAction SilentlyContinue }
+    if (-not `$alive) { break }
+    Start-Sleep -Milliseconds 500
+}
+if (`$pids | Where-Object { Get-Process -Id `$_ -ErrorAction SilentlyContinue }) {
+    Write-Host "My Claude Code did not stop within 6 hours; install not applied."
+    exit 1
+}
+Start-Sleep -Seconds 2
+`$ErrorActionPreference = 'Continue'
+`$delays = @(0, 5, 10, 20, 30)
+`$ok = `$false
+foreach (`$wait in `$delays) {
+    if (`$wait -gt 0) { Start-Sleep -Seconds `$wait }
+    $argumentsLiteral 2>&1 | Out-String | Out-Null
+    if (`$LASTEXITCODE -eq 0) { `$ok = `$true; break }
+}
+`$ErrorActionPreference = 'Stop'
+if (`$ok) {
+    Remove-Item -Path $stageDirLiteral -Recurse -Force -ErrorAction SilentlyContinue
+    Write-Host "My Claude Code install completed. Start the app with: mcc-server"
+}
+else {
+    Write-Host "My Claude Code install failed after multiple attempts. Re-run the installer."
+}
+"@
+
+    $helperPath = Join-Path $stageDir "apply-update.ps1"
+    Set-Content -LiteralPath $helperPath -Value $script -Encoding UTF8
+
+    # CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP, same as the dashboard updater:
+    # the child needs a console to run but must not be signalled when the console
+    # this installer was launched from closes.
+    $flags = 0x08000000 -bor 0x00000200
+    $process = Start-Process `
+        -FilePath "powershell.exe" `
+        -ArgumentList @("-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", $helperPath) `
+        -WindowStyle Hidden `
+        -PassThru
+    $null = $process
+
+    $script:Deferred = $true
+
+    Write-Host "My Claude Code is currently running. The update to v$Version is staged and"
+    Write-Host "will complete after you stop the running app, then restart it (mcc-server)."
+    Write-Host ""
+    Write-Host "The new version is picked up on restart."
+    return $Version
 }
 
 if ($Help) {
@@ -633,22 +751,22 @@ Add-KnownBinDirectories
 Write-Step "Ensuring uv $MinUvVersion or newer is installed"
 Ensure-Uv
 
-if (-not $DryRun) {
-    Write-Step "Checking for running My Claude Code processes"
-    Assert-NoLauncherRunning
-}
-
 Write-Step "Installing or updating My Claude Code"
 $InstalledVersion = Install-FreeClaudeCode
 
-Write-Step "Configuring PATH and verifying My Claude Code"
-Configure-AndConfirmFreeClaudeCode -ExpectedVersion $InstalledVersion
-
-Write-Host ""
-if ($DryRun) {
+if ($script:Deferred) {
+    Write-Host ""
+    Write-Host "Update staged for after restart."
+}
+elseif ($DryRun) {
+    Write-Host ""
     Write-Host "Dry run complete. No changes were made."
 }
 else {
+    Write-Step "Configuring PATH and verifying My Claude Code"
+    Configure-AndConfirmFreeClaudeCode -ExpectedVersion $InstalledVersion
+
+    Write-Host ""
     Write-Host "My Claude Code $InstalledVersion is installed and verified."
     Write-Host ""
     Write-Host "Start the proxy:"
