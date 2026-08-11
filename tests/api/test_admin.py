@@ -280,6 +280,37 @@ def test_admin_static_exposes_professional_observability_controls():
     assert "Full normalized I/O is captured" in script
     assert "trapWebSearchDetailFocus" in script
     assert "bucket boundaries use UTC" in script
+
+    # Export window + site persistence.
+    for control_id in (
+        "exportModal",
+        "exportDownloadButton",
+        "exportFormat",
+        "exportPeriod",
+        "exportSince",
+        "exportUntil",
+        "exportGroupBy",
+        "exportFieldList",
+        "exportClose",
+        "exportCustomRange",
+    ):
+        assert f'id="{control_id}"' in html
+    assert ">Export<" in html
+    assert ">Export JSON<" not in html
+    for fn in (
+        "openExportModal",
+        "closeExportModal",
+        "trapExportModalFocus",
+        "runExport",
+        "downloadBlob",
+        "downloadJson",
+        "persistDashboardState",
+        "restoreDashboardState",
+    ):
+        assert fn in script
+    assert '"mcc-dashboard-state"' in script
+    assert "exportScope" in script
+    assert "Group by" in html
     assert "trapRequestDetailFocus" in script
     assert "View request" in script
     assert "all stored rows will be deleted" in script

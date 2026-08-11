@@ -471,9 +471,9 @@ _REQUEST_DIMENSION_SQL: dict[str, str] = {
 }
 
 # Derived aggregate metrics computed per row after SQL.
-_REQUEST_AGGREGATE_DERIVED = {
-    "error_rate": "error_rate",
-    "cache_hit": "cache_hit_rate",
+_REQUEST_AGGREGATE_DERIVED: dict[str, tuple[str, ...]] = {
+    "error_rate": ("error_rate",),
+    "cache_hit": ("cache_hit_rate",),
 }
 
 
@@ -509,6 +509,20 @@ def request_aggregate_sql(
             selects.append(f"{expr} AS {alias}")
             names.append(alias)
     return ", ".join(selects) if selects else "COUNT(*) AS requests", names
+
+
+def request_aggregate_derived_columns(field_ids: Iterable[str]) -> list[str]:
+    """Return the derived (computed) aggregate columns for the selected fields."""
+    selected = set(field_ids)
+    result: list[str] = []
+    seen: set[str] = set()
+    for field_id in REQUEST_FIELD_IDS:
+        if field_id in selected:
+            for derived in _REQUEST_AGGREGATE_DERIVED.get(field_id, ()):
+                if derived not in seen:
+                    seen.add(derived)
+                    result.append(derived)
+    return result
 
 
 def compute_request_aggregate_derived(
@@ -673,6 +687,25 @@ def websearch_aggregate_sql(
         selects = ["COUNT(*) AS requests"]
         names = ["requests"]
     return ", ".join(selects), names
+
+
+_WEBSEARCH_AGGREGATE_DERIVED = {
+    "status": ("error_rate",),
+}
+
+
+def websearch_aggregate_derived_columns(field_ids: Iterable[str]) -> list[str]:
+    """Return the derived (computed) aggregate columns for the selected fields."""
+    selected = set(field_ids)
+    result: list[str] = []
+    seen: set[str] = set()
+    for field_id in WEBSEARCH_FIELD_IDS:
+        if field_id in selected:
+            for derived in _WEBSEARCH_AGGREGATE_DERIVED.get(field_id, ()):
+                if derived not in seen:
+                    seen.add(derived)
+                    result.append(derived)
+    return result
 
 
 def compute_websearch_aggregate_derived(

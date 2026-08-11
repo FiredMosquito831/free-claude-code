@@ -444,7 +444,14 @@ class WebSearchLogStore:
             since_epoch=since_epoch,
             until_epoch=until_epoch,
         )
-        select = ", ".join(columns)
+        # Keyset pagination needs ts_epoch + id; _attempt_dict needs
+        # content_captured unconditionally. Force-include all three.
+        required = {"ts_epoch", "id", "content_captured"}
+        select_columns = list(columns)
+        for column in required:
+            if column not in select_columns:
+                select_columns.append(column)
+        select = ", ".join(select_columns)
         connection = self._connect_reader()
         try:
             cursor: tuple[float, int] | None = None

@@ -14,10 +14,11 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 
+from my_claude_code.api.admin_websearch_routes import get_websearch_log_store
 from my_claude_code.config.settings import Settings
 from my_claude_code.core import export as export_engine
 from my_claude_code.core.request_log import RequestLogStore, store_from_settings
-from my_claude_code.websearch.analytics import WebSearchLogStore, get_shared_store
+from my_claude_code.websearch.analytics import WebSearchLogStore
 
 from .admin_routes import require_loopback_admin
 from .dependencies import get_settings
@@ -50,13 +51,6 @@ def _parse_bound(value: str | None, name: str) -> float | None:
 
 def _request_store(settings: Settings) -> RequestLogStore | None:
     return store_from_settings(settings)
-
-
-def _websearch_store() -> WebSearchLogStore | None:
-    try:
-        return get_shared_store()
-    except Exception:
-        return None
 
 
 def _split_csv(value: str | None) -> list[str]:
@@ -129,6 +123,7 @@ async def export_analytics(
     key: str | None = Query(None),
     q: str | None = Query(None),
     settings: Settings = Depends(get_settings),
+    websearch_store: WebSearchLogStore = Depends(get_websearch_log_store),
 ):
     """Stream an analytics export in the requested format and scope.
 
@@ -170,6 +165,7 @@ async def export_analytics(
         provider=provider,
         status=status,
         q=q,
+        store=websearch_store,
     )
 
 
@@ -213,6 +209,8 @@ def _request_export(
 
     if dims:
         select, names = export_engine.request_aggregate_sql(selected, dims)
+        derived = export_engine.request_aggregate_derived_columns(selected)
+        output_columns = names + [column for column in derived if column not in names]
         iterator = store.iter_export_aggregates(
             select=select,
             names=names,
@@ -230,9 +228,9 @@ def _request_export(
         def agg_rows() -> Iterator[dict[str, Any]]:
             for row in iterator:
                 export_engine.compute_request_aggregate_derived(row, selected)
-                yield {name: row.get(name) for name in names}
+                yield {column: row.get(column) for column in output_columns}
 
-        headers = dims + [name for name in names if name not in dims]
+        headers = output_columns
         return _stream(fmt, agg_rows(), headers, headers, filename, exported_at)
 
     sql_columns = export_engine.request_detail_columns(selected)
@@ -271,8 +269,8 @@ def _websearch_export(
     provider: str | None,
     status: str | None,
     q: str | None,
+    store: WebSearchLogStore,
 ) -> StreamingResponse:
-    store = _websearch_store()
     if store is None:
         return _disabled_response()
     selected = (
@@ -304,6 +302,8 @@ def _websearch_export(
 
     if dims:
         select, names = export_engine.websearch_aggregate_sql(selected, dims)
+        derived = export_engine.websearch_aggregate_derived_columns(selected)
+        output_columns = names + [column for column in derived if column not in names]
         iterator = store.iter_export_aggregates(
             select=select,
             names=names,
@@ -318,10 +318,11 @@ def _websearch_export(
         def agg_rows() -> Iterator[dict[str, Any]]:
             for row in iterator:
                 export_engine.compute_websearch_aggregate_derived(row, selected)
-                yield {name: row.get(name) for name in names}
+                yield {column: row.get(column) for column in output_columns}
 
-        headers = dims + [name for name in names if name not in dims]
-        return _stream(fmt, agg_rows(), headers, headers, filename, exported_at)
+        return _stream(
+            fmt, agg_rows(), output_columns, output_columns, filename, exported_at
+        )
 
     columns = export_engine.websearch_detail_columns(selected)
     headers = export_engine.websearch_detail_headers(columns)

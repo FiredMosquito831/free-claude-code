@@ -298,9 +298,7 @@
                 </select>
               </label>
               <button id="reqApplyFilters" class="secondary-button" type="button">Apply</button>
-              <button id="reqExportButton" class="secondary-button" type="button">
-                Export
-              </button>
+              <button id="reqExportButton" class="secondary-button" type="button">Export</button>
               <span id="reqBodiesIndicator" class="requests-indicator"></span>
               <button id="reqClearButton" class="secondary-button danger" type="button">Clear log</button>
             </div>
@@ -634,13 +632,7 @@
                 >
                   Apply
                 </button>
-                <button
-                  id="webSearchExportButton"
-                  class="secondary-button"
-                  type="button"
-                >
-                  Export
-                </button>
+                <button id="webSearchExportButton" class="secondary-button" type="button">Export</button>
                 <button
                   id="webSearchClearButton"
                   class="secondary-button danger"
@@ -1047,6 +1039,12 @@ TAVILY_CHUNKS_PER_SOURCE=3</code></pre>
                   actually happened. Web search analytics separate <em>logical
                   searches</em> from <em>provider attempts</em>, so one search that fell
                   back shows as one search and several attempts.
+                </p>
+                <p>
+                  <strong>Export</strong> opens the export window for Model requests or Web
+                  Search &mdash; JSON, CSV, XLSX or TXT, over a period of your choice,
+                  with selectable fields and optional grouping by provider, period, model
+                  or key. It streams the entire matching row set, not just the visible page.
                 </p>
                 <h4>Finding a request again</h4>
                 <p>
