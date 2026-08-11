@@ -134,6 +134,14 @@ _PROVIDER_FIELD_OVERRIDES: dict[str, dict[str, Any]] = {
             "api.kilo.ai/api/gateway (create at [app.kilo.ai](https://app.kilo.ai/))."
         ),
     },
+    "COMMANDCODE_API_KEY": {
+        "label": "Command Code API Key",
+        "description": (
+            "Command Code Provider-plan API key. FCC routes Claude models through "
+            "native Anthropic Messages and other models through OpenAI Chat Completions. "
+            "Create a key in [Command Code Studio](https://commandcode.ai/studio)."
+        ),
+    },
     "CLINE_API_KEY": {
         "label": "Cline API Key",
         "description": (

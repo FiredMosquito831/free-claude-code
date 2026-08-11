@@ -128,6 +128,9 @@ class Settings(BaseSettings):
     # ==================== Kilo AI Gateway Config ====================
     kilo_api_key: str = Field(default="", validation_alias="KILO_API_KEY")
 
+    # ==================== Command Code Provider API ====================
+    commandcode_api_key: str = Field(default="", validation_alias="COMMANDCODE_API_KEY")
+
     # ==================== Cline Config ====================
     cline_api_key: str = Field(default="", validation_alias="CLINE_API_KEY")
 
@@ -371,6 +374,7 @@ class Settings(BaseSettings):
     novita_proxy: str = Field(default="", validation_alias="NOVITA_PROXY")
     nous_proxy: str = Field(default="", validation_alias="NOUS_PROXY")
     kilo_proxy: str = Field(default="", validation_alias="KILO_PROXY")
+    commandcode_proxy: str = Field(default="", validation_alias="COMMANDCODE_PROXY")
     cline_proxy: str = Field(default="", validation_alias="CLINE_PROXY")
     alibaba_proxy: str = Field(default="", validation_alias="ALIBABA_PROXY")
     alibaba_cn_proxy: str = Field(default="", validation_alias="ALIBABA_CN_PROXY")

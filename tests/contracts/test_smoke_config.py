@@ -49,6 +49,7 @@ def _settings(**overrides):
         "cerebras_api_key": "",
         "ollama_api_key": "",
         "fireworks_api_key": "",
+        "commandcode_api_key": "",
         "cloudflare_api_token": "",
         "cloudflare_account_id": "",
         "lm_studio_base_url": "",
@@ -98,6 +99,20 @@ def test_ollama_provider_configuration_uses_base_url() -> None:
 
     assert config.has_provider_configuration("ollama")
     assert config.provider_models()[0].full_model == "ollama/llama3.1"
+
+
+def test_commandcode_configuration_uses_api_key(monkeypatch) -> None:
+    monkeypatch.delenv("FCC_SMOKE_MODEL_COMMANDCODE", raising=False)
+    config = _smoke_config(settings=_settings(commandcode_api_key="commandcode-key"))
+
+    assert config.has_provider_configuration("commandcode")
+    model = next(
+        item
+        for item in config.provider_smoke_models()
+        if item.provider == "commandcode"
+    )
+    assert model.full_model == "commandcode/deepseek/deepseek-v4-flash"
+    assert model.source == "provider_default"
 
 
 def test_ollama_provider_matrix_filters_models() -> None:

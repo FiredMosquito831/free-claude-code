@@ -1,0 +1,67 @@
+"""Command Code model-catalog parsing and protocol routing."""
+
+from collections.abc import Mapping, Sequence
+from typing import Any
+
+from free_claude_code.application.model_metadata import ProviderModelInfo
+from free_claude_code.providers.model_listing import ModelListResponseError
+
+
+def is_anthropic_messages_model(model_id: str) -> bool:
+    """Return whether Command Code documents this ID as a Claude model."""
+    return model_id.strip().lower().startswith("claude-")
+
+
+def extract_commandcode_model_infos(
+    payload: Any,
+    *,
+    provider_name: str,
+) -> frozenset[ProviderModelInfo]:
+    """Parse Command Code's OpenAI-shaped model list with context metadata."""
+    data = _field(payload, "data")
+    if not _is_sequence(data):
+        raise _malformed(provider_name, "expected top-level data array")
+
+    model_infos: set[ProviderModelInfo] = set()
+    for item in data:
+        model_id = _field(item, "id")
+        if not isinstance(model_id, str) or not model_id.strip():
+            raise _malformed(provider_name, "expected every data item to include id")
+        context_length = _field(item, "context_length")
+        if context_length is not None and (
+            not isinstance(context_length, int)
+            or isinstance(context_length, bool)
+            or context_length <= 0
+        ):
+            raise _malformed(
+                provider_name,
+                "expected context_length to be a positive integer",
+            )
+        model_infos.add(
+            ProviderModelInfo(
+                model_id=model_id,
+                context_length=context_length,
+            )
+        )
+
+    if not model_infos:
+        raise _malformed(provider_name, "response did not include any models")
+    return frozenset(model_infos)
+
+
+def _field(item: Any, name: str) -> Any:
+    if isinstance(item, Mapping):
+        return item.get(name)
+    return getattr(item, name, None)
+
+
+def _is_sequence(value: Any) -> bool:
+    return isinstance(value, Sequence) and not isinstance(
+        value, str | bytes | bytearray
+    )
+
+
+def _malformed(provider_name: str, reason: str) -> ModelListResponseError:
+    return ModelListResponseError(
+        f"{provider_name} model-list response is malformed: {reason}"
+    )

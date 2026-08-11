@@ -120,9 +120,13 @@ class OpenAIChatProvider(BaseProvider):
         if client is not None:
             await client.close()
 
+    async def list_models_payload(self) -> Any:
+        """Return the raw OpenAI-compatible model-list payload."""
+        return await self._client.models.list()
+
     async def list_model_ids(self) -> frozenset[str]:
         """Return model ids from the provider's OpenAI-compatible models endpoint."""
-        payload = await self._client.models.list()
+        payload = await self.list_models_payload()
         return extract_openai_model_ids(payload, provider_name=self._provider_name)
 
     def _build_request_body(

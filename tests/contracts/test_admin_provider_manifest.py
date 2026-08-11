@@ -119,6 +119,20 @@ def test_cloudflare_account_id_is_admin_provider_field() -> None:
     assert entry.secret is False
 
 
+def test_commandcode_card_owns_key_rotation_and_proxy_fields() -> None:
+    from free_claude_code.config.admin.status import provider_config_status
+
+    by_id = {entry["provider_id"]: entry for entry in provider_config_status({})}
+    card = by_id["commandcode"]
+
+    assert FIELD_BY_KEY["COMMANDCODE_API_KEY"].settings_attr == "commandcode_api_key"
+    assert "COMMANDCODE_API_KEY_ROTATION" in FIELD_BY_KEY
+    assert FIELD_BY_KEY["COMMANDCODE_PROXY"].settings_attr == "commandcode_proxy"
+    assert card["credential_owner_id"] == "commandcode"
+    assert card["credential_env"] == "COMMANDCODE_API_KEY"
+    assert card["key_count"] == 0
+
+
 def test_provider_status_reports_the_size_of_each_key_pool(monkeypatch) -> None:
     """The card face shows "3 keys - Round robin" without one request per provider.
 

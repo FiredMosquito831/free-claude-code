@@ -315,6 +315,7 @@ Enter the listed setting in the Admin UI, open **Model Config**, then search the
 | [Novita AI](https://novita.ai/settings) | `NOVITA_API_KEY` | `novita/deepseek/deepseek-v3.2` |
 | [Nous Portal](https://portal.nousresearch.com/) | `NOUS_API_KEY` | `nous_portal/deepseek/deepseek-v4-flash-0731` |
 | [Kilo AI Gateway](https://app.kilo.ai/) | `KILO_API_KEY` | `kilo/kilo-auto/balanced` |
+| [Command Code](https://commandcode.ai/provider) | `COMMANDCODE_API_KEY` | `commandcode/deepseek/deepseek-v4-flash` |
 | [Cline](https://app.cline.bot/) | `CLINE_API_KEY` | `cline/anthropic/claude-sonnet-4-6` |
 | [Cloudflare Workers AI](https://developers.cloudflare.com/workers-ai/) | `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` | `cloudflare/@cf/moonshotai/kimi-k2.6` |
 | [Z.ai](https://z.ai/manage-apikey/apikey-list) | `ZAI_API_KEY` | `zai/glm-5.2` |

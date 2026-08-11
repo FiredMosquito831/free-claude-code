@@ -49,6 +49,8 @@ SAMBANOVA_DEFAULT_BASE = "https://api.sambanova.ai/v1"
 NOUS_PORTAL_DEFAULT_BASE = "https://inference-api.nousresearch.com/v1"
 # Kilo AI Gateway OpenAI-compatible root (OpenRouter-dialect model catalog).
 KILO_DEFAULT_BASE = "https://api.kilo.ai/api/gateway"
+# Command Code Provider API: OpenAI Chat Completions and Anthropic Messages.
+COMMANDCODE_DEFAULT_BASE = "https://api.commandcode.ai/provider/v1"
 # Cline API gateway OpenAI-compatible Chat Completions.
 CLINE_DEFAULT_BASE = "https://api.cline.bot/api/v1"
 # Alibaba Cloud Model Studio (Bailian) pay-per-token "Token Plan", OpenAI-compatible.
@@ -400,6 +402,16 @@ PROVIDER_CATALOG: dict[str, ProviderDescriptor] = {
         credential_attr="kilo_api_key",
         default_base_url=KILO_DEFAULT_BASE,
         proxy_attr="kilo_proxy",
+        group="gateway",
+    ),
+    "commandcode": ProviderDescriptor(
+        provider_id="commandcode",
+        display_name="Command Code",
+        credential_env="COMMANDCODE_API_KEY",
+        credential_url="https://commandcode.ai/studio",
+        credential_attr="commandcode_api_key",
+        default_base_url=COMMANDCODE_DEFAULT_BASE,
+        proxy_attr="commandcode_proxy",
         group="gateway",
     ),
     "cline": ProviderDescriptor(

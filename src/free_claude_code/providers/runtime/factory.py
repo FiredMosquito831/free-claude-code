@@ -72,6 +72,16 @@ def _create_kilo(
     return KiloProvider(config, rate_limiter=rate_limiter)
 
 
+def _create_commandcode(
+    config: ProviderConfig,
+    _settings: Settings,
+    rate_limiter: ProviderRateLimiter,
+) -> BaseProvider:
+    from free_claude_code.providers.commandcode import CommandCodeProvider
+
+    return CommandCodeProvider(config, rate_limiter=rate_limiter)
+
+
 def _create_mistral(
     config: ProviderConfig,
     _settings: Settings,
@@ -155,6 +165,7 @@ _SPECIAL_PROVIDER_FACTORIES: dict[str, ProviderFactory] = {
     "open_router": _create_open_router,
     "nous_portal": _create_nous_portal,
     "kilo": _create_kilo,
+    "commandcode": _create_commandcode,
     "mistral": _create_mistral,
     "deepseek": _create_deepseek,
     "lmstudio": _create_lmstudio,

@@ -31,6 +31,7 @@ _EXPECTED_PROVIDER_ORDER: tuple[str, ...] = (
     "novita",
     "nous_portal",
     "kilo",
+    "commandcode",
     "cline",
     "cloudflare",
     "zai",
