@@ -507,4 +507,4 @@ def test_readme_uninstall_uses_raw_urls_and_verification_contract() -> None:
         '& ([scriptblock]::Create((irm "https://raw.githubusercontent.com/'
         'FiredMosquito831/free-claude-code/main/scripts/uninstall.ps1")))'
     ) in text
-    assert "verifies every FCC command is gone" in text
+    assert "verifies every MCC command is gone" in text
