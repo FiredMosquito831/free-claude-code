@@ -462,8 +462,8 @@ configure_and_verify_my_claude_code() {
 
     if [ "$dry_run" -eq 1 ]; then
         print_command uv tool dir --bin
-        printf '+ verify fcc-server, fcc-claude, fcc-claude-old, fcc-codex, and fcc-pi in the uv tool bin directory\n'
-        print_command fcc-server --version
+        printf '+ verify mcc-server, mcc-claude, mcc-codex, mcc-pi, mcc-help, and my-claude-code in the uv tool bin directory\n'
+        print_command mcc-server --version
         return 0
     fi
 
@@ -480,19 +480,24 @@ configure_and_verify_my_claude_code() {
     export PATH
     hash -r 2>/dev/null || true
 
-    for command_name in fcc-server fcc-claude fcc-claude-old fcc-codex fcc-pi; do
-        [ -x "$tool_bin/$command_name" ] || fail "Free Claude Code installation did not create $tool_bin/$command_name."
+    # Verify the native my-claude-code command family (mcc-*) plus the package
+    # name shim, exactly as the post-install reference leads with. The legacy
+    # fcc-* aliases resolve through the same distribution, so they exist as soon
+    # as these do.
+    for command_name in mcc-server mcc-claude mcc-claude-old mcc-codex mcc-pi \
+        mcc-init mcc-chatgpt-oauth-login mcc-compact-log mcc-help my-claude-code; do
+        [ -x "$tool_bin/$command_name" ] || fail "My Claude Code installation did not create $tool_bin/$command_name."
     done
 
-    print_command "$tool_bin/fcc-server" --version
-    if installed_version=$("$tool_bin/fcc-server" --version); then
+    print_command "$tool_bin/mcc-server" --version
+    if installed_version=$("$tool_bin/mcc-server" --version); then
         printf '%s\n' "$installed_version"
     else
         status=$?
-        fail "Free Claude Code version verification failed with exit code $status."
+        fail "My Claude Code version verification failed with exit code $status."
     fi
-    [ "$installed_version" = "free-claude-code $FCC_VERSION" ] ||
-        fail "Expected free-claude-code $FCC_VERSION; found: $installed_version"
+    [ "$installed_version" = "my-claude-code $FCC_VERSION" ] ||
+        fail "Expected my-claude-code $FCC_VERSION; found: $installed_version"
 }
 
 parse_args "$@"
