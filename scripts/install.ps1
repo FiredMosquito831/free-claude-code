@@ -25,6 +25,9 @@ $script:Deferred = $false
 # Set by Invoke-RenameThenReinstall when the update completed immediately while
 # launchers were open (old tool env renamed aside, fresh install in place).
 $script:RenamedWhileRunning = $false
+# Set by Invoke-RenameThenReinstall when a running launcher's own shim could
+# not be overwritten (os error 32); a detached helper finishes it after exit.
+$script:NeedDeferredFinish = $false
 
 function Show-Usage {
     @"
@@ -558,6 +561,18 @@ function Install-FreeClaudeCode {
                     -ToolDir $toolDir `
                     -Version $release.Version
                 if ($renamed) {
+                    if ($script:NeedDeferredFinish) {
+                        # The code + free shims updated immediately; a running
+                        # launcher's own shim could not be overwritten. Launch
+                        # the detached helper to finish that shim after the
+                        # window closes. Not a failure.
+                        Start-DeferredInstall `
+                            -UvPath $uvPath `
+                            -Arguments $arguments `
+                            -WheelPath $wheelPath `
+                            -Running $running `
+                            -Version $release.Version | Out-Null
+                    }
                     return $release.Version
                 }
                 # Rename or install failed; fall back to the previous deferral.
@@ -629,46 +644,58 @@ function Invoke-RenameThenReinstall {
     }
 
     # uv writes the launcher shims (PE+zipapps) into the uv tool bin dir. A
-    # running launcher holds its own .exe without FILE_SHARE_DELETE, so uv
-    # cannot overwrite that one shim -- but that shim is version-agnostic (its
-    # __main__.py shebangs to the tool-dir python path), so it does not need
-    # updating: new launches of it already resolve the fresh tool dir. Rename
-    # every launcher shim aside (best-effort; locked ones fail and are left),
-    # so uv can write fresh shims at the canonical paths for the free ones.
-    $binDir = Invoke-NativeCapture -FilePath $UvPath -Arguments @("tool", "dir", "--bin")
-    if (-not [string]::IsNullOrWhiteSpace($binDir)) {
-        Get-ChildItem -Path $binDir -Filter "*.exe" -ErrorAction SilentlyContinue |
-            Where-Object { $_.Name -match "^(mcc|fcc|my-claude-code|free-claude-code)" } |
-            ForEach-Object {
-                Rename-Item -LiteralPath $_.FullName -NewName ($_.Name + ".old-$stamp") -ErrorAction SilentlyContinue
-            }
-    }
-
+    # running launcher holds its own .exe WITHOUT FILE_SHARE_DELETE, so uv
+    # cannot overwrite that one shim and fails with os error 32 on it. That
+    # failure is EXPECTED and harmless: the shim is version-agnostic (its
+    # __main__.py shebangs to the absolute tool-dir python path), so it does not
+    # need updating -- new launches of it already resolve the fresh tool dir.
+    # The tool dir and every non-running shim update in the same uv call; only
+    # the running launcher's shim errors. We catch that specific failure, keep
+    # the (good) new install, and flag that a deferred helper should finish the
+    # one locked shim after the window closes. Any OTHER uv failure restores
+    # the previous install and is fatal.
+    $installFailed = $false
+    $installError = ""
     try {
         Invoke-NativeCommand -FilePath $UvPath -Arguments $Arguments
     }
     catch {
-        # Fresh install failed. Restore the previous install so the user is
-        # never left with no working tool.
+        $installFailed = $true
+        $installError = $_.Exception.Message
+    }
+
+    if ($installFailed) {
+        # A running launcher holds its own shim WITHOUT FILE_SHARE_DELETE, so uv
+        # fails copying that one shim (os error 32). That failure is EXPECTED
+        # and harmless: the shim is version-agnostic (its __main__.py shebangs
+        # to the tool-dir python path), so it does not need updating. Detect it
+        # robustly by asking whether the fresh install actually landed in the
+        # tool dir: if the receipt now names $Version, the tool env + free shims
+        # updated and only a running shim blocked uv's exit -- keep it and defer
+        # finishing that shim. Any other failure restores the previous install.
+        $installLanded = $false
+        $receipt = Join-Path $ToolDir "uv-receipt.toml"
+        if (Test-Path -LiteralPath $receipt) {
+            $receiptText = Get-Content -LiteralPath $receipt -Raw -ErrorAction SilentlyContinue
+            $installLanded = $receiptText -match [regex]::Escape("version = `"$Version`"")
+        }
+        if ($installLanded) {
+            $script:RenamedWhileRunning = $true
+            $script:NeedDeferredFinish = $true
+            return $true
+        }
+        # Real failure. Restore the previous install so the user is never left
+        # with no working tool.
         if (Test-Path -LiteralPath $renamed -PathType Container) {
             Rename-Item -LiteralPath $renamed -NewName (Split-Path -Leaf $ToolDir) -ErrorAction SilentlyContinue
         }
-        throw
+        throw "My Claude Code install failed: $installError"
     }
 
     # New install succeeded. The old dir may still be held open by a live
     # window; remove best-effort (ignore failure, it becomes orphaned
     # garbage that the sweep above reaps on a later install).
     Remove-Item -LiteralPath $renamed -Recurse -Force -ErrorAction SilentlyContinue
-    # Remove the shims we renamed aside earlier that uv did not recreate
-    # (those uv recreated are gone; locked ones could not be renamed so have no
-    # .old sibling here). Best-effort -- a running window may hold one.
-    if (-not [string]::IsNullOrWhiteSpace($binDir)) {
-        Get-ChildItem -Path $binDir -Filter "*.old-$stamp" -ErrorAction SilentlyContinue |
-            ForEach-Object {
-                Remove-Item -LiteralPath $_.FullName -Force -ErrorAction SilentlyContinue
-            }
-    }
     $script:RenamedWhileRunning = $true
     return $true
 }
@@ -915,7 +942,23 @@ Ensure-Uv
 Write-Step "Installing or updating My Claude Code"
 $InstalledVersion = Install-FreeClaudeCode
 
-if ($script:Deferred) {
+if ($script:RenamedWhileRunning) {
+    # Hybrid success: the tool env + free shims updated immediately; if a
+    # running launcher held its shim, a detached helper finishes it after the
+    # window closes. Report the installed state, not "staged".
+    Write-Step "Configuring PATH and verifying My Claude Code"
+    Configure-AndConfirmFreeClaudeCode -ExpectedVersion $InstalledVersion
+
+    Write-Host ""
+    Write-Host "My Claude Code $InstalledVersion is installed and verified."
+    Write-Host "New sessions and restarted servers use the new version."
+    if ($script:NeedDeferredFinish) {
+        Write-Host "One already-open window still runs the previous version and will switch"
+        Write-Host "over when it is closed or restarted."
+    }
+    Write-MccCommandReference
+}
+elseif ($script:Deferred) {
     Write-Host ""
     Write-Host "Update staged for after restart."
 }
@@ -929,9 +972,5 @@ else {
 
     Write-Host ""
     Write-Host "My Claude Code $InstalledVersion is installed and verified."
-    if ($script:RenamedWhileRunning) {
-        Write-Host "New sessions and restarted servers use the new version; already-open"
-        Write-Host "windows keep running the previous version until they are restarted."
-    }
     Write-MccCommandReference
 }
