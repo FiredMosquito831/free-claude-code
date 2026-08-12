@@ -548,26 +548,31 @@ function Install-FreeClaudeCode {
         # the old code, new windows/servers get the new version — exactly like
         # POSIX. If the rename is refused (rare hard lock), fall back to the
         # detached-helper deferral.
-        $toolDir = Get-UvToolDir -UvPath $uvPath
-        if ($null -ne $toolDir) {
-            try {
-                return Invoke-RenameThenReinstall `
+        try {
+            $toolDir = Get-UvToolDir -UvPath $uvPath
+            if ($null -ne $toolDir) {
+                $renamed = Invoke-RenameThenReinstall `
                     -UvPath $uvPath `
                     -Arguments $arguments `
                     -WheelPath $wheelPath `
                     -ToolDir $toolDir `
                     -Version $release.Version
-            }
-            catch {
+                if ($renamed) {
+                    return $release.Version
+                }
                 # Rename or install failed; fall back to the previous deferral.
             }
+            return Start-DeferredInstall `
+                -UvPath $uvPath `
+                -Arguments $arguments `
+                -WheelPath $wheelPath `
+                -Running $running `
+                -Version $release.Version
         }
-        return Start-DeferredInstall `
-            -UvPath $uvPath `
-            -Arguments $arguments `
-            -WheelPath $wheelPath `
-            -Running $running `
-            -Version $release.Version
+        finally {
+            # The wheel temp dir is consumed by whichever path ran; clean it up.
+            Remove-Item -LiteralPath (Split-Path -Parent $wheelPath) -Recurse -Force -ErrorAction SilentlyContinue
+        }
     }
 
     try {
@@ -598,47 +603,49 @@ function Invoke-RenameThenReinstall {
         [Parameter(Mandatory = $true)] [string] $Version
     )
 
+    if (-not (Test-Path -LiteralPath $ToolDir -PathType Container)) {
+        # Nothing to rename: a first install with a running launcher. Just
+        # install directly (the fresh env is created from scratch).
+        Invoke-NativeCommand -FilePath $UvPath -Arguments $Arguments
+        return $true
+    }
+
+    # Best-effort sweep of stale .old-* dirs whose rename-lock is gone. A
+    # dir still held open by a live window fails to delete; ignore it.
+    Get-ChildItem -Path (Split-Path -Parent $ToolDir) -Directory -Filter "my-claude-code.old-*" -ErrorAction SilentlyContinue |
+        ForEach-Object {
+            Remove-Item -LiteralPath $_.FullName -Recurse -Force -ErrorAction SilentlyContinue
+        }
+
+    $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
+    $renamed = "$ToolDir.old-$stamp"
     try {
-        if (-not (Test-Path -LiteralPath $ToolDir -PathType Container)) {
-            # Nothing to rename: a first install with a running launcher. Just
-            # install directly (the fresh env is created from scratch).
-            Invoke-NativeCommand -FilePath $UvPath -Arguments $Arguments
-            return $Version
-        }
-
-        # Best-effort sweep of stale .old-* dirs whose rename-lock is gone. A
-        # dir still held open by a live window fails to delete; ignore it.
-        Get-ChildItem -Path (Split-Path -Parent $ToolDir) -Directory -Filter "my-claude-code.old-*" -ErrorAction SilentlyContinue |
-            ForEach-Object {
-                Remove-Item -LiteralPath $_.FullName -Recurse -Force -ErrorAction SilentlyContinue
-            }
-
-        $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
-        $renamed = "$ToolDir.old-$stamp"
         Rename-Item -LiteralPath $ToolDir -NewName (Split-Path -Leaf $renamed) -ErrorAction Stop
-
-        try {
-            Invoke-NativeCommand -FilePath $UvPath -Arguments $Arguments
-        }
-        catch {
-            # Fresh install failed. Restore the previous install so the user is
-            # never left with no working tool.
-            if (Test-Path -LiteralPath $renamed -PathType Container) {
-                Rename-Item -LiteralPath $renamed -NewName (Split-Path -Leaf $ToolDir) -ErrorAction SilentlyContinue
-            }
-            throw
-        }
-
-        # New install succeeded. The old dir may still be held open by a live
-        # window; remove best-effort (ignore failure, it becomes orphaned
-        # garbage that the sweep above reaps on a later install).
-        Remove-Item -LiteralPath $renamed -Recurse -Force -ErrorAction SilentlyContinue
-        $script:RenamedWhileRunning = $true
-        return $Version
     }
-    finally {
-        Remove-Item -LiteralPath (Split-Path -Parent $WheelPath) -Recurse -Force -ErrorAction SilentlyContinue
+    catch {
+        # The rename was refused (a process holds the dir without share-delete).
+        # Fall back to the deferred install rather than risk a broken env.
+        return $false
     }
+
+    try {
+        Invoke-NativeCommand -FilePath $UvPath -Arguments $Arguments
+    }
+    catch {
+        # Fresh install failed. Restore the previous install so the user is
+        # never left with no working tool.
+        if (Test-Path -LiteralPath $renamed -PathType Container) {
+            Rename-Item -LiteralPath $renamed -NewName (Split-Path -Leaf $ToolDir) -ErrorAction SilentlyContinue
+        }
+        throw
+    }
+
+    # New install succeeded. The old dir may still be held open by a live
+    # window; remove best-effort (ignore failure, it becomes orphaned
+    # garbage that the sweep above reaps on a later install).
+    Remove-Item -LiteralPath $renamed -Recurse -Force -ErrorAction SilentlyContinue
+    $script:RenamedWhileRunning = $true
+    return $true
 }
 
 function Configure-AndConfirmFreeClaudeCode {
