@@ -1143,16 +1143,17 @@ def test_install_ps1_rename_keeps_install_when_running_shim_is_locked(
     stub_dir.mkdir(parents=True)
     uv_log = stub_dir / "uv-calls.log"
     locked_uv = stub_dir / "locked-uv.cmd"
-    # uv succeeds on the tool env (recreates the dir + writes a receipt naming
-    # the installed version) but fails copying a shim that a running launcher
-    # holds -> os error 32.
+    # uv succeeds on the tool env (recreates the dir + installs the package
+    # dist-info, proving the fresh install landed) but fails copying a shim that
+    # a running launcher holds -> os error 32.
     locked_uv.write_text(
         '@echo off\r\necho uv:%*>>"' + str(uv_log) + '"\r\n'
         'if "%1"=="tool" if "%2"=="dir" if "%3"=="--bin" echo %FAKE_TOOL_ROOT%& exit /b 0\r\n'
         'if "%1"=="tool" if "%2"=="dir" echo %FAKE_TOOL_ROOT%& exit /b 0\r\n'
         'if not "%FAKE_TOOL_ROOT%"=="" mkdir "%FAKE_TOOL_ROOT%\\my-claude-code" 2>nul\r\n'
-        'if not "%FAKE_TOOL_ROOT%"=="" echo [tool] > "%FAKE_TOOL_ROOT%\\my-claude-code\\uv-receipt.toml" 2>nul\r\n'
-        'if not "%FAKE_TOOL_ROOT%"=="" echo version = "%FAKE_INSTALL_VERSION%" >> "%FAKE_TOOL_ROOT%\\my-claude-code\\uv-receipt.toml" 2>nul\r\n'
+        'if not "%FAKE_TOOL_ROOT%"=="" mkdir "%FAKE_TOOL_ROOT%\\my-claude-code\\Lib" 2>nul\r\n'
+        'if not "%FAKE_TOOL_ROOT%"=="" mkdir "%FAKE_TOOL_ROOT%\\my-claude-code\\Lib\\site-packages" 2>nul\r\n'
+        'if not "%FAKE_TOOL_ROOT%"=="" mkdir "%FAKE_TOOL_ROOT%\\my-claude-code\\Lib\\site-packages\\my_claude_code-%FAKE_INSTALL_VERSION%.dist-info" 2>nul\r\n'
         ">&2 echo Failed to install entrypoint\r\n"
         ">&2 echo Caused by: failed to copy file from ...\r\n"
         ">&2 echo ...being used by another process. (os error 32)\r\n"

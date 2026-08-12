@@ -670,14 +670,18 @@ function Invoke-RenameThenReinstall {
         # and harmless: the shim is version-agnostic (its __main__.py shebangs
         # to the tool-dir python path), so it does not need updating. Detect it
         # robustly by asking whether the fresh install actually landed in the
-        # tool dir: if the receipt now names $Version, the tool env + free shims
-        # updated and only a running shim blocked uv's exit -- keep it and defer
-        # finishing that shim. Any other failure restores the previous install.
+        # tool dir: if the freshly-installed tool python reports $Version, the
+        # tool env + free shims updated and only a running shim blocked uv's
+        # exit -- keep it and defer finishing that shim. Any other failure
+        # restores the previous install.
         $installLanded = $false
-        $receipt = Join-Path $ToolDir "uv-receipt.toml"
-        if (Test-Path -LiteralPath $receipt) {
-            $receiptText = Get-Content -LiteralPath $receipt -Raw -ErrorAction SilentlyContinue
-            $installLanded = $receiptText -match [regex]::Escape("version = `"$Version`"")
+        # The dist-info directory is named my_claude_code-<ver>.dist-info; it
+        # exists only if uv actually installed the package into the fresh tool
+        # dir (which we created by renaming the old aside). Robust and needs no
+        # python to run.
+        $distInfo = Join-Path $ToolDir "Lib\site-packages\my_claude_code-$Version.dist-info"
+        if (Test-Path -LiteralPath $distInfo -PathType Container) {
+            $installLanded = $true
         }
         if ($installLanded) {
             $script:RenamedWhileRunning = $true
