@@ -706,15 +706,44 @@ def test_claude_minimal_child_env_sets_only_proxy_variables() -> None:
 
     assert env["ANTHROPIC_BASE_URL"] == "http://127.0.0.1:9090"
     assert env["ANTHROPIC_AUTH_TOKEN"] == "proxy-token"
-    assert env["ENABLE_WEB_SERVER_TOOLS"] == "true"
-    assert set(env) - set(base_env) == {
-        "ANTHROPIC_AUTH_TOKEN",
-        "ENABLE_WEB_SERVER_TOOLS",
-    }
+    # Web server tools default off on the client, mirroring the proxy setting.
+    assert "ENABLE_WEB_SERVER_TOOLS" not in env
+    assert set(env) - set(base_env) == {"ANTHROPIC_AUTH_TOKEN"}
     assert env["PATH"] == "keep"
     assert env["ANTHROPIC_API_KEY"] == "official-key"
     assert env["CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY"] == "0"
     assert env["CLAUDE_CODE_AUTO_COMPACT_WINDOW"] == "5000"
+
+
+def test_claude_minimal_child_env_web_server_tools_flag_adds_only_that_var() -> None:
+    """`enable_web_server_tools=True` adds exactly the web-tools key."""
+    from my_claude_code.cli.claude_env import build_minimal_claude_proxy_env
+
+    base_env = {"PATH": "keep"}
+    proxy_args = {
+        "proxy_root_url": "http://127.0.0.1:9090",
+        "auth_token": "proxy-token",
+        "base_env": base_env,
+    }
+
+    without_web_tools = build_minimal_claude_proxy_env(
+        proxy_root_url=proxy_args["proxy_root_url"],
+        auth_token=proxy_args["auth_token"],
+        base_env=proxy_args["base_env"],
+        enable_web_server_tools=False,
+    )
+    with_web_tools = build_minimal_claude_proxy_env(
+        proxy_root_url=proxy_args["proxy_root_url"],
+        auth_token=proxy_args["auth_token"],
+        base_env=proxy_args["base_env"],
+        enable_web_server_tools=True,
+    )
+
+    assert "ENABLE_WEB_SERVER_TOOLS" not in without_web_tools
+    assert set(with_web_tools) - set(without_web_tools) == {"ENABLE_WEB_SERVER_TOOLS"}
+    assert with_web_tools["ENABLE_WEB_SERVER_TOOLS"] == "true"
+    for key in without_web_tools:
+        assert with_web_tools[key] == without_web_tools[key]
 
 
 def test_claude_minimal_child_env_uses_sentinel_for_blank_configured_auth_token() -> (
@@ -736,17 +765,23 @@ def test_claude_minimal_child_env_discovery_flag_adds_only_the_discovery_var() -
     from my_claude_code.cli.claude_env import build_minimal_claude_proxy_env
 
     base_env = {"PATH": "keep"}
-    kwargs = {
+    proxy_args = {
         "proxy_root_url": "http://127.0.0.1:9090",
         "auth_token": "proxy-token",
         "base_env": base_env,
     }
 
     without_discovery = build_minimal_claude_proxy_env(
-        **kwargs, enable_model_discovery=False
+        proxy_root_url=proxy_args["proxy_root_url"],
+        auth_token=proxy_args["auth_token"],
+        base_env=proxy_args["base_env"],
+        enable_model_discovery=False,
     )
     with_discovery = build_minimal_claude_proxy_env(
-        **kwargs, enable_model_discovery=True
+        proxy_root_url=proxy_args["proxy_root_url"],
+        auth_token=proxy_args["auth_token"],
+        base_env=proxy_args["base_env"],
+        enable_model_discovery=True,
     )
 
     assert "CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY" not in without_discovery
@@ -868,6 +903,47 @@ def test_launch_claude_uses_minimal_env_and_passes_args(
     }
     register_pid.assert_called_once_with(12345)
     unregister_pid.assert_called_once_with(12345)
+
+
+def test_launch_claude_omits_web_tools_when_proxy_setting_is_off(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The client web-tools flag mirrors the proxy setting: off -> no env var."""
+    from my_claude_code.cli.launchers.claude import launch
+
+    monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://api.anthropic.com")
+    monkeypatch.setenv("ANTHROPIC_AUTH_TOKEN", "old-token")
+    settings = _launcher_settings(port=9191, token="proxy-token")
+    settings = settings.model_copy(update={"enable_web_server_tools": False}, deep=True)
+    inherited_env = dict(os.environ)
+
+    with (
+        patch(
+            "my_claude_code.cli.launchers.claude.get_settings", return_value=settings
+        ),
+        patch("my_claude_code.cli.launchers.claude.preflight_proxy", return_value=None),
+        patch(
+            "my_claude_code.cli.launchers.common.shutil.which",
+            return_value="resolved-claude.cmd",
+        ),
+        patch("my_claude_code.cli.launchers.common.subprocess.Popen") as popen,
+        patch("my_claude_code.cli.launchers.common.register_pid"),
+        patch("my_claude_code.cli.launchers.common.unregister_pid"),
+        pytest.raises(SystemExit),
+    ):
+        process = popen.return_value
+        process.pid = 12345
+        process.wait.return_value = 0
+        launch(["--model", "sonnet"])
+
+    child_env = popen.call_args.kwargs["env"]
+    assert "ENABLE_WEB_SERVER_TOOLS" not in child_env
+    changed = {
+        key
+        for key in set(inherited_env) | set(child_env)
+        if inherited_env.get(key) != child_env.get(key)
+    }
+    assert changed == {"ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN"}
 
 
 def test_launch_claude_discover_models_flag_strips_flag_and_enables_discovery(

@@ -159,7 +159,7 @@ async def test_service_rejects_forced_server_tool_when_local_handler_is_disabled
     provider_id: str,
 ):
     """Every provider needs FCC's local handler for forced server tools."""
-    settings = Settings()
+    settings = Settings.model_validate({"ENABLE_WEB_SERVER_TOOLS": False})
     assert settings.enable_web_server_tools is False
     service = MessagesHandler(
         settings,

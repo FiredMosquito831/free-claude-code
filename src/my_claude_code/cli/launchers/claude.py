@@ -53,19 +53,24 @@ def _split_discover_models_flag(argv: Sequence[str]) -> tuple[bool, list[str]]:
 def launch(argv: Sequence[str] | None = None) -> None:
     """Launch Claude Code with the proxy URL and auth token set.
 
-    Also sets `ENABLE_WEB_SERVER_TOOLS=true` so web server tools are available
-    on this session (they require the proxy-side execution path). Accepts an
-    FCC-only `--discover-models` flag (stripped before Claude Code ever sees
-    the argument list) that enables the FCC model catalog fetch used by Claude
-    Code's native model picker.
+    Also sets `ENABLE_WEB_SERVER_TOOLS=true` on the session when the proxy's
+    `enable_web_server_tools` setting is on, so Claude Code offers web tools
+    exactly when the proxy can execute them — the dashboard Web Tools toggle
+    controls both layers. Accepts an FCC-only `--discover-models` flag (stripped
+    before Claude Code ever sees the argument list) that enables the FCC model
+    catalog fetch used by Claude Code's native model picker.
     """
 
+    settings = get_settings()
     args = list(sys.argv[1:] if argv is None else argv)
     enable_model_discovery, args = _split_discover_models_flag(args)
     _launch_claude(
         args,
         build_env=build_minimal_claude_proxy_env,
-        extra_env_kwargs={"enable_model_discovery": enable_model_discovery},
+        extra_env_kwargs={
+            "enable_model_discovery": enable_model_discovery,
+            "enable_web_server_tools": settings.enable_web_server_tools,
+        },
     )
 
 
