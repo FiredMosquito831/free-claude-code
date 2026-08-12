@@ -515,7 +515,7 @@ class Settings(BaseSettings):
         default=True, validation_alias="WEBSEARCH_LOG_CAPTURE_CONTENT"
     )
     websearch_log_content_max_chars: int = Field(
-        default=50000,
+        default=2_000_000,
         ge=512,
         validation_alias="WEBSEARCH_LOG_CONTENT_MAX_CHARS",
     )

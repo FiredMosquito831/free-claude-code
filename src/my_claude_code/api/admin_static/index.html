@@ -691,26 +691,31 @@
                   id="webSearchDetailMeta"
                   class="requests-detail-meta"
                 ></dl>
-                <h4>Effective provider configuration</h4>
-                <pre
-                  id="webSearchDetailConfig"
-                  class="requests-detail-body"
-                ></pre>
+
+                <details id="webSearchDetailConfigPane" class="ws-detail-pane">
+                  <summary>Effective provider configuration</summary>
+                  <pre
+                    id="webSearchDetailConfig"
+                    class="requests-detail-body"
+                  ></pre>
+                </details>
+
                 <h4>Tool input</h4>
-                <pre
-                  id="webSearchDetailInput"
-                  class="requests-detail-body"
-                ></pre>
-                <h4>Provider response summary</h4>
+                <dl id="webSearchDetailInput" class="ws-input-summary"></dl>
+
+                <h4>Provider response</h4>
                 <div
                   id="webSearchDetailSummary"
                   class="websearch-result-summary"
                 ></div>
-                <h4>Normalized provider output</h4>
-                <pre
-                  id="webSearchDetailOutput"
-                  class="requests-detail-body"
-                ></pre>
+
+                <details id="webSearchDetailRawPane" class="ws-detail-pane" hidden>
+                  <summary>Raw output JSON</summary>
+                  <pre
+                    id="webSearchDetailOutput"
+                    class="requests-detail-body"
+                  ></pre>
+                </details>
               </div>
             </div>
           </section>

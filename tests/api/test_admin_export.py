@@ -467,6 +467,70 @@ class TestWebSearchScope:
         app.dependency_overrides.clear()
         store.close()
 
+    def test_websearch_detail_export_carries_full_output(
+        self, client, monkeypatch, tmp_path
+    ) -> None:
+        from my_claude_code.api.admin_websearch_routes import get_websearch_log_store
+        from my_claude_code.websearch.analytics import WebSearchLogStore
+        from my_claude_code.websearch.registry import SearchOutcome
+
+        store = WebSearchLogStore(tmp_path / "ws.db")
+        store.record(
+            SearchOutcome(
+                ts_epoch=time.time(),
+                ts_iso=datetime.now(UTC).isoformat(),
+                provider="exa",
+                key_index=0,
+                key_label="exak…1234",
+                query="apple pie",
+                results_count=1,
+                duration_ms=12.5,
+                status="success",
+                error_kind=None,
+                error_message=None,
+                cost_usd=0.01,
+                input_payload={"q": "apple pie", "max_results": 10},
+                output_payload={
+                    "answer": "a",
+                    "results": [
+                        {
+                            "title": "Apple Pie",
+                            "url": "https://example.com/pie",
+                            "snippet": "A snippet.",
+                            "content": "x" * 60_000,
+                            "published": "",
+                        }
+                    ],
+                },
+                provider_config={"provider_id": "exa"},
+            )
+        )
+        store.flush()
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.setenv("USERPROFILE", str(tmp_path))
+        app = create_test_app()
+        app.dependency_overrides[get_websearch_log_store] = lambda: store
+        ws_client = TestClient(app, client=("127.0.0.1", 50000))
+        response = _export(
+            ws_client,
+            format="json",
+            scope="websearch",
+            fields="query,input,output,provider_config",
+        )
+        assert response.status_code == 200
+        rows = response.json()
+        assert len(rows) == 1
+        # The decoded names must round-trip, not the raw *_json columns, and a
+        # large output must arrive in full (regression: websearch export used
+        # column names that are not DB columns and silently returned empty).
+        assert rows[0]["query"] == "apple pie"
+        assert rows[0]["input"]["q"] == "apple pie"
+        assert rows[0]["output"]["answer"] == "a"
+        assert rows[0]["output"]["results"][0]["content"] == "x" * 60_000
+        assert rows[0]["provider_config"]["provider_id"] == "exa"
+        app.dependency_overrides.clear()
+        store.close()
+
     def test_websearch_multi_provider(self, client, monkeypatch, tmp_path) -> None:
         from my_claude_code.api.admin_websearch_routes import get_websearch_log_store
         from my_claude_code.websearch.analytics import WebSearchLogStore

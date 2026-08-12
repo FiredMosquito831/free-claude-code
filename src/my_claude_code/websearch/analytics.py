@@ -43,9 +43,18 @@ _PRUNE_EVERY_INSERTS = 100
 _MAX_LIMIT = 500
 _TOP_ERRORS_LIMIT = 10
 _BUSY_TIMEOUT_MS = 5000
-_DEFAULT_MAX_CONTENT_CHARS = 50000
+_DEFAULT_MAX_CONTENT_CHARS = 2_000_000
 _CONFIG_JSON_MAX_CHARS = 20000
 _REDACTED = "[REDACTED]"
+
+# Decoded export column name -> actual DB column holding the JSON. The export
+# registry projects "input"/"output"/"provider_config" as the row keys; the
+# search_log table stores them in the *_json columns.
+_EXPORT_JSON_COLUMNS: dict[str, str] = {
+    "input": "input_json",
+    "output": "output_json",
+    "provider_config": "provider_config_json",
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -451,7 +460,15 @@ class WebSearchLogStore:
         for column in required:
             if column not in select_columns:
                 select_columns.append(column)
-        select = ", ".join(select_columns)
+        # The registry's decoded names ("input"/"output"/"provider_config")
+        # are not DB columns; the stored JSON lives in the *_json columns and
+        # _attempt_dict renames them back to the decoded names on yield.
+        select = ", ".join(
+            f"{_EXPORT_JSON_COLUMNS.get(column, column)} AS {column}"
+            if column in _EXPORT_JSON_COLUMNS
+            else column
+            for column in select_columns
+        )
         connection = self._connect_reader()
         try:
             cursor: tuple[float, int] | None = None
@@ -804,10 +821,18 @@ def _row_dict(row: sqlite3.Row) -> dict[str, Any]:
 def _attempt_dict(row: sqlite3.Row) -> dict[str, Any]:
     shaped = _row_dict(row)
     shaped["content_captured"] = bool(shaped["content_captured"])
-    if "input_json" in shaped:
-        shaped["input"] = _decode_json(shaped.pop("input_json"))
-        shaped["output"] = _decode_json(shaped.pop("output_json"))
-        shaped["provider_config"] = _decode_json(shaped.pop("provider_config_json"))
+    # The raw columns are *_json; the export path aliases them to the decoded
+    # names ("input"/"output"/"provider_config"). Decode whichever shape a
+    # query projected.
+    for decoded, raw in (
+        ("input", "input_json"),
+        ("output", "output_json"),
+        ("provider_config", "provider_config_json"),
+    ):
+        if raw in shaped:
+            shaped[decoded] = _decode_json(shaped.pop(raw))
+        elif decoded in shaped:
+            shaped[decoded] = _decode_json(shaped[decoded])
     return shaped
 
 
