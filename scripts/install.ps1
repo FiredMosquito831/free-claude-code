@@ -709,11 +709,17 @@ function Start-DeferredInstall {
     $pidsLiteral = ($Running | ForEach-Object {
         "'" + ($_.Id.ToString() -replace "'", "''") + "'"
     }) -join ", "
-    $uvLiteral = "'" + ($UvPath -replace "'", "''") + "'"
-    $stageDirLiteral = "'" + ($stageDir -replace "'", "''") + "'"
-    $argumentsLiteral = "& $uvLiteral @(" + (($Arguments | ForEach-Object {
+    # The detached helper must invoke uv as a real command. The uv path and the
+    # argument array are emitted as literal PowerShell values ($uvPath /
+    # $installArgs) so the helper calls `& $uvPath @$installArgs`. A command
+    # built as a single string and placed at statement position is treated as a
+    # command NAME, never executed -- uv would never run and the staged update
+    # would silently fail to create the mcc-* commands.
+    $uvPathLiteral = "'" + ($UvPath -replace "'", "''") + "'"
+    $installArgsLiteral = "@(" + (($Arguments | ForEach-Object {
         "'" + ($_ -replace "'", "''") + "'"
     }) -join ", ") + ")"
+    $stageDirLiteral = "'" + ($stageDir -replace "'", "''") + "'"
 
     $script = @"
 `$ErrorActionPreference = 'Stop'
@@ -729,12 +735,14 @@ if (`$pids | Where-Object { Get-Process -Id `$_ -ErrorAction SilentlyContinue })
     exit 1
 }
 Start-Sleep -Seconds 2
+`$uvPath = $uvPathLiteral
+`$installArgs = $installArgsLiteral
 `$ErrorActionPreference = 'Continue'
 `$delays = @(0, 5, 10, 20, 30)
 `$ok = `$false
 foreach (`$wait in `$delays) {
     if (`$wait -gt 0) { Start-Sleep -Seconds `$wait }
-    $argumentsLiteral 2>&1 | Out-String | Out-Null
+    & `$uvPath @`$installArgs 2>&1 | Out-String | Out-Null
     if (`$LASTEXITCODE -eq 0) { `$ok = `$true; break }
 }
 `$ErrorActionPreference = 'Stop'
