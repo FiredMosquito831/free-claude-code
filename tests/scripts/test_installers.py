@@ -928,6 +928,176 @@ exit 2
     assert "DEFERRED_UV_OK" in result.stdout, result.stdout + result.stderr
 
 
+def _extract_function_definition(installer_text: str, name: str) -> str:
+    """Return a dot-sourcable `function <name> { ... }` block from install.ps1."""
+    body = _braced_body(installer_text, f"function {name}")
+    return f"function {name} {{\n{body}\n}}\n"
+
+
+def test_install_ps1_rename_reinstall_renames_tool_dir_and_runs_uv(
+    powershell_harness: PowerShellHarness,
+    tmp_path: Path,
+) -> None:
+    # The running-launcher path now renames the old tool env aside and installs
+    # fresh immediately, so open windows keep old code and new sessions get the
+    # update (no waiting for launchers to exit). This is the same Windows rename
+    # semantic proven live: a loaded .pyd / the whole tool dir CAN be renamed.
+    installer_text = (_repo_root() / "scripts" / "install.ps1").read_text(
+        encoding="utf-8"
+    )
+    func_file = tmp_path / "RenameThenReinstall.ps1"
+    func_file.write_text(
+        _extract_function_definition(installer_text, "Invoke-RenameThenReinstall"),
+        encoding="utf-8",
+    )
+
+    stub_dir = tmp_path / "stubuv"
+    stub_dir.mkdir(parents=True)
+    uv_log = stub_dir / "uv-calls.log"
+    stub_uv = stub_dir / "stub-uv.cmd"
+    # The stub mimics real `uv tool install`: it records the invocation AND
+    # recreates the canonical tool dir (uv does this by installing a fresh env).
+    stub_uv.write_text(
+        '@echo off\r\necho uv:%*>>"' + str(uv_log) + '"\r\n'
+        'if not "%FAKE_TOOL_ROOT%"=="" mkdir "%FAKE_TOOL_ROOT%\\my-claude-code" 2>nul\r\n'
+        "exit /b 0\r\n",
+        encoding="utf-8",
+    )
+
+    wheel_dir = tmp_path / "wheel-in"
+    wheel_dir.mkdir(parents=True)
+    wheel = wheel_dir / "dummy.whl"
+    wheel.write_text("x", encoding="utf-8")
+
+    tool_root = tmp_path / "tools"
+    tool_root.mkdir(parents=True)
+    tool_dir = tool_root / "my-claude-code"
+    tool_dir.mkdir()
+    (tool_dir / "marker.txt").write_text("old", encoding="utf-8")
+
+    runner = tmp_path / "run-rename.ps1"
+    runner.write_text(
+        f"""Set-StrictMode -Version Latest
+$ErrorActionPreference = "Stop"
+function Invoke-NativeCommand {{
+    param([string] $FilePath, [string[]] $Arguments = @())
+    $global:LASTEXITCODE = 0
+    & $FilePath @Arguments
+    if ($LASTEXITCODE -ne 0) {{ throw "Command failed with exit code $($LASTEXITCODE): $FilePath" }}
+}}
+. "{(func_file.as_posix())}"
+$uvPath = "{(stub_uv.as_posix())}"
+$arguments = @("tool", "install", "--force", "--refresh-package", "my-claude-code", "--python", "3.14.0", "my-claude-code @ file:///{(wheel.as_posix())}")
+$wheelPath = "{(wheel.as_posix())}"
+$toolDir = "{(tool_dir.as_posix())}"
+$version = Invoke-RenameThenReinstall -UvPath $uvPath -Arguments $arguments -WheelPath $wheelPath -ToolDir $toolDir -Version "5.3.2"
+if ($version -ne "5.3.2") {{ throw "bad version: $version" }}
+$oldDirs = @(Get-ChildItem -Path "{(tool_root.as_posix())}" -Directory -Filter "my-claude-code.old-*")
+if ($oldDirs.Count -gt 0) {{ throw "old dir was NOT removed after successful install: $($oldDirs.Count) remain" }}
+if (-not (Test-Path -LiteralPath "{(tool_dir.as_posix())}" -PathType Container)) {{ throw "fresh tool dir not recreated by install" }}
+if (-not (Test-Path -LiteralPath "{(uv_log.as_posix())}")) {{ throw "stub uv never invoked" }}
+$c = Get-Content -LiteralPath "{(uv_log.as_posix())}" -Raw
+if ($c -notmatch "tool install") {{ throw "stub uv not called with tool install: $c" }}
+Write-Host "RENAME_REINSTALL_OK"
+""",
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        [
+            powershell_harness.powershell,
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(runner),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=powershell_harness.env | {"FAKE_TOOL_ROOT": str(tool_root)},
+    )
+    assert "RENAME_REINSTALL_OK" in result.stdout, result.stdout + result.stderr
+
+
+def test_install_ps1_rename_reinstall_restores_old_dir_on_failed_install(
+    powershell_harness: PowerShellHarness,
+    tmp_path: Path,
+) -> None:
+    # If the fresh install fails after the rename, the old tool env must be
+    # renamed back so the user is never left with no working install.
+    installer_text = (_repo_root() / "scripts" / "install.ps1").read_text(
+        encoding="utf-8"
+    )
+    func_file = tmp_path / "RenameThenReinstall.ps1"
+    func_file.write_text(
+        _extract_function_definition(installer_text, "Invoke-RenameThenReinstall"),
+        encoding="utf-8",
+    )
+
+    stub_dir = tmp_path / "stubuv"
+    stub_dir.mkdir(parents=True)
+    fail_uv = stub_dir / "fail-uv.cmd"
+    fail_uv.write_text("@echo off\r\nexit /b 33\r\n", encoding="utf-8")
+
+    wheel_dir = tmp_path / "wheel-in"
+    wheel_dir.mkdir(parents=True)
+    wheel = wheel_dir / "dummy.whl"
+    wheel.write_text("x", encoding="utf-8")
+
+    tool_root = tmp_path / "tools"
+    tool_root.mkdir(parents=True)
+    tool_dir = tool_root / "my-claude-code"
+    tool_dir.mkdir()
+    (tool_dir / "marker.txt").write_text("old", encoding="utf-8")
+
+    runner = tmp_path / "run-rename-fail.ps1"
+    runner.write_text(
+        f"""Set-StrictMode -Version Latest
+$ErrorActionPreference = "Stop"
+function Invoke-NativeCommand {{
+    param([string] $FilePath, [string[]] $Arguments = @())
+    $global:LASTEXITCODE = 0
+    & $FilePath @Arguments
+    if ($LASTEXITCODE -ne 0) {{ throw "Command failed with exit code $($LASTEXITCODE): $FilePath" }}
+}}
+. "{(func_file.as_posix())}"
+$uvPath = "{(fail_uv.as_posix())}"
+$arguments = @("tool", "install", "--force", "--refresh-package", "my-claude-code", "--python", "3.14.0", "my-claude-code @ file:///{(wheel.as_posix())}")
+$wheelPath = "{(wheel.as_posix())}"
+$toolDir = "{(tool_dir.as_posix())}"
+$threw = $false
+try {{
+    Invoke-RenameThenReinstall -UvPath $uvPath -Arguments $arguments -WheelPath $wheelPath -ToolDir $toolDir -Version "5.3.2"
+}} catch {{
+    $threw = $true
+}}
+if (-not $threw) {{ throw "expected the failed install to throw" }}
+if (-not (Test-Path -LiteralPath "{(tool_dir.as_posix())}/marker.txt")) {{ throw "old tool dir was not restored after failed install" }}
+$oldDirs = @(Get-ChildItem -Path "{(tool_root.as_posix())}" -Directory -Filter "my-claude-code.old-*")
+if ($oldDirs.Count -ne 0) {{ throw "stale .old-* dir left behind: $($oldDirs.Count)" }}
+Write-Host "RENAME_ROLLBACK_OK"
+""",
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        [
+            powershell_harness.powershell,
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(runner),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=powershell_harness.env,
+    )
+    assert "RENAME_ROLLBACK_OK" in result.stdout, result.stdout + result.stderr
+
+
 def test_installers_use_native_clients_and_single_python_selection() -> None:
     shell = (_repo_root() / "scripts" / "install.sh").read_text(encoding="utf-8")
     powershell = (_repo_root() / "scripts" / "install.ps1").read_text(encoding="utf-8")
