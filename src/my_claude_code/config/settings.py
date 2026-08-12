@@ -444,9 +444,11 @@ class Settings(BaseSettings):
     enable_filepath_extraction_mock: bool = True
 
     # ==================== Local web server tools (web_search / web_fetch) ====================
-    # Off by default: these tools perform outbound HTTP from the proxy (SSRF risk).
+    # On by default to match the shipped env template (env.example) and the
+    # dashboard manifest. These tools perform outbound HTTP from the proxy, so
+    # operators who do not want that can set ENABLE_WEB_SERVER_TOOLS=false.
     enable_web_server_tools: bool = Field(
-        default=False, validation_alias="ENABLE_WEB_SERVER_TOOLS"
+        default=True, validation_alias="ENABLE_WEB_SERVER_TOOLS"
     )
     # Comma-separated URL schemes allowed for web_fetch (default: http,https).
     web_fetch_allowed_schemes: str = Field(

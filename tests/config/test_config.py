@@ -51,7 +51,7 @@ class TestSettings:
         assert settings.reasoning_policy is ReasoningPreference.CLIENT
         assert settings.http_read_timeout == 120.0
         assert settings.http_connect_timeout == HTTP_CONNECT_TIMEOUT_DEFAULT
-        assert settings.enable_web_server_tools is False
+        assert settings.enable_web_server_tools is True
         assert settings.log_raw_api_payloads is False
         assert settings.log_raw_sse_events is False
         assert settings.debug_platform_edits is False
