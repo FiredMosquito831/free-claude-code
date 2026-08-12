@@ -277,7 +277,7 @@ def test_admin_static_exposes_professional_observability_controls():
     assert "openWebSearchDetail" in script
     assert "renderWebSearchResponseSummary" in script
     assert 'params.set("include_content", "true")' in script
-    assert "Full normalized I/O is captured" in script
+    assert "Full normalized provider input/output is captured" in script
     assert "trapWebSearchDetailFocus" in script
     assert "bucket boundaries use UTC" in script
 

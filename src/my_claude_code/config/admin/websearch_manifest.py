@@ -72,11 +72,12 @@ def _analytics_field_specs() -> tuple[dict[str, Any], ...]:
             "section_id": "websearch",
             "field_type": "number",
             "settings_attr": "websearch_log_content_max_chars",
-            "default": "50000",
+            "default": "2000000",
             "restart_required": True,
             "description": (
                 "Maximum stored characters for each input/output JSON payload "
-                "(minimum 512); larger payloads retain a bounded preview and hash."
+                "(minimum 512); the default (~2 MB) retains real provider output "
+                "in full. Larger payloads keep a bounded preview and hash."
             ),
         },
         {

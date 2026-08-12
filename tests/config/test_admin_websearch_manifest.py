@@ -197,7 +197,7 @@ def test_websearch_capture_fields_are_explicit_and_restart_aware() -> None:
     assert capture.restart_required is True
     assert cap.field_type == "number"
     assert cap.settings_attr == "websearch_log_content_max_chars"
-    assert cap.default == "50000"
+    assert cap.default == "2000000"
     assert cap.restart_required is True
 
 

@@ -3402,9 +3402,9 @@ function renderWebSearchAnalytics(
     "Route metrics count one user search; provider tables and recent rows count attempts. " +
     "Queries are stored locally and truncated to 256 characters. " +
     (stats?.capture_content
-      ? `Full normalized I/O is captured up to ${formatAnalyticsNumber(
-          stats.max_content_chars,
-        )} characters per payload.`
+      ? "Full normalized provider input/output is captured; a configurable cap "
+        + `(${formatAnalyticsNumber(stats.max_content_chars)} characters per `
+        + "payload) guards against pathological sizes."
       : "Search I/O capture is disabled; only lengths and SHA-256 hashes are retained.");
   container.appendChild(footer);
 }
@@ -3457,13 +3457,130 @@ function appendWebSearchDetailMeta(meta, fields) {
   });
 }
 
+function renderWebSearchInputSummary(input) {
+  const container = byId("webSearchDetailInput");
+  container.innerHTML = "";
+  if (!input) {
+    const note = document.createElement("dd");
+    note.className = "ws-input-empty";
+    note.textContent = "No tool input was captured for this attempt.";
+    container.appendChild(note);
+    return;
+  }
+  const fields = [];
+  if (input.query != null) fields.push(["Query", String(input.query)]);
+  if (input.max_results != null) fields.push(["Max results", String(input.max_results)]);
+  if (input.allowed_domains?.length) {
+    fields.push(["Allowed domains", String(input.allowed_domains.join(", "))]);
+  }
+  if (input.blocked_domains?.length) {
+    fields.push(["Blocked domains", String(input.blocked_domains.join(", "))]);
+  }
+  // Any provider-specific input fields beyond the common shape get a raw line
+  // so nothing is silently hidden behind the summary.
+  Object.entries(input).forEach(([key, value]) => {
+    if (["query", "max_results", "allowed_domains", "blocked_domains"].includes(key)) {
+      return;
+    }
+    if (value == null || value === "") return;
+    fields.push([key, typeof value === "string" ? value : JSON.stringify(value)]);
+  });
+  if (fields.length === 0) {
+    const note = document.createElement("dd");
+    note.className = "ws-input-empty";
+    note.textContent = "No readable fields in the tool input.";
+    container.appendChild(note);
+    return;
+  }
+  fields.forEach(([label, value]) => {
+    const dt = document.createElement("dt");
+    dt.textContent = label;
+    const dd = document.createElement("dd");
+    dd.textContent = value;
+    container.append(dt, dd);
+  });
+}
+
+function renderWebSearchRawOutput(row) {
+  // The raw JSON pane exists to inspect provider-specific fields the readable
+  // summary does not draw, and to expose the preview + hash for legacy
+  // truncated rows. It is hidden only when there is genuinely nothing to show.
+  const pane = byId("webSearchDetailRawPane");
+  const pre = byId("webSearchDetailOutput");
+  const text = capturedPayloadText(row, "output");
+  const truncated = Boolean(row.output && row.output._truncated);
+  const hasContent =
+    (row.output && !truncated) ||
+    truncated ||
+    (!row.output && (row.output_chars != null || row.output_sha256));
+  pane.hidden = !hasContent;
+  pane.querySelector(".guide-copy-button")?.remove();
+  if (hasContent) addCopyButton(pane, () => text, { inSummary: true });
+  pre.textContent = text;
+  // Keep the pane collapsed by default for full output (the readable summary
+  // is the surface), but leave legacy-truncated rows open so the notice plus
+  // preview read together.
+  pane.open = truncated;
+}
+
+function addCopyButton(host, getText, { inSummary = false } = {}) {
+  if (!navigator.clipboard || !navigator.clipboard.writeText) return;
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "guide-copy-button";
+  button.textContent = "Copy";
+  button.setAttribute("aria-label", "Copy to clipboard");
+  button.addEventListener("click", () => {
+    navigator.clipboard
+      .writeText(getText())
+      .then(() => {
+        button.textContent = "Copied";
+        button.classList.add("is-copied");
+        window.setTimeout(() => {
+          button.textContent = "Copy";
+          button.classList.remove("is-copied");
+        }, 1500);
+      })
+      .catch(() => {
+        // Clipboard writes can fail on permissions or policy; the text stays
+        // selectable by hand.
+      });
+  });
+  if (inSummary) {
+    const summary = host.querySelector("summary");
+    if (summary) {
+      summary.appendChild(button);
+      return;
+    }
+  }
+  host.appendChild(button);
+}
+
 function renderWebSearchResponseSummary(output) {
   const container = byId("webSearchDetailSummary");
   container.innerHTML = "";
-  if (!output || output._truncated) {
-    container.textContent = output?._truncated
-      ? "The stored output is truncated; inspect the preview and SHA-256 below."
-      : "No captured provider response is available.";
+  if (!output) {
+    container.textContent = "No captured provider response is available.";
+    return;
+  }
+  if (output._truncated) {
+    // Legacy rows stored before the cap was raised. Render the retained
+    // preview as readable text plus the original character count / hash.
+    const notice = document.createElement("div");
+    notice.className = "analytics-warning";
+    notice.textContent =
+      `This attempt predates the larger capture cap; only the first ` +
+      `characters of its output were stored (${Number(
+        output.original_chars ?? 0,
+      ).toLocaleString()} characters originally). Expand “Raw output JSON” ` +
+      `for the stored preview and hash.`;
+    container.appendChild(notice);
+    if (typeof output.preview === "string" && output.preview) {
+      const pre = document.createElement("pre");
+      pre.className = "requests-detail-body ws-preview-body";
+      pre.textContent = output.preview;
+      container.appendChild(pre);
+    }
     return;
   }
   if (output.error) {
@@ -3516,8 +3633,24 @@ function renderWebSearchResponseSummary(output) {
     }
     if (result.content && result.content !== result.snippet) {
       const content = document.createElement("p");
-      content.textContent = result.content;
+      content.className = "ws-result-content";
+      const truncated = result.content.length > 600;
+      content.textContent = truncated ? result.content.slice(0, 600) + "…" : result.content;
       item.appendChild(content);
+      if (truncated) {
+        const toggle = document.createElement("button");
+        toggle.type = "button";
+        toggle.className = "ghost-button ws-content-toggle";
+        toggle.textContent = "Show full content";
+        toggle.addEventListener("click", () => {
+          const expanded = content.classList.toggle("ws-content-expanded");
+          content.textContent = expanded
+            ? result.content
+            : result.content.slice(0, 600) + "…";
+          toggle.textContent = expanded ? "Collapse content" : "Show full content";
+        });
+        item.appendChild(toggle);
+      }
     }
     container.appendChild(item);
   });
@@ -3549,10 +3682,15 @@ async function openWebSearchDetail(requestId) {
     ["Input SHA-256", row.input_sha256],
     ["Output SHA-256", row.output_sha256],
   ]);
-  byId("webSearchDetailConfig").textContent =
-    prettyJson(row.provider_config) || "(configuration unavailable)";
-  byId("webSearchDetailInput").textContent = capturedPayloadText(row, "input");
-  byId("webSearchDetailOutput").textContent = capturedPayloadText(row, "output");
+  const configPre = byId("webSearchDetailConfig");
+  const configText = prettyJson(row.provider_config) || "(configuration unavailable)";
+  configPre.textContent = configText;
+  const configPane = byId("webSearchDetailConfigPane");
+  configPane.hidden = !row.provider_config;
+  configPane.querySelector(".guide-copy-button")?.remove();
+  if (row.provider_config) addCopyButton(configPane, () => configText, { inSummary: true });
+  renderWebSearchInputSummary(row.input);
+  renderWebSearchRawOutput(row);
   renderWebSearchResponseSummary(row.output);
   byId("webSearchDetailModal").hidden = false;
   byId("webSearchDetailClose").focus();

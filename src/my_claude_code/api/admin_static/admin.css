@@ -2510,6 +2510,96 @@ details.turn-pane > summary:focus-visible {
   color: var(--muted);
 }
 
+/* Web search detail modal: collapsible panes, input key/value, content reveal */
+
+.ws-detail-pane {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--panel);
+  margin: 14px 0 4px;
+}
+
+.ws-detail-pane summary {
+  position: relative;
+  padding: 10px 14px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-strong);
+  list-style-position: outside;
+}
+
+.ws-detail-pane summary::-webkit-details-marker {
+  color: var(--muted);
+}
+
+.ws-detail-pane summary .guide-copy-button {
+  top: 6px;
+  right: 8px;
+}
+
+.ws-detail-pane .requests-detail-body {
+  max-height: 320px;
+  margin: 0;
+  border-top: 1px solid var(--line);
+  border-radius: 0 0 var(--radius-md) var(--radius-md);
+}
+
+.ws-input-summary {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 4px 16px;
+  margin: 6px 0 14px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--panel);
+}
+
+.ws-input-summary dt {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.ws-input-summary dd {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text);
+  overflow-wrap: anywhere;
+  font-family: var(--font-mono);
+}
+
+.ws-input-summary .ws-input-empty {
+  font-family: var(--font-sans);
+  color: var(--muted);
+}
+
+.ws-result-content {
+  max-height: 180px;
+  overflow: auto;
+}
+
+.ws-result-content.ws-content-expanded {
+  max-height: none;
+  overflow: visible;
+}
+
+.ws-content-toggle {
+  margin-top: 8px;
+}
+
+.ws-preview-body {
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
 @media (max-width: 760px) {
   .requests-breakdowns {
     grid-template-columns: 1fr;

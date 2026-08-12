@@ -229,6 +229,31 @@ class TestRoundTrip:
         assert isinstance(detail["output"]["preview"], str)
         store.close()
 
+    def test_full_output_is_stored_untruncated(self, store) -> None:
+        """The default cap (2M chars) retains real provider output in full.
+
+        A ~60k-char output exceeds the old 50k default and would previously have
+        been stored as a truncation envelope; at the new default it round-trips
+        byte-for-byte.
+        """
+        big_answer = "answer " + "x" * 60_000
+        store.record(
+            _outcome(
+                output_payload={"answer": big_answer, "results": []},
+            )
+        )
+        store.flush()
+
+        (summary,) = store.requests()["items"]
+        detail = store.request(summary["id"])
+        assert detail is not None
+        # output_chars is the serialized JSON length, so it must exceed the raw
+        # answer by the JSON envelope; the point is nothing was truncated.
+        assert summary["output_chars"] > len(big_answer)
+        assert "_truncated" not in detail["output"]
+        assert detail["output"]["answer"] == big_answer
+        store.close()
+
     def test_recorded_outcomes_round_trip_all_fields(self, store) -> None:
         ts = _ts("2026-06-15T08:30:00+00:00")
         store.record(
