@@ -990,8 +990,8 @@ $uvPath = "{(stub_uv.as_posix())}"
 $arguments = @("tool", "install", "--force", "--refresh-package", "my-claude-code", "--python", "3.14.0", "my-claude-code @ file:///{(wheel.as_posix())}")
 $wheelPath = "{(wheel.as_posix())}"
 $toolDir = "{(tool_dir.as_posix())}"
-$version = Invoke-RenameThenReinstall -UvPath $uvPath -Arguments $arguments -WheelPath $wheelPath -ToolDir $toolDir -Version "5.3.2"
-if ($version -ne "5.3.2") {{ throw "bad version: $version" }}
+$ok = Invoke-RenameThenReinstall -UvPath $uvPath -Arguments $arguments -WheelPath $wheelPath -ToolDir $toolDir -Version "5.3.2"
+if ($ok -ne $true) {{ throw "expected rename+reinstall to report success, got: $ok" }}
 $oldDirs = @(Get-ChildItem -Path "{(tool_root.as_posix())}" -Directory -Filter "my-claude-code.old-*")
 if ($oldDirs.Count -gt 0) {{ throw "old dir was NOT removed after successful install: $($oldDirs.Count) remain" }}
 if (-not (Test-Path -LiteralPath "{(tool_dir.as_posix())}" -PathType Container)) {{ throw "fresh tool dir not recreated by install" }}
