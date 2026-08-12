@@ -489,6 +489,12 @@ def test_wsl_drvfs_process_replacement_exits_for_the_external_helper() -> None:
 
 
 def test_serve_supervisor_refuses_restart_after_incomplete_shutdown() -> None:
+    """An incomplete close must not silently become a plain stop.
+
+    A config-driven RELOAD keeps the serve loop alive even when the runtime is
+    still draining; the fresh generation retries the close. The mock closes on
+    the retry so serve() terminates rather than looping forever.
+    """
     from my_claude_code.cli import commands
 
     settings = _launcher_settings()
@@ -504,7 +510,13 @@ def test_serve_supervisor_refuses_restart_after_incomplete_shutdown() -> None:
     ):
         assert callable(process_restart_callback)
         restart_callbacks.append(restart_callback)
-        return SimpleNamespace(runtime=SimpleNamespace(is_closed=False))
+        # The first generation's close is incomplete; the retry generation
+        # finally reports closed so serve() terminates after one reload.
+        return SimpleNamespace(
+            runtime=SimpleNamespace(
+                is_closed=bool(restart_callbacks) and len(restart_callbacks) > 1
+            )
+        )
 
     class FakeServer:
         def __init__(self, config):
@@ -513,8 +525,9 @@ def test_serve_supervisor_refuses_restart_after_incomplete_shutdown() -> None:
             servers.append(self)
 
         def run(self):
-            restart_callbacks[-1]()
-            assert self.should_exit is True
+            if len(servers) == 1:
+                restart_callbacks[-1]()
+                assert self.should_exit is True
 
     def fake_config(app, **kwargs):
         return SimpleNamespace(app=app, kwargs=kwargs)
@@ -531,8 +544,8 @@ def test_serve_supervisor_refuses_restart_after_incomplete_shutdown() -> None:
     ):
         commands.serve()
 
-    assert len(servers) == 1
-    get_settings.cache_clear.assert_not_called()
+    assert len(servers) == 2
+    get_settings.cache_clear.assert_called_once()
     kill_all.assert_called_once()
 
 
@@ -1746,6 +1759,60 @@ def test_process_replace_is_refused_when_runtime_did_not_close() -> None:
     replace_process.assert_not_called()
     kill_all.assert_called_once()
     assert any("refused" in message for message in errors)
+
+
+def test_config_reload_not_degraded_to_stop_when_runtime_still_closing() -> None:
+    """A config-driven RELOAD must not become a process exit when the runtime
+    is still draining (the 'server crashed after I applied a setting' bug)."""
+    from my_claude_code.cli import commands
+
+    settings = _launcher_settings()
+    get_settings = MagicMock(return_value=settings)
+    get_settings.cache_clear = MagicMock()
+    restart_callbacks: list[Callable[[], None]] = []
+    runs = 0
+
+    def build_asgi_app(
+        _settings: Settings,
+        restart_callback: Callable[[], None],
+        process_restart_callback: Callable[[], None],
+    ):
+        restart_callbacks.append(restart_callback)
+        # The runtime never reports closed: a real in-flight drain (e.g. the
+        # request-log writer flushing a large DB during a config apply).
+        return SimpleNamespace(runtime=SimpleNamespace(is_closed=False))
+
+    class FakeServer:
+        def __init__(self, config):
+            self.config = config
+            self.should_exit = False
+
+        def run(self):
+            nonlocal runs
+            runs += 1
+            if runs == 1:
+                # First generation: a config change requests a reload.
+                restart_callbacks[-1]()
+                assert self.should_exit is True
+
+    with (
+        patch.object(commands, "get_settings", get_settings),
+        patch.object(commands.uvicorn, "Config", side_effect=_fake_config),
+        patch.object(commands.uvicorn, "Server", side_effect=FakeServer),
+        patch.object(commands, "build_asgi_app", side_effect=build_asgi_app),
+        patch.object(commands, "_schedule_open_admin_browser"),
+        patch.object(commands, "kill_all_best_effort") as kill_all,
+        patch.object(commands, "probe_port_available", return_value=True),
+        patch.object(commands, "wait_for_port_free", return_value=True),
+    ):
+        commands.serve()
+
+    # The reload must cause the serve loop to run a second generation (the
+    # fresh app), not exit the process. Before the fix it returned STOP and
+    # killed the server (kill_all via serve's finally).
+    assert runs == 2
+    assert len(restart_callbacks) == 2
+    kill_all.assert_called_once()
 
 
 def test_process_replacement_logs_recovery_command_when_execv_fails() -> None:

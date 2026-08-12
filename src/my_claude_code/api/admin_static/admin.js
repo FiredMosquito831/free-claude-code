@@ -3564,21 +3564,43 @@ function renderWebSearchResponseSummary(output) {
     return;
   }
   if (output._truncated) {
-    // Legacy rows stored before the cap was raised. Render the retained
-    // preview as readable text plus the original character count / hash.
+    // Legacy rows stored before the cap was raised. The stored preview is the
+    // first chunk of the serialized output; parse out the results it contains
+    // and render them as readable cards instead of dumping raw JSON.
     const notice = document.createElement("div");
     notice.className = "analytics-warning";
     notice.textContent =
       `This attempt predates the larger capture cap; only the first ` +
       `characters of its output were stored (${Number(
         output.original_chars ?? 0,
-      ).toLocaleString()} characters originally). Expand “Raw output JSON” ` +
-      `for the stored preview and hash.`;
+      ).toLocaleString()} characters originally).`;
     container.appendChild(notice);
-    if (typeof output.preview === "string" && output.preview) {
+    const preview = typeof output.preview === "string" ? output.preview : "";
+    const parsed = previewResultsFromJson(preview);
+    if (parsed.results.length > 0) {
+      if (parsed.answer) {
+        const answer = document.createElement("div");
+        answer.className = "websearch-result-answer";
+        const title = document.createElement("strong");
+        title.textContent = "Provider answer / rich summary";
+        const text = document.createElement("p");
+        text.textContent = parsed.answer;
+        answer.append(title, text);
+        container.appendChild(answer);
+      }
+      renderWebSearchResultCards(container, parsed.results, { fromPreview: true });
+      const note = document.createElement("p");
+      note.className = "analytics-footnote ws-preview-note";
+      note.textContent =
+        `The preview contains the first ${parsed.results.length} of ` +
+        `${Number(output.original_chars ?? 0).toLocaleString()} characters; ` +
+        `expand “Raw output JSON” for the exact stored preview and hash.`;
+      container.appendChild(note);
+    } else if (preview) {
+      // Unparseable (cut mid-string): show the raw preview as text.
       const pre = document.createElement("pre");
       pre.className = "requests-detail-body ws-preview-body";
-      pre.textContent = output.preview;
+      pre.textContent = preview;
       container.appendChild(pre);
     }
     return;
@@ -3603,9 +3625,22 @@ function renderWebSearchResponseSummary(output) {
     container.appendChild(answer);
   }
   const results = Array.isArray(output.results) ? output.results : [];
+  renderWebSearchResultCards(container, results);
+  if (!output.answer && results.length === 0) {
+    container.textContent = "The provider returned no results or answer.";
+  }
+}
+
+/**
+ * Render search results as readable cards: title, url link, published date,
+ * snippet (the search result description), and — when present and different —
+ * the extracted page text behind a "Show full content" toggle.
+ */
+function renderWebSearchResultCards(container, results, { fromPreview = false } = {}) {
   results.forEach((result, index) => {
     const item = document.createElement("article");
     item.className = "websearch-result-item";
+    item.dataset.fromPreview = fromPreview ? "true" : undefined;
     const title = document.createElement("strong");
     title.textContent = `${index + 1}. ${result.title || "Untitled result"}`;
     item.appendChild(title);
@@ -3626,27 +3661,31 @@ function renderWebSearchResponseSummary(output) {
       published.textContent = `Published: ${result.published}`;
       item.appendChild(published);
     }
-    if (result.snippet) {
+    // The snippet is the provider's description of the result — the most
+    // useful line for a human. The extracted content is often far longer.
+    const description = result.snippet || result.description || result.text || "";
+    if (description) {
       const snippet = document.createElement("p");
-      snippet.textContent = result.snippet;
+      snippet.textContent = description;
       item.appendChild(snippet);
     }
-    if (result.content && result.content !== result.snippet) {
-      const content = document.createElement("p");
-      content.className = "ws-result-content";
-      const truncated = result.content.length > 600;
-      content.textContent = truncated ? result.content.slice(0, 600) + "…" : result.content;
-      item.appendChild(content);
+    const content = result.content && result.content !== description ? result.content : "";
+    if (content) {
+      const contentP = document.createElement("p");
+      contentP.className = "ws-result-content";
+      const truncated = content.length > 600;
+      contentP.textContent = truncated ? content.slice(0, 600) + "…" : content;
+      item.appendChild(contentP);
       if (truncated) {
         const toggle = document.createElement("button");
         toggle.type = "button";
         toggle.className = "ghost-button ws-content-toggle";
         toggle.textContent = "Show full content";
         toggle.addEventListener("click", () => {
-          const expanded = content.classList.toggle("ws-content-expanded");
-          content.textContent = expanded
-            ? result.content
-            : result.content.slice(0, 600) + "…";
+          const expanded = contentP.classList.toggle("ws-content-expanded");
+          contentP.textContent = expanded
+            ? content
+            : content.slice(0, 600) + "…";
           toggle.textContent = expanded ? "Collapse content" : "Show full content";
         });
         item.appendChild(toggle);
@@ -3654,8 +3693,95 @@ function renderWebSearchResponseSummary(output) {
     }
     container.appendChild(item);
   });
-  if (!output.answer && results.length === 0) {
-    container.textContent = "The provider returned no results or answer.";
+}
+
+/**
+ * Best-effort parse of a truncated serialized-JSON preview (the first N chars
+ * of an output payload). Returns { answer, results } for whatever complete
+ * fields survived the cut. Falls back to an empty result set when the preview
+ * is not parseable (it can be cut mid-string).
+ */
+function previewResultsFromJson(preview) {
+  if (!preview) return { answer: "", results: [] };
+  try {
+    const parsed = JSON.parse(preview);
+    return {
+      answer: parsed && typeof parsed.answer === "string" ? parsed.answer : "",
+      results: Array.isArray(parsed && parsed.results) ? parsed.results : [],
+    };
+  } catch (_) {
+    // The preview can be truncated inside a string value, so JSON.parse fails.
+    // Extract the leading "answer" (it precedes "results" in the payload), then
+    // walk the "results": [ array. Each result's small leading fields (title,
+    // url, snippet/description, published) come before its huge content, so a
+    // result that is cut mid-content still contributes a readable card.
+    let answer = "";
+    const answerMatch = preview.match(/"answer"\s*:\s*"((?:[^"\\]|\\.)*)"/);
+    if (answerMatch) answer = answerMatch[1];
+    const match = preview.match(/"results"\s*:\s*\[/);
+    if (!match) return { answer, results: [] };
+    const start = match.index + match[0].length;
+    const results = [];
+    let i = start;
+    let guard = 0;
+    while (i < preview.length && guard < 20) {
+      guard += 1;
+      while (i < preview.length && /\s|,/.test(preview[i])) i += 1;
+      if (i >= preview.length || preview[i] !== "{") break;
+      const objStart = i;
+      let depth = 0;
+      let j = i;
+      let inString = false;
+      let stringChar = "";
+      for (; j < preview.length; j += 1) {
+        const ch = preview[j];
+        if (inString) {
+          if (ch === "\\") { j += 1; continue; }
+          if (ch === stringChar) inString = false;
+          continue;
+        }
+        if (ch === '"') { inString = true; stringChar = ch; continue; }
+        if (ch === "{") depth += 1;
+        else if (ch === "}") {
+          depth -= 1;
+          if (depth === 0) break;
+        }
+      }
+      let obj;
+      if (depth === 0) {
+        try {
+          obj = JSON.parse(preview.slice(objStart, j + 1));
+        } catch (_) {
+          obj = null;
+        }
+        i = j + 1;
+      } else {
+        // Object is cut mid-way (usually inside the huge content string). Pull
+        // the small leading fields out of the partial text.
+        const partial = preview.slice(objStart);
+        obj = {};
+        const field = (name) => {
+          const re = new RegExp(`"${name}"\\s*:\\s*"((?:[^"\\\\]|\\\\.)*)"`);
+          const m = partial.match(re);
+          return m ? m[1] : "";
+        };
+        const title = field("title");
+        const url = field("url");
+        const snippet = field("snippet") || field("description") || field("text");
+        const published = field("published");
+        if (title || url || snippet) {
+          obj = { title, url, snippet, published };
+          results.push(obj);
+        }
+        break; // the cut object is the last one
+      }
+      if (obj && (obj.title || obj.url || obj.snippet || obj.content)) {
+        results.push(obj);
+      } else if (obj) {
+        break;
+      }
+    }
+    return { answer, results };
   }
 }
 
