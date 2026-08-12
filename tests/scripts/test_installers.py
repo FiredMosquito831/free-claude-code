@@ -843,6 +843,91 @@ def test_install_ps1_voice_flags_only_change_fcc_spec(
     )
 
 
+def test_install_ps1_deferred_helper_invokes_uv_as_command() -> None:
+    # The deferred (app running) path hands a detached helper that must run
+    # `uv tool install`. It must call uv through the call operator on an array,
+    # never by placing a command string at statement position: PowerShell treats
+    # a statement-position string as a command NAME and never executes it, so uv
+    # would not run and the staged update would create no mcc-* commands.
+    powershell = (_repo_root() / "scripts" / "install.ps1").read_text(encoding="utf-8")
+
+    assert "& $uvPath @$installArgs" in powershell
+    assert "$argumentsLiteral" not in powershell
+
+
+def test_install_ps1_deferred_helper_runs_uv(
+    powershell_harness: PowerShellHarness,
+    tmp_path: Path,
+) -> None:
+    # End-to-end proof: load the real Start-DeferredInstall, point it at a stub
+    # uv, and let a short-lived process stand in for the running launcher. The
+    # detached helper must actually invoke `uv tool install` once the process
+    # exits -- otherwise the staged update installs nothing.
+    installer_text = (_repo_root() / "scripts" / "install.ps1").read_text(
+        encoding="utf-8"
+    )
+    func_body = _braced_body(installer_text, "function Start-DeferredInstall")
+    func_file = tmp_path / "StartDeferredInstall.ps1"
+    func_file.write_text(
+        "function Start-DeferredInstall {\n" + func_body + "\n}\n", encoding="utf-8"
+    )
+
+    stub_dir = tmp_path / "stubuv"
+    stub_dir.mkdir(parents=True)
+    uv_log = stub_dir / "uv-calls.log"
+    stub_uv = stub_dir / "stub-uv.cmd"
+    stub_uv.write_text(
+        '@echo off\r\necho uv:%*>>"' + str(uv_log) + '"\r\nexit /b 0\r\n',
+        encoding="utf-8",
+    )
+
+    wheel_dir = tmp_path / "wheel-in"
+    wheel_dir.mkdir(parents=True)
+    wheel = wheel_dir / "dummy.whl"
+    wheel.write_text("x", encoding="utf-8")
+
+    runner = tmp_path / "run-deferred.ps1"
+    runner.write_text(
+        f"""Set-StrictMode -Version Latest
+$ErrorActionPreference = "Stop"
+. "{(func_file.as_posix())}"
+function Write-MccCommandReference {{ }}
+$uvPath = "{(stub_uv.as_posix())}"
+$arguments = @("tool", "install", "--force", "--refresh-package", "my-claude-code", "--python", "3.14.0", "my-claude-code @ file:///{(wheel.as_posix())}")
+$wheelPath = "{(wheel.as_posix())}"
+$running = @(Start-Process -FilePath "ping" -ArgumentList "-n", "3", "127.0.0.1" -PassThru)
+Start-DeferredInstall -UvPath $uvPath -Arguments $arguments -WheelPath $wheelPath -Running $running -Version "5.2.2"
+$deadline = (Get-Date).AddSeconds(25)
+while ((Get-Date) -lt $deadline) {{
+    if (Test-Path -LiteralPath "{(uv_log.as_posix())}") {{
+        $c = Get-Content -LiteralPath "{(uv_log.as_posix())}" -Raw
+        if ($c -match "tool install") {{ Write-Host "DEFERRED_UV_OK"; exit 0 }}
+    }}
+    Start-Sleep -Milliseconds 500
+}}
+Write-Host "DEFERRED_UV_MISSING"
+exit 2
+""",
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        [
+            powershell_harness.powershell,
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(runner),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=powershell_harness.env,
+    )
+    assert "DEFERRED_UV_OK" in result.stdout, result.stdout + result.stderr
+
+
 def test_installers_use_native_clients_and_single_python_selection() -> None:
     shell = (_repo_root() / "scripts" / "install.sh").read_text(encoding="utf-8")
     powershell = (_repo_root() / "scripts" / "install.ps1").read_text(encoding="utf-8")
