@@ -136,14 +136,17 @@ if [ "${{1:-}}" = "tool" ] && [ "${{2:-}}" = "install" ]; then
         exit 33
     fi
     mkdir -p "$FAKE_TOOL_BIN"
-    cp "$FAKE_FIXTURES/fcc-command.sh" "$FAKE_TOOL_BIN/fcc-server"
-    cp "$FAKE_FIXTURES/fcc-command.sh" "$FAKE_TOOL_BIN/fcc-claude"
-    cp "$FAKE_FIXTURES/fcc-command.sh" "$FAKE_TOOL_BIN/fcc-claude-old"
-    cp "$FAKE_FIXTURES/fcc-command.sh" "$FAKE_TOOL_BIN/fcc-pi"
-    if [ "$FAIL_STEP" != "fcc-missing" ]; then
-        cp "$FAKE_FIXTURES/fcc-command.sh" "$FAKE_TOOL_BIN/fcc-codex"
+    for name in mcc-server mcc-claude mcc-claude-old mcc-codex mcc-pi \
+        mcc-init mcc-chatgpt-oauth-login mcc-compact-log mcc-help \
+        my-claude-code fcc-server fcc-claude fcc-claude-old fcc-pi \
+        fcc-init fcc-chatgpt-oauth-login fcc-compact-log free-claude-code \
+        fcc-codex; do
+        cp "$FAKE_FIXTURES/fcc-command.sh" "$FAKE_TOOL_BIN/$name"
+    done
+    if [ "$FAIL_STEP" = "fcc-missing" ]; then
+        rm -f "$FAKE_TOOL_BIN/mcc-server"
     fi
-    chmod +x "$FAKE_TOOL_BIN"/fcc-*
+    chmod +x "$FAKE_TOOL_BIN"/fcc-* "$FAKE_TOOL_BIN"/mcc-* "$FAKE_TOOL_BIN"/my-claude-code "$FAKE_TOOL_BIN"/free-claude-code 2>/dev/null || true
     exit 0
 fi
 if [ "${{1:-}}" = "tool" ] && [ "${{2:-}}" = "update-shell" ]; then
@@ -277,6 +280,9 @@ fi
 if [ "$name" = "fcc-server" ] && [ "${{1:-}}" = "--version" ]; then
     echo "free-claude-code {FCC_VERSION}"
 fi
+if [ "$name" = "mcc-server" ] && [ "${{1:-}}" = "--version" ]; then
+    echo "my-claude-code {FCC_VERSION}"
+fi
 """,
     )
 
@@ -389,7 +395,7 @@ def test_install_sh_stops_without_success_on_each_failure(
         "fcc-checksum": "uv:tool install",
         "fcc-install": "uv:tool update-shell",
         "path-update": "uv:tool dir --bin",
-        "fcc-missing": "fcc-server:--version",
+        "fcc-missing": "mcc-server:--version",
     }.get(failure)
     if forbidden is not None:
         assert not any(forbidden in call for call in posix_harness.calls())
@@ -488,11 +494,8 @@ exit /b 0
 :install
 if "%FAIL_STEP%"=="fcc-install" exit /b 53
 if not exist "%FAKE_TOOL_BIN%" mkdir "%FAKE_TOOL_BIN%"
-copy /y "%FAKE_FIXTURES%\fcc-command.cmd" "%FAKE_TOOL_BIN%\fcc-server.cmd" >nul
-copy /y "%FAKE_FIXTURES%\fcc-command.cmd" "%FAKE_TOOL_BIN%\fcc-claude.cmd" >nul
-copy /y "%FAKE_FIXTURES%\fcc-command.cmd" "%FAKE_TOOL_BIN%\fcc-claude-old.cmd" >nul
-copy /y "%FAKE_FIXTURES%\fcc-command.cmd" "%FAKE_TOOL_BIN%\fcc-pi.cmd" >nul
-if not "%FAIL_STEP%"=="fcc-missing" copy /y "%FAKE_FIXTURES%\fcc-command.cmd" "%FAKE_TOOL_BIN%\fcc-codex.cmd" >nul
+for %%N in (mcc-server mcc-claude mcc-claude-old mcc-codex mcc-pi mcc-init mcc-chatgpt-oauth-login mcc-compact-log mcc-help my-claude-code fcc-server fcc-claude fcc-claude-old fcc-codex fcc-pi fcc-init fcc-chatgpt-oauth-login fcc-compact-log free-claude-code) do copy /y "%FAKE_FIXTURES%\fcc-command.cmd" "%FAKE_TOOL_BIN%\%%N.cmd" >nul
+if "%FAIL_STEP%"=="fcc-missing" del /q "%FAKE_TOOL_BIN%\mcc-server.cmd" >nul
 exit /b 0
 :update_shell
 if "%FAIL_STEP%"=="path-update" exit /b 54
@@ -598,6 +601,7 @@ for %%I in ("%~f0") do set "FCC_NAME=%%~nI"
 echo %FCC_NAME%:%*>>"%CALL_LOG%"
 if "%FAIL_STEP%"=="fcc-verify" exit /b 55
 if "%FCC_NAME%"=="fcc-server" if "%1"=="--version" echo free-claude-code {FCC_VERSION}
+if "%FCC_NAME%"=="mcc-server" if "%1"=="--version" echo my-claude-code {FCC_VERSION}
 exit /b 0
 """,
         encoding="utf-8",
@@ -783,7 +787,7 @@ def test_install_ps1_stops_without_success_on_each_failure(
         "fcc-checksum": "uv:tool install",
         "fcc-install": "uv:tool update-shell",
         "path-update": "uv:tool dir --bin",
-        "fcc-missing": "fcc-server:--version",
+        "fcc-missing": "mcc-server:--version",
     }.get(failure)
     if forbidden is not None:
         assert not any(forbidden in call for call in powershell_harness.calls())

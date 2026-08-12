@@ -564,8 +564,8 @@ function Configure-AndConfirmFreeClaudeCode {
     if ($DryRun) {
         Write-Host "+ uv tool update-shell"
         Write-Host "+ uv tool dir --bin"
-        Write-Host "+ verify fcc-server, fcc-claude, fcc-claude-old, fcc-codex, and fcc-pi in the uv tool bin directory"
-        Write-Host "+ fcc-server --version"
+        Write-Host "+ verify mcc-server, mcc-claude, mcc-codex, mcc-pi, mcc-help, and my-claude-code in the uv tool bin directory"
+        Write-Host "+ mcc-server --version"
         return
     }
 
@@ -584,11 +584,20 @@ function Configure-AndConfirmFreeClaudeCode {
         [IO.Path]::DirectorySeparatorChar,
         [IO.Path]::AltDirectorySeparatorChar
     )
+    # Verify the native my-claude-code command family (mcc-*) plus the package
+    # name shim, exactly as the post-install reference on WSL/Linux leads with.
+    # The legacy fcc-* aliases resolve through the same distribution, so they
+    # exist as soon as these do.
+    $mccCommands = @(
+        "mcc-server", "mcc-claude", "mcc-claude-old", "mcc-codex", "mcc-pi",
+        "mcc-init", "mcc-chatgpt-oauth-login", "mcc-compact-log", "mcc-help",
+        "my-claude-code"
+    )
     $installedCommands = @{}
-    foreach ($commandName in @("fcc-server", "fcc-claude", "fcc-claude-old", "fcc-codex", "fcc-pi")) {
+    foreach ($commandName in $mccCommands) {
         $command = Get-ApplicationCommand $commandName
         if (-not $command) {
-            throw "Free Claude Code installation did not create '$commandName'."
+            throw "My Claude Code installation did not create '$commandName'."
         }
         $commandDirectory = ([IO.Path]::GetFullPath((Split-Path -Parent $command.Source))).TrimEnd(
             [IO.Path]::DirectorySeparatorChar,
@@ -600,9 +609,9 @@ function Configure-AndConfirmFreeClaudeCode {
         $installedCommands[$commandName] = $command.Source
     }
 
-    $installedVersion = Invoke-NativeCapture -FilePath $installedCommands["fcc-server"] -Arguments @("--version")
-    if ($installedVersion -ne "free-claude-code $ExpectedVersion") {
-        throw "Expected free-claude-code $ExpectedVersion; found: $installedVersion"
+    $installedVersion = Invoke-NativeCapture -FilePath $installedCommands["mcc-server"] -Arguments @("--version")
+    if ($installedVersion -ne "my-claude-code $ExpectedVersion") {
+        throw "Expected my-claude-code $ExpectedVersion; found: $installedVersion"
     }
 }
 
