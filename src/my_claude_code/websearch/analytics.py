@@ -16,7 +16,7 @@ import hashlib
 import json
 import sqlite3
 import threading
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -416,6 +416,98 @@ class WebSearchLogStore:
         finally:
             connection.close()
         return {"total": int(total), "limit": limit, "offset": offset, "items": items}
+
+    def iter_export_rows(
+        self,
+        *,
+        columns: list[str],
+        include_content: bool,
+        provider: str | None = None,
+        status: str | None = None,
+        q: str | None = None,
+        since_epoch: float | None = None,
+        until_epoch: float | None = None,
+        page_size: int = 1_000,
+    ) -> Iterator[dict[str, Any]]:
+        """Yield every matching attempt for an export, bypassing the 500-row cap.
+
+        Keyset-paginates over ``(ts_epoch, id)`` so a full export stays O(n),
+        and keeps one reader connection open (closed in ``finally`` so a
+        generator abandoned mid-stream leaks nothing). Decodes captured
+        ``input_json``/``output_json``/``provider_config_json`` when
+        ``include_content`` is true.
+        """
+        where, params = _attempt_filter_where(
+            provider=provider,
+            status=status,
+            q=q,
+            since_epoch=since_epoch,
+            until_epoch=until_epoch,
+        )
+        # Keyset pagination needs ts_epoch + id; _attempt_dict needs
+        # content_captured unconditionally. Force-include all three.
+        required = {"ts_epoch", "id", "content_captured"}
+        select_columns = list(columns)
+        for column in required:
+            if column not in select_columns:
+                select_columns.append(column)
+        select = ", ".join(select_columns)
+        connection = self._connect_reader()
+        try:
+            cursor: tuple[float, int] | None = None
+            while True:
+                page_where = where
+                page_params: list[Any] = list(params)
+                if cursor is not None:
+                    last_ts, last_id = cursor
+                    page_where = f"{where}{' AND' if where else 'WHERE'}"
+                    page_where += " (ts_epoch, id) < (?, ?)"
+                    page_params.extend([last_ts, last_id])
+                rows = connection.execute(
+                    f"SELECT {select} FROM search_log {page_where}"
+                    " ORDER BY ts_epoch DESC, id DESC LIMIT ?",
+                    (*page_params, page_size),
+                ).fetchall()
+                if not rows:
+                    return
+                for row in rows:
+                    yield _attempt_dict(row)
+                cursor = (float(rows[-1]["ts_epoch"]), int(rows[-1]["id"]))
+        finally:
+            connection.close()
+
+    def iter_export_aggregates(
+        self,
+        *,
+        select: str,
+        names: list[str],
+        group_by: list[str],
+        provider: str | None = None,
+        status: str | None = None,
+        q: str | None = None,
+        since_epoch: float | None = None,
+        until_epoch: float | None = None,
+    ) -> Iterator[dict[str, Any]]:
+        """Yield the aggregated (grouped) websearch records for an export."""
+        where, params = _attempt_filter_where(
+            provider=provider,
+            status=status,
+            q=q,
+            since_epoch=since_epoch,
+            until_epoch=until_epoch,
+        )
+        group_sql = ", ".join(group_by)
+        order_sql = ", ".join(group_by)
+        sql = (
+            f"SELECT {select} FROM search_log {where}"
+            f" GROUP BY {group_sql} ORDER BY {order_sql}"
+        )
+        connection = self._connect_reader()
+        try:
+            for row in connection.execute(sql, params).fetchall():
+                yield {name: row[name] for name in names}
+        finally:
+            connection.close()
 
     def request(self, request_id: int) -> dict[str, Any] | None:
         """Return one provider-attempt record with captured I/O and configuration."""

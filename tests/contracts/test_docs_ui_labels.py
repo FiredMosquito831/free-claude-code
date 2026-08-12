@@ -41,6 +41,7 @@ DOCUMENTED_CONTROLS: tuple[str, ...] = (
     # windowed totals stop rising.
     "All time",
     "Clear log",
+    "Export",
 )
 
 
