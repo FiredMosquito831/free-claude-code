@@ -109,6 +109,28 @@ class TestFormatCoverage:
         assert "ID" in headers
         assert "Status" in headers
         assert len(rows) == 13  # header + 12 rows
+        # Data cells are present and aligned to the header (regression: the
+        # renderer used label keys for lookup and produced empty data rows).
+        provider_col = headers.index("Provider")
+        data_row = rows[1]
+        assert data_row[provider_col] in {"p1", "p2"}
+
+    def test_csv_detail_has_real_data(self, client, seeded_store) -> None:
+        response = _export(
+            client,
+            format="csv",
+            scope="requests",
+            fields="providers,models,tokens_out",
+        )
+        rows = list(csv.reader(io.StringIO(response.content.decode("utf-8-sig"))))
+        headers = rows[0]
+        provider_col = headers.index("Provider")
+        model_col = headers.index("Resolved model")
+        tokens_col = headers.index("Tokens out")
+        assert len(rows) == 13  # header + 12 rows
+        assert any(row[provider_col] == "p1" for row in rows[1:])
+        assert any(row[model_col] in {"m1", "m2"} for row in rows[1:])
+        assert any(row[tokens_col] and row[tokens_col] != "0" for row in rows[1:])
 
     def test_txt_is_readable_report(self, client, seeded_store) -> None:
         response = _export(client, format="txt", scope="requests")
@@ -116,6 +138,36 @@ class TestFormatCoverage:
         assert "Export" in text
         assert "ID" in text
         assert "Status" in text
+
+    def test_txt_does_not_truncate_long_values(self, client, tmp_path) -> None:
+        # A long model id must survive the report (regression: values were cut
+        # to the header width, e.g. "nvidia/nemotro").
+        long_model = "nvidia/nemotron-3-ultra-550b-a55b"
+        store = get_request_log_store(tmp_path / "requests.db")
+        assert store is not None
+        store.enqueue(
+            RequestRecord(
+                id="long",
+                endpoint="/v1/messages",
+                protocol="anthropic",
+                provider="nvidia_nim",
+                resolved_model=long_model,
+                requested_model=long_model,
+                ts_epoch=time.time(),
+                status="success",
+                tokens_in=10,
+                tokens_out=1,
+            )
+        )
+        store.close()
+        response = _export(
+            client,
+            format="txt",
+            scope="requests",
+            fields="providers,models",
+        )
+        text = response.content.decode("utf-8")
+        assert long_model in text
 
     def test_xlsx_reads_back(self, client, seeded_store) -> None:
         pytest.importorskip("openpyxl")
@@ -132,6 +184,36 @@ class TestFormatCoverage:
         ]
         assert "ID" in header_row
         assert "Status" in header_row
+
+    def test_xlsx_detail_has_real_data(self, client, seeded_store) -> None:
+        pytest.importorskip("openpyxl")
+        import io as _io
+
+        import openpyxl
+
+        response = _export(
+            client,
+            format="xlsx",
+            scope="requests",
+            fields="providers,models,tokens_out",
+        )
+        workbook = openpyxl.load_workbook(_io.BytesIO(response.content))
+        sheet = workbook.active
+        header_row = [
+            sheet.cell(1, col).value for col in range(1, sheet.max_column + 1)
+        ]
+        # openpyxl columns are 1-based; the header list is 0-based.
+        provider_col = header_row.index("Provider") + 1
+        model_col = header_row.index("Resolved model") + 1
+        # Data cells must be populated (regression: empty cells).
+        providers = {
+            sheet.cell(row, provider_col).value for row in range(2, sheet.max_row + 1)
+        }
+        models = {
+            sheet.cell(row, model_col).value for row in range(2, sheet.max_row + 1)
+        }
+        assert providers == {"p1", "p2"}
+        assert models == {"m1", "m2"}
 
 
 class TestFieldSelection:
@@ -248,6 +330,57 @@ class TestPeriodWindow:
         response = _export(client, format="json", scope="requests", since="garbage")
         assert response.status_code == 400
 
+    def test_all_time_returns_everything(self, client, seeded_store) -> None:
+        # No since/until = lifetime (the "All time" period sends no bounds).
+        response = _export(client, format="json", scope="requests")
+        assert len(response.json()) == 12
+
+
+class TestMultiValueFilters:
+    def test_multi_provider_returns_union(self, client, seeded_store) -> None:
+        response = _export(
+            client,
+            format="json",
+            scope="requests",
+            provider="p1,p2",
+        )
+        rows = response.json()
+        assert len(rows) == 12
+        assert {row["provider"] for row in rows} == {"p1", "p2"}
+
+    def test_multi_provider_subset(self, client, seeded_store) -> None:
+        response = _export(client, format="json", scope="requests", provider="p1")
+        rows = response.json()
+        assert rows
+        assert {row["provider"] for row in rows} == {"p1"}
+
+    def test_multi_model_returns_union(self, client, seeded_store) -> None:
+        response = _export(
+            client,
+            format="json",
+            scope="requests",
+            model="m1,m2",
+        )
+        rows = response.json()
+        assert len(rows) == 12
+        # Each row matched by resolved_model OR requested_model.
+        assert {row["resolved_model"] for row in rows} == {"m1", "m2"}
+
+    def test_multi_provider_with_since_combines(self, client, seeded_store) -> None:
+        now = time.time()
+        since = now - 95
+        response = _export(
+            client,
+            format="json",
+            scope="requests",
+            provider="p1,p2",
+            since=str(since),
+        )
+        rows = response.json()
+        assert rows
+        for row in rows:
+            assert row["ts_epoch"] >= since
+
 
 class TestFullDBBypass:
     def test_export_returns_more_than_500_rows(self, client, tmp_path) -> None:
@@ -331,5 +464,51 @@ class TestWebSearchScope:
         assert rows[0]["provider"] == "exa"
         assert rows[0]["results_count"] == 5
         assert rows[0]["cost_usd"] == 0.01
+        app.dependency_overrides.clear()
+        store.close()
+
+    def test_websearch_multi_provider(self, client, monkeypatch, tmp_path) -> None:
+        from my_claude_code.api.admin_websearch_routes import get_websearch_log_store
+        from my_claude_code.websearch.analytics import WebSearchLogStore
+        from my_claude_code.websearch.registry import SearchOutcome
+
+        store = WebSearchLogStore(tmp_path / "ws.db")
+        for index, provider in enumerate(("exa", "brave", "exa")):
+            store.record(
+                SearchOutcome(
+                    ts_epoch=time.time() - index,
+                    ts_iso=datetime.now(UTC).isoformat(),
+                    provider=provider,
+                    key_index=0,
+                    key_label=f"{provider[:3]}…abcd",
+                    query="q",
+                    results_count=3,
+                    duration_ms=10.0,
+                    status="success",
+                    error_kind=None,
+                    error_message=None,
+                    cost_usd=0.01,
+                    input_payload={"q": "q"},
+                    output_payload={"answer": "a"},
+                    provider_config={"provider_id": provider},
+                )
+            )
+        store.flush()
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.setenv("USERPROFILE", str(tmp_path))
+        app = create_test_app()
+        app.dependency_overrides[get_websearch_log_store] = lambda: store
+        ws_client = TestClient(app, client=("127.0.0.1", 50000))
+        response = _export(
+            ws_client,
+            format="json",
+            scope="websearch",
+            fields="provider",
+            provider="exa,brave",
+        )
+        assert response.status_code == 200
+        rows = response.json()
+        assert len(rows) == 3
+        assert {row["provider"] for row in rows} == {"exa", "brave"}
         app.dependency_overrides.clear()
         store.close()

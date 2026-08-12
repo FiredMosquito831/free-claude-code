@@ -934,8 +934,12 @@ def _attempt_filter_where(
     clauses: list[str] = []
     params: list[Any] = []
     if provider:
-        clauses.append("provider = ?")
-        params.append(provider)
+        # Comma-separated values mean "any of these providers" (multi-select).
+        providers = [part for part in provider.split(",") if part]
+        if providers:
+            placeholders = ",".join("?" * len(providers))
+            clauses.append(f"provider IN ({placeholders})")
+            params.extend(providers)
     if status:
         clauses.append("status = ?")
         params.append(status)

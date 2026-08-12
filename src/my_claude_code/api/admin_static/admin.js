@@ -4578,6 +4578,7 @@ document.querySelectorAll('input[name="exportScope"]').forEach((radio) => {
     renderExportFieldList(scope);
     byId("exportPeriod").value = EXPORT_DEFAULT_PERIOD[scope];
     byId("exportCustomRange").hidden = true;
+    syncExportFilterVisibility(scope);
     byId("exportHint").textContent = "";
   });
 });
@@ -5791,6 +5792,32 @@ function renderExportFieldList(scope) {
   });
 }
 
+function populateExportFilterOptions() {
+  // Reuse the request stats' provider/model/key option sets so the export
+  // filter offers the same suggestions as the requests view.
+  const populate = (id, known) => {
+    const datalist = byId(id);
+    if (!datalist) return;
+    datalist.replaceChildren(
+      ...Array.from(known)
+        .sort((left, right) => left.localeCompare(right))
+        .map((value) => {
+          const option = document.createElement("option");
+          option.value = value;
+          return option;
+        }),
+    );
+  };
+  populate("exportProviderOptions", reqState.providerOptions);
+  populate("exportModelOptions", reqState.modelOptions);
+}
+
+function syncExportFilterVisibility(scope) {
+  // Web Search has no models; hide the model filter for that scope.
+  const modelWrap = byId("exportModelFilterWrap");
+  if (modelWrap) modelWrap.hidden = scope === "websearch";
+}
+
 function openExportModal() {
   exportReturnFocus = document.activeElement;
   // Default scope to the view the user opened from.
@@ -5804,6 +5831,10 @@ function openExportModal() {
   byId("exportCustomRange").hidden = true;
   byId("exportGroupBy").value = "";
   renderExportFieldList(initial);
+  syncExportFilterVisibility(initial);
+  populateExportFilterOptions();
+  byId("exportProviderFilter").value = "";
+  byId("exportModelFilter").value = "";
   byId("exportHint").textContent = "";
   byId("exportModal").hidden = false;
   byId("exportDownloadButton").focus();
@@ -5845,7 +5876,9 @@ function trapExportModalFocus(event) {
 
 function exportPeriodSeconds() {
   const raw = byId("exportPeriod").value;
-  if (raw === "custom") return null;
+  // "all" (lifetime) and "custom" both mean "no fixed window": the caller
+  // sends no since, or the custom bounds instead.
+  if (raw === "all" || raw === "custom") return null;
   return Number(raw) || 0;
 }
 
@@ -5870,10 +5903,14 @@ function exportParamsFor(scope) {
   const fields = Array.from(byId("exportFieldList").querySelectorAll("input:checked"))
     .map((input) => input.value);
   if (fields.length) params.set("fields", fields.join(","));
+  const provider = byId("exportProviderFilter").value.trim();
+  if (provider) params.set("provider", provider);
+  const model = byId("exportModelFilter").value.trim();
+  if (model) params.set("model", model);
   const periodSeconds = exportPeriodSeconds();
   if (periodSeconds !== null) {
     params.set("since", String(Math.floor(Date.now() / 1000) - periodSeconds));
-  } else {
+  } else if (byId("exportPeriod").value === "custom") {
     const since = exportCustomSince();
     if (since) params.set("since", since);
     const until = exportCustomUntil();

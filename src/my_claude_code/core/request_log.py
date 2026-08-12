@@ -1384,14 +1384,26 @@ class RequestLogStore:
         clauses: list[str] = []
         args: list[Any] = []
         if provider:
-            clauses.append("provider = ?")
-            args.append(provider)
+            # Comma-separated values mean "any of these providers" (multi-select).
+            providers = [part for part in provider.split(",") if part]
+            if providers:
+                placeholders = ",".join("?" * len(providers))
+                clauses.append(f"provider IN ({placeholders})")
+                args.extend(providers)
         if key:
             clauses.append("key_label = ?")
             args.append(key)
         if model:
-            clauses.append("(resolved_model = ? OR requested_model = ?)")
-            args.extend([model, model])
+            # Comma-separated values mean "any of these models".
+            models = [part for part in model.split(",") if part]
+            if models:
+                placeholders = ",".join("?" * len(models))
+                clauses.append(
+                    f"(resolved_model IN ({placeholders})"
+                    f" OR requested_model IN ({placeholders}))"
+                )
+                args.extend(models)
+                args.extend(models)
         if status:
             clauses.append("status = ?")
             args.append(status)

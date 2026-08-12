@@ -118,6 +118,46 @@ def test_list_filters(store: RequestLogStore) -> None:
     assert total == 1
 
 
+def test_list_multi_value_filters(store: RequestLogStore) -> None:
+    base = time.time()
+    store.enqueue(
+        _record(
+            "a", provider="p1", resolved_model="m1", status="success", ts_epoch=base
+        )
+    )
+    store.enqueue(
+        _record(
+            "b",
+            provider="p2",
+            resolved_model="m2",
+            status="success",
+            ts_epoch=base + 10,
+        )
+    )
+    store.enqueue(
+        _record(
+            "c",
+            provider="p3",
+            resolved_model="m3",
+            status="success",
+            ts_epoch=base + 20,
+        )
+    )
+    store.close()
+    # Comma-separated provider means "any of these".
+    _, total = store.list_requests(provider="p1,p3")
+    assert total == 2
+    # Comma-separated model matches either resolved_model or requested_model.
+    _, total = store.list_requests(model="m1,m2")
+    assert total == 2
+    # Combined provider + model intersection.
+    _, total = store.list_requests(provider="p1,p2", model="m2")
+    assert total == 1
+    # A single value still behaves like a scalar equality.
+    _, total = store.list_requests(provider="p1")
+    assert total == 1
+
+
 def test_list_text_search(store: RequestLogStore) -> None:
     store.enqueue(
         _record("a", input_text="deploy the kubernetes cluster", output_text="done")
