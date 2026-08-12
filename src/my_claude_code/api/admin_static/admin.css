@@ -2600,6 +2600,10 @@ details.turn-pane > summary:focus-visible {
   line-height: 1.5;
 }
 
+.ws-preview-note {
+  margin: 8px 0 0;
+}
+
 @media (max-width: 760px) {
   .requests-breakdowns {
     grid-template-columns: 1fr;

@@ -319,8 +319,14 @@ def _run_supervised_server(
             settings.server_graceful_shutdown_seconds,
         )
         raise SystemExit(1)
-    # Any other pending action falls back to a clean stop, as before.
-    return ServerExitAction.STOP
+    # A config-driven RELOAD must not degrade to a plain stop when the runtime
+    # is still draining. The serve() loop rebuilds the app on the next pass and
+    # the port-wait at the top of the next iteration handles the lingering
+    # socket, so returning RELOAD keeps the server up instead of exiting the
+    # process (which is what "the server crashed after I applied a setting"
+    # looked like). Writer threads are daemon, so an old runtime still closing
+    # does not block the fresh generation.
+    return ServerExitAction.RELOAD
 
 
 def init() -> None:
