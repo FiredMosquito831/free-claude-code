@@ -22,6 +22,9 @@ $UvInstallUrl = "https://astral.sh/uv/install.ps1"
 # Set by Start-DeferredInstall when the app was running and the install was
 # staged for completion after the user stops it.
 $script:Deferred = $false
+# Set by Invoke-RenameThenReinstall when the update completed immediately while
+# launchers were open (old tool env renamed aside, fresh install in place).
+$script:RenamedWhileRunning = $false
 
 function Show-Usage {
     @"
@@ -535,12 +538,30 @@ function Install-FreeClaudeCode {
 
     $running = @(Get-RunningLaunchers)
     if ($running.Count -gt 0) {
-        # The app is live. Windows cannot replace the tool environment while a
-        # process runs from it, so stage the verified wheel and let a detached
-        # helper finish the install after the launchers exit. The user restarts
-        # the app; the new version is picked up then. This mirrors how the
-        # dashboard updater defers on Windows (release_updates.py) and how a
-        # POSIX install already behaves (uv unlinks open files).
+        # Launchers are live. Windows refuses to DELETE the uv tool directory
+        # while a process runs from it (interpreter + loaded .pyd held open), so
+        # `uv tool install --force` would fail partway. But Windows ALLOWS
+        # RENAMING a directory that a process runs from, and a running process
+        # keeps its already-loaded modules in memory even if the files are
+        # renamed away. So we rename the old tool env aside, install fresh into
+        # the canonical path, and regenerate the shims: open windows keep running
+        # the old code, new windows/servers get the new version — exactly like
+        # POSIX. If the rename is refused (rare hard lock), fall back to the
+        # detached-helper deferral.
+        $toolDir = Get-UvToolDir -UvPath $uvPath
+        if ($null -ne $toolDir) {
+            try {
+                return Invoke-RenameThenReinstall `
+                    -UvPath $uvPath `
+                    -Arguments $arguments `
+                    -WheelPath $wheelPath `
+                    -ToolDir $toolDir `
+                    -Version $release.Version
+            }
+            catch {
+                # Rename or install failed; fall back to the previous deferral.
+            }
+        }
         return Start-DeferredInstall `
             -UvPath $uvPath `
             -Arguments $arguments `
@@ -556,6 +577,68 @@ function Install-FreeClaudeCode {
         Remove-Item -LiteralPath (Split-Path -Parent $wheelPath) -Recurse -Force -ErrorAction SilentlyContinue
     }
     return $release.Version
+}
+
+function Get-UvToolDir {
+    param([Parameter(Mandatory = $true)] [string] $UvPath)
+
+    $toolDir = Invoke-NativeCapture -FilePath $UvPath -Arguments @("tool", "dir")
+    if ([string]::IsNullOrWhiteSpace($toolDir)) {
+        return $null
+    }
+    return Join-Path $toolDir "my-claude-code"
+}
+
+function Invoke-RenameThenReinstall {
+    param(
+        [Parameter(Mandatory = $true)] [string] $UvPath,
+        [Parameter(Mandatory = $true)] [string[]] $Arguments,
+        [Parameter(Mandatory = $true)] [string] $WheelPath,
+        [Parameter(Mandatory = $true)] [string] $ToolDir,
+        [Parameter(Mandatory = $true)] [string] $Version
+    )
+
+    try {
+        if (-not (Test-Path -LiteralPath $ToolDir -PathType Container)) {
+            # Nothing to rename: a first install with a running launcher. Just
+            # install directly (the fresh env is created from scratch).
+            Invoke-NativeCommand -FilePath $UvPath -Arguments $Arguments
+            return $Version
+        }
+
+        # Best-effort sweep of stale .old-* dirs whose rename-lock is gone. A
+        # dir still held open by a live window fails to delete; ignore it.
+        Get-ChildItem -Path (Split-Path -Parent $ToolDir) -Directory -Filter "my-claude-code.old-*" -ErrorAction SilentlyContinue |
+            ForEach-Object {
+                Remove-Item -LiteralPath $_.FullName -Recurse -Force -ErrorAction SilentlyContinue
+            }
+
+        $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
+        $renamed = "$ToolDir.old-$stamp"
+        Rename-Item -LiteralPath $ToolDir -NewName (Split-Path -Leaf $renamed) -ErrorAction Stop
+
+        try {
+            Invoke-NativeCommand -FilePath $UvPath -Arguments $Arguments
+        }
+        catch {
+            # Fresh install failed. Restore the previous install so the user is
+            # never left with no working tool.
+            if (Test-Path -LiteralPath $renamed -PathType Container) {
+                Rename-Item -LiteralPath $renamed -NewName (Split-Path -Leaf $ToolDir) -ErrorAction SilentlyContinue
+            }
+            throw
+        }
+
+        # New install succeeded. The old dir may still be held open by a live
+        # window; remove best-effort (ignore failure, it becomes orphaned
+        # garbage that the sweep above reaps on a later install).
+        Remove-Item -LiteralPath $renamed -Recurse -Force -ErrorAction SilentlyContinue
+        $script:RenamedWhileRunning = $true
+        return $Version
+    }
+    finally {
+        Remove-Item -LiteralPath (Split-Path -Parent $WheelPath) -Recurse -Force -ErrorAction SilentlyContinue
+    }
 }
 
 function Configure-AndConfirmFreeClaudeCode {
@@ -814,5 +897,9 @@ else {
 
     Write-Host ""
     Write-Host "My Claude Code $InstalledVersion is installed and verified."
+    if ($script:RenamedWhileRunning) {
+        Write-Host "New sessions and restarted servers use the new version; already-open"
+        Write-Host "windows keep running the previous version until they are restarted."
+    }
     Write-MccCommandReference
 }
