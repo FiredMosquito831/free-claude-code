@@ -1120,6 +1120,109 @@ Write-Host "RENAME_ROLLBACK_OK"
     assert "RENAME_ROLLBACK_OK" in result.stdout, result.stdout + result.stderr
 
 
+def test_install_ps1_rename_keeps_install_when_running_shim_is_locked(
+    powershell_harness: PowerShellHarness,
+    tmp_path: Path,
+) -> None:
+    # A running launcher's own shim cannot be overwritten (os error 32 /
+    # "being used by another process"). That failure is EXPECTED: the tool dir
+    # and free shims already updated, and the shim is version-agnostic. The
+    # rename path must keep the new install, report success, and flag that a
+    # detached helper finishes the locked shim after the window closes -- NOT
+    # roll back and NOT treat it as fatal.
+    installer_text = (_repo_root() / "scripts" / "install.ps1").read_text(
+        encoding="utf-8"
+    )
+    func_file = tmp_path / "RenameThenReinstall.ps1"
+    func_file.write_text(
+        _extract_function_definition(installer_text, "Invoke-RenameThenReinstall"),
+        encoding="utf-8",
+    )
+
+    stub_dir = tmp_path / "stubuv"
+    stub_dir.mkdir(parents=True)
+    uv_log = stub_dir / "uv-calls.log"
+    locked_uv = stub_dir / "locked-uv.cmd"
+    # uv succeeds on the tool env (recreates the dir + writes a receipt naming
+    # the installed version) but fails copying a shim that a running launcher
+    # holds -> os error 32.
+    locked_uv.write_text(
+        '@echo off\r\necho uv:%*>>"' + str(uv_log) + '"\r\n'
+        'if "%1"=="tool" if "%2"=="dir" if "%3"=="--bin" echo %FAKE_TOOL_ROOT%& exit /b 0\r\n'
+        'if "%1"=="tool" if "%2"=="dir" echo %FAKE_TOOL_ROOT%& exit /b 0\r\n'
+        'if not "%FAKE_TOOL_ROOT%"=="" mkdir "%FAKE_TOOL_ROOT%\\my-claude-code" 2>nul\r\n'
+        'if not "%FAKE_TOOL_ROOT%"=="" echo [tool] > "%FAKE_TOOL_ROOT%\\my-claude-code\\uv-receipt.toml" 2>nul\r\n'
+        'if not "%FAKE_TOOL_ROOT%"=="" echo version = "%FAKE_INSTALL_VERSION%" >> "%FAKE_TOOL_ROOT%\\my-claude-code\\uv-receipt.toml" 2>nul\r\n'
+        ">&2 echo Failed to install entrypoint\r\n"
+        ">&2 echo Caused by: failed to copy file from ...\r\n"
+        ">&2 echo ...being used by another process. (os error 32)\r\n"
+        "exit /b 2\r\n",
+        encoding="utf-8",
+    )
+
+    wheel_dir = tmp_path / "wheel-in"
+    wheel_dir.mkdir(parents=True)
+    wheel = wheel_dir / "dummy.whl"
+    wheel.write_text("x", encoding="utf-8")
+
+    tool_root = tmp_path / "tools"
+    tool_root.mkdir(parents=True)
+    tool_dir = tool_root / "my-claude-code"
+    tool_dir.mkdir()
+    (tool_dir / "marker.txt").write_text("old", encoding="utf-8")
+
+    runner = tmp_path / "run-locked.ps1"
+    runner.write_text(
+        f"""Set-StrictMode -Version Latest
+$ErrorActionPreference = "Stop"
+function Invoke-NativeCommand {{
+    param([string] $FilePath, [string[]] $Arguments = @())
+    $global:LASTEXITCODE = 0
+    & $FilePath @Arguments
+    if ($LASTEXITCODE -ne 0) {{ throw "Command failed with exit code $($LASTEXITCODE): $FilePath" }}
+}}
+function Invoke-NativeCapture {{
+    param([string] $FilePath, [string[]] $Arguments = @())
+    $global:LASTEXITCODE = 0
+    $out = & $FilePath @Arguments
+    if ($LASTEXITCODE -ne 0) {{ throw "Command failed with exit code $($LASTEXITCODE): $FilePath" }}
+    return ($out | Out-String).Trim()
+}}
+$script:RenamedWhileRunning = $false
+$script:NeedDeferredFinish = $false
+. "{(func_file.as_posix())}"
+$uvPath = "{(locked_uv.as_posix())}"
+$arguments = @("tool", "install", "--force", "--refresh-package", "my-claude-code", "--python", "3.14.0", "my-claude-code @ file:///{(wheel.as_posix())}")
+$wheelPath = "{(wheel.as_posix())}"
+$toolDir = "{(tool_dir.as_posix())}"
+$ok = Invoke-RenameThenReinstall -UvPath $uvPath -Arguments $arguments -WheelPath $wheelPath -ToolDir $toolDir -Version "5.3.3"
+if ($ok -ne $true) {{ throw "expected success despite locked shim, got: $ok" }}
+if ($script:NeedDeferredFinish -ne $true) {{ throw "expected NeedDeferredFinish to be set" }}
+if ($script:RenamedWhileRunning -ne $true) {{ throw "expected RenamedWhileRunning to be set" }}
+if (-not (Test-Path -LiteralPath "{(tool_dir.as_posix())}" -PathType Container)) {{ throw "fresh tool dir not kept" }}
+Write-Host "LOCKED_SHIM_OK"
+""",
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        [
+            powershell_harness.powershell,
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(runner),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=powershell_harness.env
+        | {"FAKE_TOOL_ROOT": str(tool_root), "FAKE_INSTALL_VERSION": "5.3.3"},
+    )
+    assert "LOCKED_SHIM_OK" in result.stdout, result.stdout + result.stderr
+
+
 def test_installers_use_native_clients_and_single_python_selection() -> None:
     shell = (_repo_root() / "scripts" / "install.sh").read_text(encoding="utf-8")
     powershell = (_repo_root() / "scripts" / "install.ps1").read_text(encoding="utf-8")
