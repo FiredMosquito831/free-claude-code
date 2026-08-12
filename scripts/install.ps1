@@ -628,6 +628,22 @@ function Invoke-RenameThenReinstall {
         return $false
     }
 
+    # uv writes the launcher shims (PE+zipapps) into the uv tool bin dir. A
+    # running launcher holds its own .exe without FILE_SHARE_DELETE, so uv
+    # cannot overwrite that one shim -- but that shim is version-agnostic (its
+    # __main__.py shebangs to the tool-dir python path), so it does not need
+    # updating: new launches of it already resolve the fresh tool dir. Rename
+    # every launcher shim aside (best-effort; locked ones fail and are left),
+    # so uv can write fresh shims at the canonical paths for the free ones.
+    $binDir = Invoke-NativeCapture -FilePath $UvPath -Arguments @("tool", "dir", "--bin")
+    if (-not [string]::IsNullOrWhiteSpace($binDir)) {
+        Get-ChildItem -Path $binDir -Filter "*.exe" -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -match "^(mcc|fcc|my-claude-code|free-claude-code)" } |
+            ForEach-Object {
+                Rename-Item -LiteralPath $_.FullName -NewName ($_.Name + ".old-$stamp") -ErrorAction SilentlyContinue
+            }
+    }
+
     try {
         Invoke-NativeCommand -FilePath $UvPath -Arguments $Arguments
     }
@@ -644,6 +660,15 @@ function Invoke-RenameThenReinstall {
     # window; remove best-effort (ignore failure, it becomes orphaned
     # garbage that the sweep above reaps on a later install).
     Remove-Item -LiteralPath $renamed -Recurse -Force -ErrorAction SilentlyContinue
+    # Remove the shims we renamed aside earlier that uv did not recreate
+    # (those uv recreated are gone; locked ones could not be renamed so have no
+    # .old sibling here). Best-effort -- a running window may hold one.
+    if (-not [string]::IsNullOrWhiteSpace($binDir)) {
+        Get-ChildItem -Path $binDir -Filter "*.old-$stamp" -ErrorAction SilentlyContinue |
+            ForEach-Object {
+                Remove-Item -LiteralPath $_.FullName -Force -ErrorAction SilentlyContinue
+            }
+    }
     $script:RenamedWhileRunning = $true
     return $true
 }

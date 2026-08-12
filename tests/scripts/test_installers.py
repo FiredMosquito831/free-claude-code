@@ -955,10 +955,12 @@ def test_install_ps1_rename_reinstall_renames_tool_dir_and_runs_uv(
     stub_dir.mkdir(parents=True)
     uv_log = stub_dir / "uv-calls.log"
     stub_uv = stub_dir / "stub-uv.cmd"
-    # The stub mimics real `uv tool install`: it records the invocation AND
-    # recreates the canonical tool dir (uv does this by installing a fresh env).
+    # The stub mimics real `uv`: records invocations, answers `tool dir` and
+    # `tool dir --bin`, and on `tool install` recreates the canonical tool dir.
     stub_uv.write_text(
         '@echo off\r\necho uv:%*>>"' + str(uv_log) + '"\r\n'
+        'if "%1"=="tool" if "%2"=="dir" if "%3"=="--bin" echo %FAKE_TOOL_ROOT%& exit /b 0\r\n'
+        'if "%1"=="tool" if "%2"=="dir" echo %FAKE_TOOL_ROOT%& exit /b 0\r\n'
         'if not "%FAKE_TOOL_ROOT%"=="" mkdir "%FAKE_TOOL_ROOT%\\my-claude-code" 2>nul\r\n'
         "exit /b 0\r\n",
         encoding="utf-8",
@@ -984,6 +986,13 @@ function Invoke-NativeCommand {{
     $global:LASTEXITCODE = 0
     & $FilePath @Arguments
     if ($LASTEXITCODE -ne 0) {{ throw "Command failed with exit code $($LASTEXITCODE): $FilePath" }}
+}}
+function Invoke-NativeCapture {{
+    param([string] $FilePath, [string[]] $Arguments = @())
+    $global:LASTEXITCODE = 0
+    $out = & $FilePath @Arguments
+    if ($LASTEXITCODE -ne 0) {{ throw "Command failed with exit code $($LASTEXITCODE): $FilePath" }}
+    return ($out | Out-String).Trim()
 }}
 . "{(func_file.as_posix())}"
 $uvPath = "{(stub_uv.as_posix())}"
@@ -1038,7 +1047,13 @@ def test_install_ps1_rename_reinstall_restores_old_dir_on_failed_install(
     stub_dir = tmp_path / "stubuv"
     stub_dir.mkdir(parents=True)
     fail_uv = stub_dir / "fail-uv.cmd"
-    fail_uv.write_text("@echo off\r\nexit /b 33\r\n", encoding="utf-8")
+    fail_uv.write_text(
+        "@echo off\r\n"
+        'if "%1"=="tool" if "%2"=="dir" if "%3"=="--bin" echo %FAKE_TOOL_ROOT%& exit /b 0\r\n'
+        'if "%1"=="tool" if "%2"=="dir" echo %FAKE_TOOL_ROOT%& exit /b 0\r\n'
+        "exit /b 33\r\n",
+        encoding="utf-8",
+    )
 
     wheel_dir = tmp_path / "wheel-in"
     wheel_dir.mkdir(parents=True)
@@ -1060,6 +1075,13 @@ function Invoke-NativeCommand {{
     $global:LASTEXITCODE = 0
     & $FilePath @Arguments
     if ($LASTEXITCODE -ne 0) {{ throw "Command failed with exit code $($LASTEXITCODE): $FilePath" }}
+}}
+function Invoke-NativeCapture {{
+    param([string] $FilePath, [string[]] $Arguments = @())
+    $global:LASTEXITCODE = 0
+    $out = & $FilePath @Arguments
+    if ($LASTEXITCODE -ne 0) {{ throw "Command failed with exit code $($LASTEXITCODE): $FilePath" }}
+    return ($out | Out-String).Trim()
 }}
 . "{(func_file.as_posix())}"
 $uvPath = "{(fail_uv.as_posix())}"
@@ -1093,7 +1115,7 @@ Write-Host "RENAME_ROLLBACK_OK"
         check=False,
         capture_output=True,
         text=True,
-        env=powershell_harness.env,
+        env=powershell_harness.env | {"FAKE_TOOL_ROOT": str(tool_root)},
     )
     assert "RENAME_ROLLBACK_OK" in result.stdout, result.stdout + result.stderr
 
