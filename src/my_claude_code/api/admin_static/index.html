@@ -488,6 +488,7 @@
                 <div class="export-row">
                   <label class="export-row-label" for="exportPeriod">Period</label>
                   <select id="exportPeriod">
+                    <option value="all">All time</option>
                     <option value="3600">Last hour</option>
                     <option value="86400" selected>Last 24 hours</option>
                     <option value="604800">Last 7 days</option>
@@ -518,6 +519,30 @@
                     <option value="period">Period only</option>
                     <option value="provider">Provider only</option>
                   </select>
+                </div>
+
+                <div class="export-row export-filter-row">
+                  <span class="export-row-label">Filter</span>
+                  <label class="export-filter">
+                    <span class="export-filter-label">Providers</span>
+                    <input
+                      id="exportProviderFilter"
+                      type="text"
+                      list="exportProviderOptions"
+                      placeholder="any, or comma-separated (e.g. nvidia_nim, open_router)"
+                    />
+                    <datalist id="exportProviderOptions"></datalist>
+                  </label>
+                  <label class="export-filter" id="exportModelFilterWrap">
+                    <span class="export-filter-label">Models</span>
+                    <input
+                      id="exportModelFilter"
+                      type="text"
+                      list="exportModelOptions"
+                      placeholder="any, or comma-separated"
+                    />
+                    <datalist id="exportModelOptions"></datalist>
+                  </label>
                 </div>
 
                 <fieldset class="export-fields">

@@ -77,9 +77,9 @@ def _render(
     if fmt == "json":
         return export_engine.render_json_array(rows)
     if fmt == "csv":
-        return export_engine.render_csv(rows, headers)
+        return export_engine.render_csv(rows, columns, headers)
     if fmt == "xlsx":
-        return export_engine.render_xlsx(rows, headers)
+        return export_engine.render_xlsx(rows, columns, headers)
     return export_engine.render_txt(
         rows,
         columns,

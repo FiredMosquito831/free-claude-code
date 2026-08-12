@@ -726,12 +726,20 @@ def websearch_detail_only_fields(field_ids: Iterable[str]) -> list[str]:
 # --------------------------------------------------------------------------
 
 
-def render_csv(rows: Iterable[dict[str, Any]], columns: list[str]) -> Iterator[bytes]:
-    """Yield UTF-8 BOM then one CSV line per row, projected to ``columns``."""
+def render_csv(
+    rows: Iterable[dict[str, Any]], columns: list[str], headers: list[str]
+) -> Iterator[bytes]:
+    """Yield UTF-8 BOM then one CSV line per row.
+
+    ``headers`` are the human-readable column labels (the first row);
+    ``columns`` are the row-dict keys each data cell is read from. They differ
+    for the detail export (labels vs SQL column names), and reading cells by
+    label produced empty data rows.
+    """
     yield b"\xef\xbb\xbf"
     buffer = io.StringIO()
     writer = csv.writer(buffer, lineterminator="\n")
-    writer.writerow(columns)
+    writer.writerow(headers)
     yield buffer.getvalue().encode("utf-8")
     for row in rows:
         buffer.seek(0)
@@ -777,12 +785,19 @@ def _json_default(value: Any) -> Any:
 
 
 def render_xlsx(
-    rows: Iterable[dict[str, Any]], columns: list[str], sheet_title: str = "Export"
+    rows: Iterable[dict[str, Any]],
+    columns: list[str],
+    headers: list[str],
+    sheet_title: str = "Export",
 ) -> Iterator[bytes]:
-    """Stream an XLSX workbook built in ``write_only`` mode via a spool file."""
+    """Stream an XLSX workbook built in ``write_only`` mode via a spool file.
+
+    ``headers`` are the human-readable labels (the first row); ``columns`` are
+    the row-dict keys each data cell is read from (see :func:`render_csv`).
+    """
     workbook = openpyxl.Workbook(write_only=True)
     sheet = workbook.create_sheet(title=sheet_title[:31])
-    sheet.append(columns)
+    sheet.append(headers)
     for row in rows:
         sheet.append([_xlsx_cell(row.get(column)) for column in columns])
     with tempfile.SpooledTemporaryFile(max_size=1024 * 1024, mode="w+b") as spool:
@@ -810,17 +825,29 @@ def render_txt(
     title: str,
     summary: str,
 ) -> Iterator[bytes]:
-    """Yield a readable report: title, summary, aligned columns, group subtotals."""
+    """Yield a readable report: title, summary, aligned columns, group subtotals.
+
+    Column widths are derived from the widest value seen (capped at 40 chars);
+    values are padded, never truncated, so long model ids and endpoints survive
+    the report.
+    """
     yield f"{title}\n".encode()
     yield f"{summary}\n\n".encode()
-    widths = [min(len(header), 40) for header in headers]
-    yield _txt_row(headers, widths).encode("utf-8")
-    yield _txt_rule(widths).encode("utf-8")
+    widths = [min(max(len(header), 1), 40) for header in headers]
+    pending: list[list[str]] = []
     for row in rows:
         values = [
             "" if row.get(column) is None else _serialize_cell(row.get(column))
             for column in columns
         ]
+        for index, value in enumerate(values):
+            length = len(value)
+            if index < len(widths) and length > widths[index]:
+                widths[index] = min(length, 40)
+        pending.append(values)
+    yield _txt_row(headers, widths).encode("utf-8")
+    yield _txt_rule(widths).encode("utf-8")
+    for values in pending:
         yield _txt_row(values, widths).encode("utf-8")
     yield b"\n"
 
