@@ -706,7 +706,11 @@ def test_claude_minimal_child_env_sets_only_proxy_variables() -> None:
 
     assert env["ANTHROPIC_BASE_URL"] == "http://127.0.0.1:9090"
     assert env["ANTHROPIC_AUTH_TOKEN"] == "proxy-token"
-    assert set(env) - set(base_env) == {"ANTHROPIC_AUTH_TOKEN"}
+    assert env["ENABLE_WEB_SERVER_TOOLS"] == "true"
+    assert set(env) - set(base_env) == {
+        "ANTHROPIC_AUTH_TOKEN",
+        "ENABLE_WEB_SERVER_TOOLS",
+    }
     assert env["PATH"] == "keep"
     assert env["ANTHROPIC_API_KEY"] == "official-key"
     assert env["CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY"] == "0"
@@ -847,16 +851,21 @@ def test_launch_claude_uses_minimal_env_and_passes_args(
     child_env = popen.call_args.kwargs["env"]
     assert child_env["ANTHROPIC_BASE_URL"] == "http://127.0.0.1:9191"
     assert child_env["ANTHROPIC_AUTH_TOKEN"] == "proxy-token"
+    assert child_env["ENABLE_WEB_SERVER_TOOLS"] == "true"
     assert child_env["KEEP_ME"] == "yes"
-    # Only the two proxy variables differ from the inherited environment;
-    # everything else — including anything already set by the caller's shell —
-    # is left exactly as it was.
+    # Only the two proxy variables plus the forced web-server-tools flag differ
+    # from the inherited environment; everything else — including anything
+    # already set by the caller's shell — is left exactly as it was.
     changed = {
         key
         for key in set(inherited_env) | set(child_env)
         if inherited_env.get(key) != child_env.get(key)
     }
-    assert changed == {"ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN"}
+    assert changed == {
+        "ANTHROPIC_BASE_URL",
+        "ANTHROPIC_AUTH_TOKEN",
+        "ENABLE_WEB_SERVER_TOOLS",
+    }
     register_pid.assert_called_once_with(12345)
     unregister_pid.assert_called_once_with(12345)
 

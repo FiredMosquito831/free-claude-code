@@ -51,11 +51,13 @@ def _split_discover_models_flag(argv: Sequence[str]) -> tuple[bool, list[str]]:
 
 
 def launch(argv: Sequence[str] | None = None) -> None:
-    """Launch Claude Code with only the proxy URL and auth token set.
+    """Launch Claude Code with the proxy URL and auth token set.
 
-    Accepts an FCC-only `--discover-models` flag (stripped before Claude
-    Code ever sees the argument list) that enables the FCC model catalog
-    fetch used by Claude Code's native model picker.
+    Also sets `ENABLE_WEB_SERVER_TOOLS=true` so web server tools are available
+    on this session (they require the proxy-side execution path). Accepts an
+    FCC-only `--discover-models` flag (stripped before Claude Code ever sees
+    the argument list) that enables the FCC model catalog fetch used by Claude
+    Code's native model picker.
     """
 
     args = list(sys.argv[1:] if argv is None else argv)

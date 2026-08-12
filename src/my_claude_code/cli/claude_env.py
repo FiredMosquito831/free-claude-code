@@ -46,9 +46,14 @@ def build_minimal_claude_proxy_env(
     Claude Code's `~/.claude/settings.json` takes precedence over environment
     variables, so `build_claude_proxy_env`'s aggressive stripping and extra
     flags are wasted effort for users who already configured that file. This
-    builder is for users who have not: it sets exactly `ANTHROPIC_BASE_URL`
-    and `ANTHROPIC_AUTH_TOKEN` on top of the inherited process environment,
-    removing nothing and adding nothing else.
+    builder is for users who have not: it sets exactly `ANTHROPIC_BASE_URL`,
+    `ANTHROPIC_AUTH_TOKEN` and `ENABLE_WEB_SERVER_TOOLS=true` on top of the
+    inherited process environment, removing nothing and adding nothing else.
+
+    `ENABLE_WEB_SERVER_TOOLS=true` is forced because this launcher exists to
+    work through the FCC proxy, and web server tools need the proxy-side
+    execution path. It is set unconditionally so the mcc-claude / fcc-claude
+    sessions always have web tools available.
 
     `enable_model_discovery` additionally sets
     `CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1`, which makes Claude Code
@@ -61,6 +66,7 @@ def build_minimal_claude_proxy_env(
     env = dict(base_env)
     env["ANTHROPIC_BASE_URL"] = proxy_root_url
     env["ANTHROPIC_AUTH_TOKEN"] = proxy_auth_token(auth_token)
+    env["ENABLE_WEB_SERVER_TOOLS"] = "true"
     if enable_model_discovery:
         env["CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY"] = "1"
     return env
