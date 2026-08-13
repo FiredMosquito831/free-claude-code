@@ -20,3 +20,6 @@ Microsoft/
 
 # Local working notes (practices, lessons, open items)
 WORKING-NOTES.md
+
+# Cached upstream Claude Code docs used by scripts/gen_claude_config_reference.py
+.claude-docs-cache/
