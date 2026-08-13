@@ -80,6 +80,70 @@
               <div id="versionDetails" class="version-details"></div>
               <pre id="versionUpgradeLog" class="requests-detail-body version-upgrade-log" hidden></pre>
             </section>
+            <section class="provider-strip" aria-label="Custom providers">
+              <div class="strip-header">
+                <h3>Custom providers</h3>
+                <button
+                  id="addCustomProviderButton"
+                  class="secondary-button"
+                  type="button"
+                >
+                  Add custom provider
+                </button>
+              </div>
+              <div id="customProviderGrid" class="provider-grid"></div>
+              <form id="customProviderForm" class="cp-form" hidden>
+                <div class="field">
+                  <label for="cpDisplayName"><span>Display name</span></label>
+                  <input id="cpDisplayName" type="text" autocomplete="off" placeholder="My Provider" />
+                </div>
+                <div class="field">
+                  <label for="cpBaseUrl"><span>Base URL</span></label>
+                  <input id="cpBaseUrl" type="text" autocomplete="off" placeholder="https://api.example.com/v1" />
+                </div>
+                <div class="field" id="cpApiKeyField">
+                  <label for="cpApiKey"><span>API key</span></label>
+                  <input id="cpApiKey" type="password" autocomplete="off" placeholder="Paste an API key" />
+                </div>
+                <div class="field">
+                  <label for="cpRotation"><span>Key rotation</span></label>
+                  <select id="cpRotation">
+                    <option value="failover">failover</option>
+                    <option value="single">single</option>
+                    <option value="round_robin">round_robin</option>
+                    <option value="least_used">least_used</option>
+                  </select>
+                </div>
+                <div class="field">
+                  <label for="cpProxy"><span>Proxy (optional)</span></label>
+                  <input id="cpProxy" type="text" autocomplete="off" placeholder="http://127.0.0.1:7890" />
+                </div>
+                <div class="cp-form-actions">
+                  <button id="cpSubmitButton" class="primary-button" type="submit">Add provider</button>
+                  <button id="cpCancelButton" class="secondary-button" type="button">Cancel</button>
+                </div>
+              </form>
+            </section>
+            <div
+              id="providersSections"
+              class="form-sections"
+              aria-label="Provider configuration"
+            ></div>
+          </section>
+
+          <section id="view-claude" class="admin-view" data-view="claude" hidden>
+            <div class="observability-heading">
+              <div>
+                <p class="eyebrow">Client configuration</p>
+                <h3>Claude Code</h3>
+                <p>
+                  Point the Claude Code CLI at this proxy. One Configure click
+                  writes the proxy URL and token into Claude Code&rsquo;s
+                  settings file so a stale <code>ANTHROPIC_BASE_URL</code> export
+                  can&rsquo;t silently override it.
+                </p>
+              </div>
+            </div>
             <section
               class="settings-section"
               id="claudeSettingsPanel"
@@ -130,55 +194,6 @@
                 precedence over the user file configured above.
               </p>
             </section>
-            <section class="provider-strip" aria-label="Custom providers">
-              <div class="strip-header">
-                <h3>Custom providers</h3>
-                <button
-                  id="addCustomProviderButton"
-                  class="secondary-button"
-                  type="button"
-                >
-                  Add custom provider
-                </button>
-              </div>
-              <div id="customProviderGrid" class="provider-grid"></div>
-              <form id="customProviderForm" class="cp-form" hidden>
-                <div class="field">
-                  <label for="cpDisplayName"><span>Display name</span></label>
-                  <input id="cpDisplayName" type="text" autocomplete="off" placeholder="My Provider" />
-                </div>
-                <div class="field">
-                  <label for="cpBaseUrl"><span>Base URL</span></label>
-                  <input id="cpBaseUrl" type="text" autocomplete="off" placeholder="https://api.example.com/v1" />
-                </div>
-                <div class="field" id="cpApiKeyField">
-                  <label for="cpApiKey"><span>API key</span></label>
-                  <input id="cpApiKey" type="password" autocomplete="off" placeholder="Paste an API key" />
-                </div>
-                <div class="field">
-                  <label for="cpRotation"><span>Key rotation</span></label>
-                  <select id="cpRotation">
-                    <option value="failover">failover</option>
-                    <option value="single">single</option>
-                    <option value="round_robin">round_robin</option>
-                    <option value="least_used">least_used</option>
-                  </select>
-                </div>
-                <div class="field">
-                  <label for="cpProxy"><span>Proxy (optional)</span></label>
-                  <input id="cpProxy" type="text" autocomplete="off" placeholder="http://127.0.0.1:7890" />
-                </div>
-                <div class="cp-form-actions">
-                  <button id="cpSubmitButton" class="primary-button" type="submit">Add provider</button>
-                  <button id="cpCancelButton" class="secondary-button" type="button">Cancel</button>
-                </div>
-              </form>
-            </section>
-            <div
-              id="providersSections"
-              class="form-sections"
-              aria-label="Provider configuration"
-            ></div>
           </section>
 
           <section id="view-model_config" class="admin-view" data-view="model_config" hidden>
@@ -876,8 +891,8 @@ OLLAMA_BASE_URL="http://127.0.0.1:11434"</code></pre>
                   button on this dashboard, not hand-editing JSON.
                 </p>
                 <p>
-                  <strong>1.</strong> Go to <strong>Providers &rarr; Claude Code settings
-                  file</strong>. The path field is pre-filled with
+                  <strong>1.</strong> Open the <strong>Claude Code</strong> page from
+                  the left nav. The path field is pre-filled with
                   <code>~/.claude/settings.json</code>, and the card lists every settings
                   file it can see on this machine &mdash; if this server runs under WSL
                   while Claude Code runs on Windows, that includes the Windows-side file

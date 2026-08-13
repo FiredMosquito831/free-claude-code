@@ -213,12 +213,11 @@ def build_state(
                 "Apply MCC's proxy settings to your Claude Code settings.json "
                 "so the CLI sends requests through FCC."
             ),
-            view="providers",
+            view="claude",
             optional=False,
             done=claude_settings_configured,
             instructions=(
-                "Open the Providers page from the left nav.",
-                "Scroll to the Claude Code settings file card.",
+                "Open the Claude Code page from the left nav.",
                 "Click Configure to write MCC's URL and token into settings.json.",
             ),
             target="#claudeSettingsPanel",

@@ -3857,12 +3857,17 @@ details.turn-pane > summary:focus-visible {
   color: var(--text);
 }
 
+/* The selected pill uses the theme's neutral raised surface with an accent
+   ring, not a full accent fill. A full fill recolors per theme (emerald on
+   midnight, crimson on velvet) and reads as a broken/uneven control; the ring
+   stays identical across themes while the accent still marks the selection. */
 .theme-option[aria-checked="true"] {
-  background: var(--accent);
-  color: #04130d;
-  border-color: var(--accent-border);
+  background: var(--panel-strong);
+  color: var(--accent);
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent-border);
 }
 
 :root[data-theme="high-contrast"] .theme-option[aria-checked="true"] {
-  color: #000000;
+  color: var(--accent);
 }
