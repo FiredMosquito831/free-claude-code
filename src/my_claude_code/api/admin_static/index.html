@@ -906,10 +906,11 @@ OLLAMA_BASE_URL="http://127.0.0.1:11434"</code></pre>
                 <img class="guide-shot" src="/admin/img/cc-model-picker.png"
                      alt="Claude Code model picker listing MCC models" loading="lazy">
                 <p>
-                  <code>fcc-claude</code> sets the proxy variables for just the current
+                  <code>mcc-claude</code> sets the proxy variables for just the current
                   shell session, without touching any file. Add <code>--discover-models</code>
                   to also enable the picker above (an extra request to the proxy on every
-                  launch, so it is opt-in): <code>fcc-claude --discover-models</code>.
+                  launch, so it is opt-in): <code>mcc-claude --discover-models</code>.
+                  The legacy <code>fcc-claude</code> alias behaves identically.
                 </p>
                 <details class="guide-note">
                   <summary>Editing the file by hand instead</summary>
@@ -978,8 +979,8 @@ OLLAMA_BASE_URL="http://127.0.0.1:11434"</code></pre>
                 </p>
 
                 <h3 id="guide-other">Point Codex or Pi here</h3>
-                <pre><code>fcc-codex
-fcc-pi</code></pre>
+                <pre><code>mcc-codex
+mcc-pi</code></pre>
                 <img class="guide-shot" src="/admin/img/codex-model-picker.png"
                      alt="Codex model picker with the generated MCC catalog" loading="lazy">
                 <p>
@@ -1184,7 +1185,8 @@ TAVILY_CHUNKS_PER_SOURCE=3</code></pre>
                   <strong>Store prompts and replies</strong> is the setting that
                   decides whether content search works at all, and
                   <strong>Compress stored text</strong> applies to new rows —
-                  run <code>fcc-compact-log</code> to convert existing history.
+                  run <code>mcc-compact-log</code> (legacy alias
+                  <code>fcc-compact-log</code>) to convert existing history.
                 </p>
                 <h4>Blank means default</h4>
                 <p>
@@ -1250,7 +1252,7 @@ EXA_API_KEY_ROTATION=failover</code></pre>
 
                 <h3 id="guide-trouble">Troubleshooting</h3>
                 <ul>
-                  <li><strong><code>fcc-server</code> not found after installing</strong>
+                  <li><strong><code>mcc-server</code> not found after installing</strong>
                     &mdash; close and reopen your terminal; the installer extends
                     <code>PATH</code> and an open shell will not see it.</li>
                   <li><strong>Claude Code still talks to Anthropic</strong> &mdash; the

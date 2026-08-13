@@ -32,7 +32,7 @@ Run your coding agents with free, paid, or local models. Choose and validate pro
 
 <div align="center">
   <img src="assets/cc-model-picker.png" alt="Claude Code model picker showing gateway models" width="700">
-  <p><em>Claude Code native <code>/model</code> picker with MCC gateway models — requires <code>fcc-claude --discover-models</code> (or <code>fcc-claude-old</code>).</em></p>
+  <p><em>Claude Code native <code>/model</code> picker with MCC gateway models — requires <code>mcc-claude --discover-models</code> (or <code>mcc-claude-old</code>).</em></p>
 </div>
 
 <div align="center">
@@ -46,7 +46,7 @@ Run your coding agents with free, paid, or local models. Choose and validate pro
 
 | Area | What you get |
 | --- | --- |
-| **Coding agents** | Launch Claude Code with `fcc-claude`, Codex with `fcc-codex`, or Pi with `fcc-pi`; Codex and Pi's native model pickers always list the MCC catalog, Claude Code's needs `fcc-claude --discover-models` (or `fcc-claude-old`). |
+| **Coding agents** | Launch Claude Code with `mcc-claude`, Codex with `mcc-codex`, or Pi with `mcc-pi`; Codex and Pi's native model pickers always list the MCC catalog, Claude Code's needs `mcc-claude --discover-models` (or `mcc-claude-old`). Legacy `fcc-claude`, `fcc-codex`, and `fcc-pi` aliases still work. |
 | **Model providers** | 27 cloud and local providers, including Kimi For Coding and an experimental ChatGPT OAuth provider. Switch and validate providers from the Admin UI. |
 | **Model-tier routing** | Route Fable, Opus, Sonnet, Haiku, and fallback traffic to different models, each with an ordered fallback chain. |
 | **Vision adapter** | Image requests are diverted to a model that can see when the tier's own model cannot, with its own fallback chain. |
@@ -114,14 +114,14 @@ mcc-server --version
 
 1. Installs `uv` (the Python tool runner) if it's missing or too old.
 2. Looks up the **latest** release, downloads its wheel, and **verifies the SHA-256 that GitHub publishes for that asset** — a mismatch aborts rather than running unverified code.
-3. Installs My Claude Code and puts `mcc-server`, `fcc-claude`, `fcc-claude-old`, `fcc-codex`, and `fcc-pi` on your `PATH`.
+3. Installs My Claude Code and puts `mcc-server`, `mcc-claude`, `mcc-claude-old`, `mcc-codex`, and `mcc-pi` on your `PATH` (the legacy `fcc-*` spellings remain as aliases).
 
-That's all it does. **It does not install Claude Code, Codex, or Pi** — those are separate third-party tools, and My Claude Code doesn't need any of them to run. Install whichever you actually use, yourself. The `fcc-*` launchers just point an agent you already have at the proxy.
+That's all it does. **It does not install Claude Code, Codex, or Pi** — those are separate third-party tools, and My Claude Code doesn't need any of them to run. Install whichever you actually use, yourself. The `mcc-*` launchers just point an agent you already have at the proxy.
 
 The command always installs the **newest** release, so re-running it is how you update from the command line. To install a specific release instead:
 
 ```bash
-sh install.sh --version 4.16.0      # PowerShell: -Version 4.16.0
+sh install.sh --version 5.5.1      # PowerShell: -Version 5.5.1
 ```
 
 Want to see what it would do without changing anything? Add `--dry-run` (PowerShell: `-DryRun`).
@@ -169,38 +169,38 @@ Use the port shown in your terminal if it differs from `8082`.
 Claude Code:
 
 ```bash
-fcc-claude
+mcc-claude
 ```
 
-`fcc-claude` sets only `ANTHROPIC_BASE_URL` and `ANTHROPIC_AUTH_TOKEN` on top of
+`mcc-claude` sets only `ANTHROPIC_BASE_URL` and `ANTHROPIC_AUTH_TOKEN` on top of
 your inherited shell environment — nothing else is changed or stripped. This
 means its native model picker does **not** list the MCC catalog by default,
 since that requires an extra request to the proxy on every launch; pass
-`fcc-claude --discover-models` to opt in without adopting the rest of the
+`mcc-claude --discover-models` to opt in without adopting the rest of the
 legacy behavior. If you want the previous behavior (also enables gateway
 model discovery, sets the auto-compact window, disables telemetry/autoupdate,
-and clears any inherited `ANTHROPIC_*` variables), use `fcc-claude-old`
+and clears any inherited `ANTHROPIC_*` variables), use `mcc-claude-old`
 instead.
 
 Codex:
 
 ```bash
-fcc-codex
+mcc-codex
 ```
 
 Pi:
 
 ```bash
-fcc-pi
+mcc-pi
 ```
 
-All three launchers use the current Admin UI settings. Codex and Pi's native model pickers always list the models MCC exposes; for Claude Code, add `--discover-models` to `fcc-claude` (or use `fcc-claude-old`) to populate its picker the same way — otherwise pick a model tier by name. Normal CLI arguments still work, for example:
+All three launchers use the current Admin UI settings. Codex and Pi's native model pickers always list the models MCC exposes; for Claude Code, add `--discover-models` to `mcc-claude` (or use `mcc-claude-old`) to populate its picker the same way — otherwise pick a model tier by name. Normal CLI arguments still work, for example:
 
 ```bash
-fcc-codex exec "hello"
+mcc-codex exec "hello"
 ```
 
-`fcc-pi` registers MCC only for that Pi process; your existing Pi settings, sessions, credentials, and extensions remain unchanged.
+`mcc-pi` registers MCC only for that Pi process; your existing Pi settings, sessions, credentials, and extensions remain unchanged. The legacy `fcc-claude`, `fcc-codex`, and `fcc-pi` aliases behave identically.
 
 <a id="install-troubleshooting"></a>
 
@@ -210,7 +210,7 @@ fcc-codex exec "hello"
 | --- | --- |
 | `mcc-server: command not found` right after installing | Your shell's `PATH` is stale. **Close and reopen the terminal.** If it persists, check that `~/.local/bin` (Windows: `%USERPROFILE%\.local\bin`) is on `PATH`. |
 | The install stopped partway with an error about `claude`, `codex`, or `pi` | An old installer tried to install those for you and aborted when one failed. The current installer doesn't touch them at all — just re-run the command above. |
-| I want Claude Code / Codex / Pi installed too | The installer no longer installs them. Install each from its own official installer; then `fcc-claude`, `fcc-codex`, and `fcc-pi` will launch them through the proxy. |
+| I want Claude Code / Codex / Pi installed too | The installer no longer installs them. Install each from its own official installer; then `mcc-claude`, `mcc-codex`, and `mcc-pi` will launch them through the proxy. |
 | `MCC release wheel checksum mismatch; refusing to install` | The download was corrupted or incomplete. Re-run the command. This check is deliberate: it will not install a wheel it can't verify. |
 | PowerShell refuses to run the script | `Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass`, then re-run. This only affects the current window. |
 | Admin UI won't open, or settings don't seem to apply | You probably installed in **both** PowerShell and WSL and are editing one config while the server reads the other. Run `mcc-server --version` in each and pick one environment. |
@@ -242,7 +242,7 @@ Notes:
 
 - Keep any other keys you already have in the file — just merge the `env` entries.
 - `ANTHROPIC_AUTH_TOKEN` sends the key as a bearer token (what MCC expects). The settings file wins over shell exports.
-- This gives you a working proxy connection, but the native `/model` picker stays empty until model discovery is on — add `"CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY": "1"` to the same `env` block, or launch with `fcc-claude --discover-models` instead of editing the file.
+- This gives you a working proxy connection, but the native `/model` picker stays empty until model discovery is on — add `"CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY": "1"` to the same `env` block, or launch with `mcc-claude --discover-models` instead of editing the file.
 - A `.claude/settings.json` or `.claude/settings.local.json` **inside a project directory** takes precedence over this user-level file. A user-level `settings.local.json` is *not* read — that scope is repository-root only.
 - Restart Claude Code after editing, then verify with `/status` — it should show `Anthropic base URL: http://127.0.0.1:8082` and your auth token.
 - Official reference: [Claude Code LLM gateway docs](https://code.claude.com/docs/en/llm-gateway-connect) · [settings.json reference](https://code.claude.com/docs/en/settings).
@@ -666,9 +666,9 @@ The Admin UI keeps the two levels explicit: top cards and the main trend chart r
 
 ```bash
 WEBSEARCH_LOG_ENABLED=true
-WEBSEARCH_LOG_MAX_ROWS=50000   # retention cap; oldest rows pruned
+WEBSEARCH_LOG_MAX_ROWS=50000    # retention cap; oldest rows pruned
 WEBSEARCH_LOG_CAPTURE_CONTENT=true      # false keeps lengths + SHA-256 only
-WEBSEARCH_LOG_CONTENT_MAX_CHARS=50000   # cap per input/output JSON payload
+WEBSEARCH_LOG_CONTENT_MAX_CHARS=2000000 # cap per input/output JSON payload
 ```
 
 Oversized payloads are stored as valid JSON truncation envelopes containing the original length, SHA-256, and a bounded preview. API keys are never copied into configuration snapshots, secret-looking object fields are redacted, and proxy/userinfo credentials are removed. Search content still commonly includes private queries, result URLs, and page text. `WEBSEARCH_LOG_CAPTURE_CONTENT=false` withholds the captured input/output payloads **and the query text itself**, keeping only lengths and SHA-256 hashes, so the switch covers everything a search reveals. Set `WEBSEARCH_LOG_ENABLED=false` to record nothing at all.
@@ -724,7 +724,7 @@ REQUEST_LOG_COMPRESS_BODIES=true   # false stores text inline, as before
 
 The dictionary is trained automatically once the log has seen a few hundred requests, and every blob records which dictionary compressed it, so retraining can never make an older row unreadable. Prompts are stored once and shared: the prompt is 98% of the bytes and 35.3% of those are exact repeats, so it lives in its own content-addressed blob apart from the reply, which differs every time. On a real log that removed a further **29.9%** after compression.
 
-Compression applies to **newly written** requests, so a database carried across the upgrade keeps paying the old price for its existing history. **`fcc-compact-log`** rewrites it in place — stop the server first, since the final vacuum needs the file to itself. Measured on a real 1.7 GB log: **1.73 GB → 0.29 GB in 4.9 minutes**, with all 50,034 bodies verified byte-identical against a backup afterwards. Safe to interrupt and resume.
+Compression applies to **newly written** requests, so a database carried across the upgrade keeps paying the old price for its existing history. **`mcc-compact-log`** (legacy alias `fcc-compact-log`) rewrites it in place — stop the server first, since the final vacuum needs the file to itself. Measured on a real 1.7 GB log: **1.73 GB → 0.29 GB in 4.9 minutes**, with all 50,034 bodies verified byte-identical against a backup afterwards. Safe to interrupt and resume.
 
 Setting `REQUEST_LOG_CAPTURE_BODIES=false` remains the extreme option — metadata only, roughly 77× more rows per gigabyte, at the cost of the request/response drill-down.
 
@@ -812,7 +812,7 @@ MCC can talk directly to `chatgpt.com/backend-api/codex/responses` (OpenAI Respo
 
 1. **Admin UI → Log in with device code** — the default and recommended path; it works across Windows/WSL, SSH, containers, and other remote environments without a localhost callback.
 2. **Admin UI → Browser login (same device)** — browser PKCE for cases where the browser and MCC definitely share the same localhost. Do not use it when MCC runs in WSL and the browser runs on Windows.
-3. `fcc-chatgpt-oauth-login` — browser PKCE locally, with immediate device-code fallback under WSL/remote sessions or when the callback cannot start. `--device` forces device login; `--browser` explicitly confirms a same-localhost browser.
+3. `mcc-chatgpt-oauth-login` — browser PKCE locally, with immediate device-code fallback under WSL/remote sessions or when the callback cannot start. `--device` forces device login; `--browser` explicitly confirms a same-localhost browser.
 4. **Import Codex CLI Tokens** — after `codex login`, copy the complete renewable credential bundle into MCC without modifying `~/.codex/auth.json`.
 
 MCC stores its renewable credentials separately at `~/.fcc/auth/chatgpt-oauth.json`. The Admin API and `.env` contain only a non-secret managed-credential reference. A raw `CHATGPT_OAUTH_ACCESS_TOKEN` remains supported as an advanced override, but it cannot be refreshed.
@@ -831,7 +831,7 @@ Moonshot's coding-plan endpoint, separate from the standard Kimi platform: OpenA
 
 ## Connect Your Client
 
-For terminal use, start `mcc-server`, then run `fcc-claude`, `fcc-codex`, or `fcc-pi`. Use the guides below for editor integrations.
+For terminal use, start `mcc-server`, then run `mcc-claude`, `mcc-codex`, or `mcc-pi` (legacy `fcc-*` aliases work too). Use the guides below for editor integrations.
 
 <details>
 <summary><strong>Claude Code in VS Code</strong></summary>

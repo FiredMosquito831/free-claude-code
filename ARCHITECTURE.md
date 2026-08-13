@@ -1,6 +1,6 @@
 # Architecture
 
-This document is a maintainer-oriented map of Free Claude Code. It explains the
+This document is a maintainer-oriented map of My Claude Code (MCC). It explains the
 runtime boundaries, request flows, provider abstraction, configuration model,
 optional messaging bridge, and verification strategy.
 
@@ -10,7 +10,7 @@ and how contributors should extend it.
 
 ## System Overview
 
-Free Claude Code is a local proxy for agent clients. It accepts Anthropic
+My Claude Code is a local proxy for agent clients. It accepts Anthropic
 Messages traffic from Claude Code and Pi clients and OpenAI Responses traffic
 from Codex clients, routes the request to a configured upstream provider, and
 preserves the wire protocol expected by the caller.
@@ -208,8 +208,9 @@ new places to add unrelated behavior:
 
 Console scripts are registered in [pyproject.toml](pyproject.toml):
 
-- `fcc-server` and `free-claude-code` call `my_claude_code.cli.entrypoints:serve`.
-- `fcc-init` calls `my_claude_code.cli.entrypoints:init`.
+- `mcc-server` (legacy aliases `fcc-server`, `free-claude-code`) calls
+  `my_claude_code.cli.entrypoints:serve`.
+- `mcc-init` (legacy alias `fcc-init`) calls `my_claude_code.cli.entrypoints:init`.
 - `fcc-claude` calls `my_claude_code.cli.launchers.claude:launch`.
 - `fcc-claude-old` calls `my_claude_code.cli.launchers.claude:launch_legacy`.
 - `fcc-codex` calls `my_claude_code.cli.launchers.codex:launch`.
