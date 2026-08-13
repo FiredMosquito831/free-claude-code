@@ -225,7 +225,9 @@ Two ways to point Claude Code at your local MCC server (`http://127.0.0.1:8082`,
 
 ### Claude Code CLI
 
-The easiest route is the **Admin UI → Providers → Claude Code settings file** card. It lists every user-level `settings.json` it can find on this machine — under WSL that is two different files, your Linux home *and* your Windows home — shows whether each already points here, and configures or unsets the one you pick. It backs the file up first and refuses to touch one it cannot parse. It also warns when an enterprise `managed-settings.json` sets `ANTHROPIC_*`, because that outranks the file you are editing.
+The easiest route is the **Admin UI → Configure Claude Code** page. It lists every user-level `settings.json` it can find on this machine — under WSL that is two different files, your Linux home *and* your Windows home — shows whether each already points here, and configures or unsets the one you pick. It backs the file up first and refuses to touch one it cannot parse. It also warns when an enterprise `managed-settings.json` sets `ANTHROPIC_*`, because that outranks the file you are editing.
+
+Prefer a per-session setup that leaves normal Claude Code untouched? Run `mcc-claude` to point only the current shell session at My Claude Code, or `mcc-claude --discover-models` to also list the gateway models in the `/model` picker. Normal `claude` keeps using your standard Anthropic account.
 
 To do it by hand instead, edit `~/.claude/settings.json` (`%USERPROFILE%\.claude\settings.json` on Windows) and **add the `env` block — or replace these values if they already exist**:
 
