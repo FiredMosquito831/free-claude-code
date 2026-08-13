@@ -5581,7 +5581,7 @@ function registerChartRedraw(canvasId, fn) {
   chartRedrawers.set(canvasId, fn);
 }
 function applyTheme(name) {
-  if (name !== "paper" && name !== "high-contrast") name = "midnight";
+  if (name !== "paper" && name !== "high-contrast" && name !== "velvet") name = "midnight";
   if (name === "midnight") delete document.documentElement.dataset.theme;
   else document.documentElement.dataset.theme = name;
   try { localStorage.setItem(THEME_KEY, name); } catch (_) {}

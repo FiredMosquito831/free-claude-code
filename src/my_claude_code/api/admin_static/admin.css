@@ -3759,6 +3759,67 @@ details.turn-pane > summary:focus-visible {
   --dropdown-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%23ffffff' stroke-width='2.5'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' d='M19.5 8.25l-7.5 7.5-7.5-7.5'/%3E%3C/svg%3E");
 }
 
+:root[data-theme="velvet"] {
+  color-scheme: dark;
+
+  /* Deep navy base, lit from the top like silk catching light: the page is a
+     steep navy (--bg), panels lift a step, cards lift another, and hover
+     lifts one more. Velvet is a pile of short, dense fibres, so surfaces sit
+     close together rather than floating far apart. */
+  --bg: #0a1220;
+  --panel: #0d1526;
+  --panel-strong: #131d30;
+  --card: #101a2c;
+  --card-hover: #162238;
+  --input: #08101f;
+  --input-focus: #0c1424;
+  --text: #e8eaf2;
+  --text-strong: #ffffff;
+  --muted: #a3adc2;
+  --line: rgba(255, 255, 255, 0.07);
+  --line-strong: rgba(255, 255, 255, 0.14);
+
+  /* Velvet red: a crimson that keeps its depth at small sizes, so accent text
+     still clears 4.5:1 against the navy surfaces it sits on. */
+  --accent: #e6435e;
+  --accent-dark: #d92b4c;
+  --accent-muted: rgba(230, 67, 94, 0.14);
+  --accent-border: rgba(230, 67, 94, 0.42);
+
+  /* Status colors -- success and warning stay outside the red family so the
+     crimson accent is unmistakably the brand hue and never collides with
+     "something is failing". */
+  --ok: #34d399;
+  --ok-bg: rgba(52, 211, 153, 0.12);
+  --ok-border: rgba(52, 211, 153, 0.32);
+
+  --warn: #f5b041;
+  --warn-bg: rgba(245, 176, 65, 0.12);
+  --warn-border: rgba(245, 176, 65, 0.32);
+
+  --error: #ff6b6b;
+  --error-bg: rgba(255, 107, 107, 0.12);
+  --error-border: rgba(255, 107, 107, 0.32);
+
+  --neutral: #94a3b8;
+  --neutral-bg: rgba(148, 163, 184, 0.12);
+  --neutral-border: rgba(148, 163, 184, 0.32);
+
+  --info: #6ea8ff;
+
+  --reasoning: var(--info);
+  --reasoning-bg: rgba(110, 168, 255, 0.1);
+  --reasoning-border: rgba(110, 168, 255, 0.32);
+
+  /* The silk-and-velvet read comes from a faint crimson bloom in the shadows
+     instead of a flat black drop. */
+  --shadow-sm: 0 2px 8px rgba(4, 8, 18, 0.42);
+  --shadow: 0 12px 34px rgba(4, 8, 18, 0.62);
+  --glow-accent: 0 0 12px rgba(230, 67, 94, 0.22);
+
+  --dropdown-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%23a3adc2' stroke-width='2.5'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' d='M19.5 8.25l-7.5 7.5-7.5-7.5'/%3E%3C/svg%3E");
+}
+
 :root[data-theme="high-contrast"] button,
 :root[data-theme="high-contrast"] input,
 :root[data-theme="high-contrast"] select,

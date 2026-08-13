@@ -1641,6 +1641,94 @@ def test_admin_static_styles_every_class_the_script_emits():
     assert unstyled == [], f"emitted by admin.js with no CSS rule: {unstyled}"
 
 
+def test_admin_static_velvet_theme_defines_every_semantic_token():
+    """The velvet theme is a full theme, not a partial override.
+
+    It only swaps the same semantic tokens the other themes swap, so every
+    surface the console draws picks it up without a single bespoke selector.
+    If a new token is added to the midnight block later and not to velvet, the
+    missing ones are listed here -- the check is the same shape as the other
+    themes, which is the point.
+    """
+    static = Path("src/my_claude_code/api/admin_static")
+    styles = (static / "admin.css").read_text(encoding="utf-8")
+
+    velvet = re.search(
+        r":root\[data-theme=\"velvet\"\]\s*\{(.*?)\n\}",
+        styles,
+        re.DOTALL,
+    )
+    assert velvet is not None, "velvet theme block missing from admin.css"
+
+    # The baseline is the token set the existing themes override, not every
+    # variable in :root: structural tokens (fonts, radii, transitions) are
+    # defined once in :root and intentionally inherited by every theme, so
+    # paper and high-contrast do not repeat them either. Velvet must cover the
+    # same semantic tokens those themes cover, or a surface silently falls
+    # back to the midnight default.
+    paper = re.search(
+        r":root\[data-theme=\"paper\"\]\s*\{(.*?)\n\}",
+        styles,
+        re.DOTALL,
+    )
+    assert paper is not None, "paper theme block missing from admin.css"
+    baseline = set(re.findall(r"(--[a-z-]+):", paper.group(1)))
+    velvet_tokens = set(re.findall(r"(--[a-z-]+):", velvet.group(1)))
+    missing = sorted(baseline - velvet_tokens)
+    assert missing == [], f"velvet theme omits tokens: {missing}"
+
+    # A few meaningful values: the theme has to be genuinely navy + velvet red,
+    # and text on the navy base has to clear WCAG AA (>= 4.5:1).
+    def var_value(style_text: str, name: str) -> str:
+        match = re.search(rf"{name}\s*:\s*([^;]+);", style_text)
+        assert match is not None, f"{name} missing from velvet theme"
+        return match.group(1).strip()
+
+    bg = var_value(velvet.group(1), "--bg")
+    accent = var_value(velvet.group(1), "--accent")
+    assert bg.startswith("#") and accent.startswith("#")
+
+    text = var_value(velvet.group(1), "--text")
+
+    def relative_luminance(hex_color: str) -> float:
+        def channel(value: float) -> float:
+            value /= 255.0
+            return (
+                value / 12.92 if value <= 0.04045 else ((value + 0.055) / 1.055) ** 2.4
+            )
+
+        hex_color = hex_color.lstrip("#")
+        r, g, b = (int(hex_color[i : i + 2], 16) for i in (0, 2, 4))
+        return 0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b)
+
+    def contrast(fg: str, bg_color: str) -> float:
+        lighter = max(relative_luminance(fg), relative_luminance(bg_color))
+        darker = min(relative_luminance(fg), relative_luminance(bg_color))
+        return (lighter + 0.05) / (darker + 0.05)
+
+    assert contrast(text, bg) >= 4.5
+    # Red on navy must clear AA for accent text (eyebrows, active nav, links).
+    assert contrast(accent, bg) >= 4.5
+
+
+def test_admin_static_theme_switcher_includes_velvet():
+    """The theme switcher offers a Velvet option with the matching value."""
+    html = Path("src/my_claude_code/api/admin_static/index.html").read_text(
+        encoding="utf-8"
+    )
+    script = Path("src/my_claude_code/api/admin_static/admin.js").read_text(
+        encoding="utf-8"
+    )
+
+    assert (
+        '<button type="button" class="theme-option" data-theme-value="velvet" '
+        'aria-checked="false">Velvet</button>' in html
+    )
+    # applyTheme() must accept "velvet" instead of treating it as an unknown
+    # theme that falls back to midnight.
+    assert 'name !== "paper" && name !== "high-contrast" && name !== "velvet"' in script
+
+
 def test_credential_add_accepts_a_pasted_pool_and_skips_duplicates(
     monkeypatch, tmp_path
 ):
