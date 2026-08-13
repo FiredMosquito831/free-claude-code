@@ -37,11 +37,9 @@ from my_claude_code.config.claude_config_editor import (
     plan_changes,
     read_values,
 )
+from my_claude_code.config.claude_discovery import discover_settings_files
 from my_claude_code.config.claude_settings import ClaudeSettingsError
-from my_claude_code.config.paths import (
-    claude_settings_candidates,
-    claude_settings_path,
-)
+from my_claude_code.config.paths import claude_settings_path
 
 from .admin_routes import require_loopback_admin
 
@@ -162,7 +160,7 @@ async def get_claude_config_document(
         "error": document.error,
         "is_default": target == claude_settings_path(),
         "default_path": str(claude_settings_path()),
-        "candidates": [str(candidate) for candidate in claude_settings_candidates()],
+        "candidates": [entry.path for entry in discover_settings_files()],
         "values": values,
         "managed_overrides": managed_overrides(sorted(values)),
     }

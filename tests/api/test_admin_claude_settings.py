@@ -5,6 +5,7 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
+from my_claude_code.config import claude_discovery
 from my_claude_code.config.proxy_auth import proxy_auth_token
 from my_claude_code.config.server_urls import local_proxy_root_url
 from my_claude_code.config.settings import Settings
@@ -19,6 +20,19 @@ def _set_home(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("USERPROFILE", str(tmp_path))
     monkeypatch.chdir(tmp_path)
+
+
+def _only_native_world(monkeypatch) -> None:
+    """Confine discovery to the fake home these tests build.
+
+    Discovery deliberately reaches across the WSL boundary, so on a developer
+    machine with WSL installed it finds the real settings.json there and the
+    assertions become machine-dependent. The cross-boundary probes have their
+    own tests in tests/config/test_claude_discovery.py.
+    """
+
+    monkeypatch.setattr(claude_discovery, "wsl_distributions", lambda: ())
+    monkeypatch.setattr(claude_discovery, "windows_claude_settings_path", lambda: None)
 
 
 def test_get_claude_settings_returns_default_path_and_status(monkeypatch, tmp_path):
@@ -36,27 +50,44 @@ def test_get_claude_settings_returns_default_path_and_status(monkeypatch, tmp_pa
     assert body["status"]["exists"] is False
 
 
-def test_get_claude_settings_returns_targets_with_default_marked(monkeypatch, tmp_path):
+def test_targets_lists_only_settings_files_that_exist(monkeypatch, tmp_path):
+    """A path that could exist is noise on a list describing what is real.
+
+    Targets used to always include the default path whether or not anything was
+    there, which made "not found" a row you had to read past on every machine.
+    """
+
     _set_home(monkeypatch, tmp_path)
+    _only_native_world(monkeypatch)
     app = create_test_app()
 
-    default_path = str(tmp_path / ".claude" / "settings.json")
+    body = _local_client(app).get("/admin/api/claude-settings").json()
+    assert body["targets"] == []
+    assert body["default_path"] == str(tmp_path / ".claude" / "settings.json")
 
-    response = _local_client(app).get("/admin/api/claude-settings")
-    assert response.status_code == 200
-    body = response.json()
+
+def test_a_discovered_target_says_which_world_it_came_from(monkeypatch, tmp_path):
+    """The origin is what makes the list a choice rather than a list of paths."""
+
+    _set_home(monkeypatch, tmp_path)
+    _only_native_world(monkeypatch)
+    settings_path = tmp_path / ".claude" / "settings.json"
+    settings_path.parent.mkdir(parents=True, exist_ok=True)
+    settings_path.write_text(json.dumps({"model": "sonnet"}), encoding="utf-8")
+
+    app = create_test_app()
+    body = _local_client(app).get("/admin/api/claude-settings").json()
 
     targets = body["targets"]
-    assert len(targets) >= 1
-    default_targets = [target for target in targets if target["path"] == default_path]
-    assert len(default_targets) == 1
-    default_target = default_targets[0]
-    assert default_target["is_default"] is True
-    assert default_target["exists"] is False
-    assert default_target["state"] == "unset"
-
-    other_targets = [target for target in targets if target["path"] != default_path]
-    assert all(target["is_default"] is False for target in other_targets)
+    assert len(targets) == 1
+    target = targets[0]
+    assert target["path"] == str(settings_path)
+    assert target["is_default"] is True
+    assert target["exists"] is True
+    assert target["state"] == "unset"
+    assert target["origin"] in {"windows", "wsl", "linux", "macos"}
+    assert target["origin_label"]
+    assert body["native_origin"] == target["origin"]
 
 
 def test_get_claude_settings_honours_caller_supplied_path(monkeypatch, tmp_path):

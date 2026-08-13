@@ -4663,7 +4663,12 @@ async function loadClaudeSettings(path) {
   try {
     state.claudeSettings = await api(`/admin/api/claude-settings${params}`);
     if (!input.value) {
-      input.value = state.claudeSettings.default_path;
+      // Prefer a discovered file already pointing here, then any discovered
+      // file, and only then the default path -- which may not exist at all.
+      const targets = state.claudeSettings.targets || [];
+      const configured = targets.find((target) => target.state === "configured");
+      input.value =
+        configured?.path || targets[0]?.path || state.claudeSettings.default_path;
     }
   } catch (error) {
     state.claudeSettings = { error: error.message };
@@ -4671,58 +4676,103 @@ async function loadClaudeSettings(path) {
   renderClaudeSettings();
 }
 
+// The list of settings files this machine actually has, and which world each
+// belongs to. On a machine with WSL there are two Claude Code installations and
+// two settings.json files; "my setting did not apply" is nearly always the
+// other one, so the origin is shown as prominently as the path.
+const CC_STATE_LABELS = {
+  configured: "Configured for My Claude Code",
+  mismatch: "Points somewhere else",
+  unset: "Not configured",
+  unreadable: "Unreadable",
+};
+
+function claudeSelectedTarget(info) {
+  const targets = info?.targets || [];
+  const selected = claudeSettingsPathInputValue();
+  return targets.find((target) => target.path === selected) || null;
+}
+
 function renderClaudeSettingsTargets(info) {
   const targetsEl = byId("claudeSettingsTargets");
   if (!targetsEl) return;
 
-  targetsEl.innerHTML = "";
+  targetsEl.replaceChildren();
   const targets = info?.targets || [];
-  if (targets.length === 0) return;
+  const selectedPath = claudeSettingsPathInputValue();
 
-  if (targets.length === 1) {
-    const target = targets[0];
-    const line = document.createElement("p");
-    line.className = "claude-settings-targets-single";
-    line.textContent = target.path;
-    const badge = document.createElement("span");
-    badge.className = `claude-settings-badge ${target.state === "configured" ? "ok" : ""}`.trim();
-    badge.textContent = target.exists
-      ? target.state === "configured"
-        ? "configured"
-        : "exists"
-      : "not found";
-    line.appendChild(badge);
-    targetsEl.appendChild(line);
+  if (!targets.length) {
+    const empty = document.createElement("p");
+    empty.className = "claude-settings-empty";
+    empty.textContent =
+      "No Claude Code settings.json found on this machine. Configure will " +
+      "create one at the default location.";
+    targetsEl.append(empty);
+
+    const path = document.createElement("p");
+    path.className = "claude-target-path";
+    path.textContent = info?.default_path || "";
+    targetsEl.append(path);
     return;
   }
 
   const list = document.createElement("ul");
-  list.className = "claude-settings-targets-list";
-  targets.forEach((target) => {
-    const item = document.createElement("li");
+  list.className = "claude-targets";
 
-    const select = document.createElement("button");
-    select.type = "button";
-    select.className = "ghost-button";
-    select.textContent = target.is_default ? `${target.path} (default)` : target.path;
-    select.addEventListener("click", () => {
+  targets.forEach((target, index) => {
+    const item = document.createElement("li");
+    item.className = "claude-target";
+
+    const inputId = `claudeTarget-${index}`;
+    const radio = document.createElement("input");
+    radio.type = "radio";
+    radio.name = "claudeSettingsTarget";
+    radio.id = inputId;
+    radio.value = target.path;
+    radio.checked = target.path === selectedPath;
+    radio.addEventListener("change", () => {
       byId("claudeSettingsPath").value = target.path;
       loadClaudeSettings(target.path);
+      // Selecting a file here is also what the editor below works on, so the
+      // whole page follows one selection rather than two that can disagree.
+      loadClaudeConfig(target.path);
     });
-    item.appendChild(select);
 
-    const badge = document.createElement("span");
-    badge.className = `claude-settings-badge ${target.state === "configured" ? "ok" : ""}`.trim();
-    badge.textContent = target.exists
-      ? target.state === "configured"
-        ? "configured"
-        : "exists"
-      : "not found";
-    item.appendChild(badge);
+    const label = document.createElement("label");
+    label.className = "claude-target-body";
+    label.htmlFor = inputId;
 
-    list.appendChild(item);
+    const head = document.createElement("span");
+    head.className = "claude-target-head";
+
+    const origin = document.createElement("span");
+    origin.className = `claude-origin claude-origin-${target.origin}`;
+    origin.textContent = target.origin_label;
+    head.append(origin);
+
+    if (target.detail && target.detail !== "this machine") {
+      const detail = document.createElement("span");
+      detail.className = "claude-target-detail";
+      detail.textContent = target.detail;
+      head.append(detail);
+    }
+
+    const state = document.createElement("span");
+    state.className = `claude-state claude-state-${target.state}`;
+    state.textContent = CC_STATE_LABELS[target.state] || target.state;
+    head.append(state);
+
+    const path = document.createElement("span");
+    path.className = "claude-target-path";
+    path.textContent = target.path;
+
+    label.append(head, path);
+    item.append(radio, label);
+    if (target.path === selectedPath) item.classList.add("is-selected");
+    list.append(item);
   });
-  targetsEl.appendChild(list);
+
+  targetsEl.append(list);
 }
 
 function renderClaudeSettingsOverrides(status) {
@@ -4749,8 +4799,16 @@ function renderClaudeSettings() {
   if (!statusEl || !applyButton || !removeButton) return;
 
   const info = state.claudeSettings;
+  const state_ = info?.status?.state;
+  // Remove takes the two proxy keys back out. Offering it on a file that does
+  // not have them is a button that can only do nothing, so it is hidden until
+  // there is something to remove.
+  const hasProxyKeys = state_ === "configured" || state_ === "mismatch";
   applyButton.disabled = state.claudeSettingsBusy;
-  removeButton.disabled = state.claudeSettingsBusy;
+  removeButton.disabled = state.claudeSettingsBusy || !hasProxyKeys;
+  removeButton.hidden = !hasProxyKeys;
+  applyButton.textContent =
+    state_ === "configured" ? "Reconfigure" : "Configure";
 
   renderClaudeSettingsTargets(info);
 
@@ -4796,15 +4854,19 @@ async function applyClaudeSettings() {
   state.claudeSettingsBusy = true;
   renderClaudeSettings();
   try {
-    state.claudeSettings = await api("/admin/api/claude-settings/apply", {
+    await api("/admin/api/claude-settings/apply", {
       method: "POST",
       body: JSON.stringify({ path: claudeSettingsPathInputValue() || null }),
     });
     showMessage("Claude Code settings file configured", "ok");
   } catch (error) {
     showMessage(`Could not configure Claude settings: ${error.message}`, "error");
-    await loadClaudeSettings(claudeSettingsPathInputValue());
   } finally {
+    // Always re-read rather than adopting the write response: that response
+    // carries only the status of the file just written, and the page also
+    // needs the discovered-file list, whose states this write just changed.
+    await loadClaudeSettings(claudeSettingsPathInputValue());
+    await loadClaudeConfig(claudeSettingsPathInputValue());
     state.claudeSettingsBusy = false;
     renderClaudeSettings();
   }
@@ -4815,15 +4877,16 @@ async function unsetClaudeSettings() {
   state.claudeSettingsBusy = true;
   renderClaudeSettings();
   try {
-    state.claudeSettings = await api("/admin/api/claude-settings/unset", {
+    await api("/admin/api/claude-settings/unset", {
       method: "POST",
       body: JSON.stringify({ path: claudeSettingsPathInputValue() || null }),
     });
     showMessage("Claude Code settings file entries removed", "ok");
   } catch (error) {
     showMessage(`Could not remove Claude settings entries: ${error.message}`, "error");
-    await loadClaudeSettings(claudeSettingsPathInputValue());
   } finally {
+    await loadClaudeSettings(claudeSettingsPathInputValue());
+    await loadClaudeConfig(claudeSettingsPathInputValue());
     state.claudeSettingsBusy = false;
     renderClaudeSettings();
   }
@@ -5497,6 +5560,8 @@ async function loadClaudeConfig(path) {
     const document_ = await api(`/admin/api/claude-config/document${params}`);
     config.values = document_.values || {};
     config.path = document_.path;
+    const editingPath = byId("ccEditingPath");
+    if (editingPath) editingPath.textContent = `Editing ${document_.path}`;
     config.parsed = document_.parsed;
     config.pending.clear();
     renderClaudeConfigManagedWarning(document_.managed_overrides);
