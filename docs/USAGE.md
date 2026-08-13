@@ -38,7 +38,7 @@ Because the translation happens at the protocol level, streaming, tool use, reas
 Three consequences worth internalising before you start:
 
 1. **The server must be running.** It's a daemon, not a library. Close the terminal and your agent stops working.
-2. **Your agent's model picker can list MCC's catalog**, not Anthropic's. Selecting "Sonnet" routes to whatever *you* mapped Sonnet to. Codex and Pi's pickers always do this; Claude Code's needs model discovery turned on (`fcc-claude --discover-models` or `fcc-claude-old`) — see [§4](#4-tutorial-connect-claude-code-cli).
+2. **Your agent's model picker can list MCC's catalog**, not Anthropic's. Selecting "Sonnet" routes to whatever *you* mapped Sonnet to. Codex and Pi's pickers always do this; Claude Code's needs model discovery turned on (`mcc-claude --discover-models` or `mcc-claude-old`) — see [§4](#4-tutorial-connect-claude-code-cli).
 3. **Credentials live server-side.** Your agent holds a token that only authenticates it to the proxy; the real provider keys never leave your machine.
 
 <div align="center">
@@ -88,14 +88,14 @@ mcc-server --version
 
 1. Installs `uv` (the Python tool runner) if missing or too old.
 2. Looks up the **latest** release, downloads its wheel, and **verifies the SHA-256 that GitHub publishes for that asset**. A mismatch aborts rather than running unverified code.
-3. Installs the package and puts `mcc-server`, `fcc-claude`, `fcc-claude-old`, `fcc-codex` and `fcc-pi` on your `PATH`.
+3. Installs the package and puts `mcc-server`, `mcc-claude`, `mcc-claude-old`, `mcc-codex` and `mcc-pi` on your `PATH` (the legacy `fcc-*` spellings remain as aliases).
 
-**It does not install Claude Code, Codex, or Pi.** Those are separate third-party tools and the proxy doesn't need any of them to run. Install whichever you actually use, yourself — the `fcc-*` launchers simply point an agent you already have at the proxy.
+**It does not install Claude Code, Codex, or Pi.** Those are separate third-party tools and the proxy doesn't need any of them to run. Install whichever you actually use, yourself — the `mcc-*` launchers simply point an agent you already have at the proxy.
 
 Pin a specific version instead of the newest:
 
 ```bash
-sh install.sh --version 4.16.0      # PowerShell: -Version 4.16.0
+sh install.sh --version 5.5.1      # PowerShell: -Version 5.5.1
 ```
 
 Add `--dry-run` (`-DryRun`) to print what it would do without changing anything. Both scripts are readable before you run them: [install.sh](../scripts/install.sh), [install.ps1](../scripts/install.ps1).
@@ -190,7 +190,7 @@ If it still shows Anthropic's own endpoint, the settings file wasn't picked up �
 
 ### Step 4 — pick a model
 
-No model overrides are needed — MCC exposes native **Fable / Opus / Sonnet / Haiku** tier models, so you can type a tier name at the `/model` prompt either way. Claude Code's built-in *picker*, though, only lists the MCC catalog once model discovery is on: add `"CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY": "1"` to the `env` block from Step 2, or use `fcc-claude --discover-models` from the Shortcut below.
+No model overrides are needed — MCC exposes native **Fable / Opus / Sonnet / Haiku** tier models, so you can type a tier name at the `/model` prompt either way. Claude Code's built-in *picker*, though, only lists the MCC catalog once model discovery is on: add `"CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY": "1"` to the `env` block from Step 2, or use `mcc-claude --discover-models` from the Shortcut below.
 
 <div align="center">
   <img src="../assets/cc-model-picker.png" alt="Claude Code model picker showing MCC gateway models" width="720">
@@ -203,24 +203,27 @@ If you'd rather not edit the settings file, the bundled launcher sets the two
 proxy variables for the session:
 
 ```bash
-fcc-claude
+mcc-claude
 ```
 
-`fcc-claude` only sets `ANTHROPIC_BASE_URL` and `ANTHROPIC_AUTH_TOKEN` — it
+`mcc-claude` only sets `ANTHROPIC_BASE_URL` and `ANTHROPIC_AUTH_TOKEN` — it
 doesn't touch anything else, since `~/.claude/settings.json` (Step 2 above)
 takes precedence over environment variables anyway. This also means its
 native model picker stays empty by default; pass `--discover-models` to have
-`fcc-claude` additionally set `CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1`
+`mcc-claude` additionally set `CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1`
 for the session (an extra request to the proxy on every launch, so it's
 opt-in):
 
 ```bash
-fcc-claude --discover-models
+mcc-claude --discover-models
 ```
 
-If you want the previous `fcc-claude` behavior — gateway model discovery
+If you want the previous `mcc-claude` behavior — gateway model discovery
 enabled, the auto-compact window set, telemetry/autoupdate disabled, and
-inherited `ANTHROPIC_*` variables cleared — run `fcc-claude-old` instead.
+inherited `ANTHROPIC_*` variables cleared — run `mcc-claude-old` instead.
+
+The legacy `fcc-claude`, `fcc-claude-old`, `fcc-codex` and `fcc-pi` aliases
+behave identically.
 
 Official references: [Claude Code LLM gateway docs](https://code.claude.com/docs/en/llm-gateway-connect) · [settings.json reference](https://code.claude.com/docs/en/settings)
 
@@ -287,9 +290,11 @@ With **Model discovery** on, the app populates its picker from MCC's `/v1/models
 Both have launchers that configure the environment for you:
 
 ```bash
-fcc-codex      # Codex CLI against the local MCC Responses provider
-fcc-pi         # Pi
+mcc-codex      # Codex CLI against the local MCC Responses provider
+mcc-pi         # Pi
 ```
+
+(The legacy `fcc-codex` and `fcc-pi` aliases behave identically.)
 
 Codex reads a model catalog that MCC generates, so its own picker works normally:
 
@@ -634,11 +639,11 @@ Two things not to worry about: the dictionary trains itself once the log has see
 
 Compression only ever applies to **newly written** requests, so a database carried across the upgrade keeps paying the old price for its whole history. On a real 1.7 GB log that meant every one of its 50,000 rows.
 
-`fcc-compact-log` rewrites them in place:
+`mcc-compact-log` (legacy alias `fcc-compact-log`) rewrites them in place:
 
 ```bash
 # stop the server first, or the final vacuum cannot reclaim the space
-fcc-compact-log
+mcc-compact-log
 ```
 
 Measured on a copy of that 1.7 GB database: **1.73 GB → 0.29 GB in 4.9 minutes**, and all 49,934 bodies verified byte-identical against the original afterwards. It is safe to interrupt — each batch commits on its own and a row is converted only after its body is stored, so a kill leaves a consistent database with the work merely unfinished. Running it again resumes.
@@ -664,7 +669,7 @@ The two are shown in separate tables so the numbers reconcile.
 WEBSEARCH_LOG_ENABLED=true
 WEBSEARCH_LOG_MAX_ROWS=50000
 WEBSEARCH_LOG_CAPTURE_CONTENT=true      # false = lengths and hashes only
-WEBSEARCH_LOG_CONTENT_MAX_CHARS=50000
+WEBSEARCH_LOG_CONTENT_MAX_CHARS=2000000 # cap per input/output JSON payload
 ```
 
 > **Privacy.** Search content routinely includes private queries, result URLs and page text. `WEBSEARCH_LOG_CAPTURE_CONTENT=false` withholds the captured payloads **and the query text itself**, keeping only lengths and SHA-256 hashes.
