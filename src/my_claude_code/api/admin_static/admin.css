@@ -85,6 +85,14 @@
   box-sizing: border-box;
 }
 
+/* The hidden attribute only sets `display: none` as a UA default, so any rule
+   that sets display -- `.secondary-button { display: flex }`, say -- silently
+   beats it and the element stays on screen with `hidden` set. Found on the
+   Remove button, which stayed visible on a file that had nothing to remove. */
+[hidden] {
+  display: none !important;
+}
+
 body {
   margin: 0;
   min-width: 320px;
@@ -4444,4 +4452,137 @@ details.turn-pane > summary:focus-visible {
   align-items: center;
   min-height: 44px;
   padding-right: 72px;
+}
+
+/* ── Discovered settings files ─────────────────────────────────────────────
+   The origin badge carries as much weight as the path: on a machine with WSL
+   there are two settings.json files and picking the wrong world is the whole
+   failure mode this list exists to prevent. */
+
+.claude-targets {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0 0 var(--space-3);
+  padding: 0;
+  list-style: none;
+}
+
+.claude-target {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--card);
+  transition: border-color var(--transition-fast);
+}
+
+.claude-target:hover {
+  border-color: var(--line-strong);
+}
+
+.claude-target.is-selected {
+  border-color: var(--accent-border);
+  background: var(--accent-muted);
+}
+
+.claude-target input[type="radio"] {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  margin-top: 3px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.claude-target-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  min-height: 40px;
+  cursor: pointer;
+}
+
+.claude-target-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.claude-origin {
+  padding: 2px 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-full);
+  background: var(--panel-strong);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-strong);
+}
+
+.claude-target-detail {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.claude-state {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.claude-state-configured {
+  color: var(--ok);
+}
+
+.claude-state-mismatch {
+  color: var(--warn);
+}
+
+.claude-state-unreadable {
+  color: var(--error);
+}
+
+.claude-target-path {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.claude-settings-empty {
+  margin: 0 0 4px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.claude-other-file {
+  margin-top: var(--space-3);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--line);
+}
+
+.claude-other-file > summary {
+  min-height: 32px;
+  font-size: 13px;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.claude-other-file > summary:hover {
+  color: var(--text);
+}
+
+.cc-editing-path {
+  margin: 2px 0 6px !important;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--accent) !important;
+  overflow-wrap: anywhere;
 }

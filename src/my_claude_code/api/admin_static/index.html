@@ -178,22 +178,34 @@
                   </button>
                 </div>
               </div>
-              <div class="field">
-                <label for="claudeSettingsPath"><span>Settings file path</span></label>
-                <input id="claudeSettingsPath" type="text" autocomplete="off" />
-              </div>
-              <div id="claudeSettingsTargets" class="claude-settings-targets"></div>
+              <div
+                id="claudeSettingsTargets"
+                class="claude-settings-targets"
+                role="radiogroup"
+                aria-label="Discovered Claude Code settings files"
+              ></div>
               <div
                 id="claudeSettingsStatus"
                 class="claude-settings-status"
                 aria-live="polite"
               ></div>
               <div id="claudeSettingsOverrides" class="claude-settings-overrides"></div>
-              <p class="claude-settings-project-note">
-                Not detected here, but worth knowing: a <code>.claude/settings.json</code>
-                or <code>.claude/settings.local.json</code> in a project directory takes
-                precedence over the user file configured above.
-              </p>
+              <details class="claude-other-file">
+                <summary>Use a different file</summary>
+                <div class="field">
+                  <label for="claudeSettingsPath">
+                    <span>Settings file path</span>
+                  </label>
+                  <input id="claudeSettingsPath" type="text" autocomplete="off" />
+                </div>
+                <p class="claude-settings-project-note">
+                  A project&rsquo;s <code>.claude/settings.json</code> or
+                  <code>.claude/settings.local.json</code> takes precedence over the
+                  user file, but this server cannot tell which repository you are
+                  working in &mdash; type its path here to select it. Everything
+                  below edits whichever file is selected.
+                </p>
+              </details>
             </section>
 
             <section
@@ -271,6 +283,7 @@
               <div class="section-heading">
                 <div>
                   <h3>All Claude Code settings</h3>
+                  <p class="cc-editing-path" id="ccEditingPath"></p>
                   <p>
                     Every setting the Claude Code CLI reads, with the values it
                     accepts. Edits collect below and are written only when you

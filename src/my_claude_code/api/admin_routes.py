@@ -22,6 +22,11 @@ from my_claude_code.config.admin.manifest import FIELD_BY_KEY
 from my_claude_code.config.admin.persistence import validate_updates
 from my_claude_code.config.admin.sources import is_locked_source
 from my_claude_code.config.admin.values import load_config_response, load_value_state
+from my_claude_code.config.claude_discovery import (
+    DiscoveredSettings,
+    discover_settings_files,
+    native_origin,
+)
 from my_claude_code.config.claude_settings import (
     ClaudeSettingsError,
     ClaudeSettingsStatus,
@@ -48,7 +53,6 @@ from my_claude_code.config.onboarding import (
     save_persisted as save_onboarding_persisted,
 )
 from my_claude_code.config.paths import (
-    claude_settings_candidates,
     claude_settings_path,
 )
 from my_claude_code.config.provider_catalog import PROVIDER_CATALOG
@@ -460,21 +464,30 @@ def _claude_settings_status_response(status: ClaudeSettingsStatus) -> dict[str, 
 
 
 async def _claude_settings_target(
-    path: str, expected_base_url: str, expected_auth_token: str
+    discovered: DiscoveredSettings, expected_base_url: str, expected_auth_token: str
 ) -> dict[str, Any]:
-    """Evaluate a single detected settings candidate for the ``targets`` list."""
+    """Evaluate one discovered settings file for the ``targets`` list.
+
+    ``origin`` is the point of the list. A machine running WSL has two Claude
+    Code installations and two settings files, and "my setting did not apply"
+    is almost always the other one. Naming the world each file belongs to is
+    what turns a list of paths into a choice a person can make.
+    """
 
     target_status = await asyncio.to_thread(
         read_status,
-        path=Path(path),
+        path=Path(discovered.path),
         expected_base_url=expected_base_url,
         expected_auth_token=expected_auth_token,
     )
     return {
-        "path": path,
+        "path": discovered.path,
+        "origin": discovered.origin,
+        "origin_label": discovered.origin_label,
+        "detail": discovered.detail,
         "exists": target_status.exists,
         "state": target_status.state,
-        "is_default": Path(path) == claude_settings_path(),
+        "is_default": Path(discovered.path) == claude_settings_path(),
     }
 
 
@@ -493,15 +506,16 @@ async def get_claude_settings(
         expected_base_url=expected_base_url,
         expected_auth_token=expected_auth_token,
     )
-    candidates = await asyncio.to_thread(claude_settings_candidates)
+    # Discovery crosses the WSL boundary, which can be slow when the other side
+    # is stopped, so it runs off the event loop like every other probe here.
+    discovered = await asyncio.to_thread(discover_settings_files)
     targets = [
-        await _claude_settings_target(
-            str(candidate), expected_base_url, expected_auth_token
-        )
-        for candidate in candidates
+        await _claude_settings_target(entry, expected_base_url, expected_auth_token)
+        for entry in discovered
     ]
     response = _claude_settings_status_response(status)
     response["targets"] = targets
+    response["native_origin"] = native_origin()
     return response
 
 
