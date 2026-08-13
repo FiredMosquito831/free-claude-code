@@ -5,8 +5,10 @@ than hand-maintained. It reads the published markdown source of the official
 documentation pages and emits two artifacts:
 
 * ``docs/CLAUDE-CODE-CONFIG.md``           -- the human reference
-* ``docs/claude-code-config-catalog.json`` -- the same data, machine readable,
-  for the Configure Claude Code page to build its controls from
+* ``src/my_claude_code/config/data/claude_code_config_catalog.json`` -- the same
+  data, machine readable. This is packaged data rather than documentation: the
+  Configure Claude Code page reads it at runtime to build its controls, and
+  keeping one copy is what stops the page and the reference from drifting.
 
 Usage::
 
@@ -33,6 +35,14 @@ import httpx
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_CACHE = REPO_ROOT / ".claude-docs-cache"
+CATALOG_PATH = (
+    REPO_ROOT
+    / "src"
+    / "my_claude_code"
+    / "config"
+    / "data"
+    / "claude_code_config_catalog.json"
+)
 DOC_BASE_URL = "https://code.claude.com/docs/en"
 DOCS_BASE = "https://code.claude.com"
 
@@ -119,6 +129,108 @@ SET_OR_UNSET = {
 
 # Reads a number, so only `0` turns it off (docs call this out by name).
 NUMERIC_BOOLEAN = {"FORCE_HYPERLINK"}
+
+# The settings a person actually reaches for. The Configure Claude Code page
+# shows these by default and hides the long tail behind "Show all", so the page
+# stays flat and dense without hiding anything: search always covers everything.
+COMMON_ENV = {
+    "ANTHROPIC_API_KEY",
+    "ANTHROPIC_AUTH_TOKEN",
+    "ANTHROPIC_BASE_URL",
+    "ANTHROPIC_CUSTOM_MODEL_OPTION",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL",
+    "ANTHROPIC_MODEL",
+    "API_TIMEOUT_MS",
+    "BASH_DEFAULT_TIMEOUT_MS",
+    "BASH_MAX_OUTPUT_LENGTH",
+    "BASH_MAX_TIMEOUT_MS",
+    "CLAUDE_CODE_AUTO_COMPACT_WINDOW",
+    "CLAUDE_CODE_DISABLE_1M_CONTEXT",
+    "CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS",
+    "CLAUDE_CODE_DISABLE_MOUSE",
+    "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC",
+    "CLAUDE_CODE_DISABLE_THINKING",
+    "CLAUDE_CODE_EFFORT_LEVEL",
+    "CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY",
+    "CLAUDE_CODE_ENABLE_TELEMETRY",
+    "CLAUDE_CODE_GIT_BASH_PATH",
+    "CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS",
+    "CLAUDE_CODE_MAX_CONTEXT_TOKENS",
+    "CLAUDE_CODE_MAX_OUTPUT_TOKENS",
+    "CLAUDE_CODE_MAX_RETRIES",
+    "CLAUDE_CODE_MAX_TOOL_USE_CONCURRENCY",
+    "CLAUDE_CODE_NO_FLICKER",
+    "CLAUDE_CODE_RETRY_WATCHDOG",
+    "CLAUDE_CODE_SHELL",
+    "CLAUDE_CODE_SUBAGENT_MODEL",
+    "CLAUDE_CODE_SUBPROCESS_ENV_SCRUB",
+    "CLAUDE_CODE_USE_POWERSHELL_TOOL",
+    "CLAUDE_CONFIG_DIR",
+    "DEBUG",
+    "DISABLE_AUTOUPDATER",
+    "DISABLE_AUTO_COMPACT",
+    "DISABLE_ERROR_REPORTING",
+    "DISABLE_INTERLEAVED_THINKING",
+    "DISABLE_PROMPT_CACHING",
+    "DISABLE_TELEMETRY",
+    "ENABLE_PROMPT_CACHING_1H",
+    "ENABLE_TOOL_SEARCH",
+    "HTTPS_PROXY",
+    "HTTP_PROXY",
+    "MAX_MCP_OUTPUT_TOKENS",
+    "MAX_THINKING_TOKENS",
+    "MCP_TIMEOUT",
+    "MCP_TOOL_TIMEOUT",
+    "NO_PROXY",
+    "USE_BUILTIN_RIPGREP",
+}
+
+COMMON_SETTINGS = {
+    "advisorModel",
+    "agentPushNotifEnabled",
+    "alwaysThinkingEnabled",
+    "apiKeyHelper",
+    "askUserQuestionTimeout",
+    "attribution",
+    "autoCompactEnabled",
+    "autoCompactWindow",
+    "autoMemoryEnabled",
+    "autoUpdatesChannel",
+    "cleanupPeriodDays",
+    "disableAllHooks",
+    "disableBundledSkills",
+    "disableWorkflows",
+    "editorMode",
+    "effortLevel",
+    "enableAllProjectMcpServers",
+    "env",
+    "fallbackModel",
+    "fastMode",
+    "fileCheckpointingEnabled",
+    "includeGitInstructions",
+    "inputNeededNotifEnabled",
+    "language",
+    "model",
+    "outputStyle",
+    "permissions",
+    "preferredNotifChannel",
+    "promptSuggestionEnabled",
+    "remoteControlAtStartup",
+    "respectGitignore",
+    "showTurnDuration",
+    "skillOverrides",
+    "spinnerTipsEnabled",
+    "statusLine",
+    "syntaxHighlightingDisabled",
+    "teammateMode",
+    "theme",
+    "tui",
+    "verbose",
+    "viewMode",
+    "workflowSizeGuideline",
+}
 
 SECRET_LIKE = re.compile(
     r"(API_KEY|AUTH_TOKEN|_TOKEN$|CLIENT_SECRET|PASSPHRASE|BEARER)", re.I
@@ -356,6 +468,7 @@ def build_catalog(docs: Path) -> dict:
             "classification_evidence": evidence,
             "default": extract_default(purpose),
             "purpose": purpose.strip(),
+            "common": name in COMMON_ENV,
         }
         if control == "enum":
             entry["values"] = ENV_ENUMS[name]
@@ -393,6 +506,7 @@ def build_catalog(docs: Path) -> dict:
                 "default": extract_default(description),
                 "example": example.strip(),
                 "purpose": description.strip(),
+                "common": key in COMMON_SETTINGS or kind == "permission_setting",
                 "managed_only": "(Managed settings only)" in description
                 or "Managed settings only." in description,
             }
@@ -942,7 +1056,13 @@ def main() -> None:
         "--out-dir",
         type=Path,
         default=REPO_ROOT / "docs",
-        help="directory to write the reference and catalog into",
+        help="directory to write the human reference into",
+    )
+    parser.add_argument(
+        "--catalog-path",
+        type=Path,
+        default=CATALOG_PATH,
+        help="path to write the machine-readable catalog into",
     )
     args = parser.parse_args()
 
@@ -958,7 +1078,11 @@ def main() -> None:
     catalog = build_catalog(args.cache)
     args.out_dir.mkdir(parents=True, exist_ok=True)
 
-    catalog_path = args.out_dir / "claude-code-config-catalog.json"
+    # The catalog is packaged data, not documentation: the Configure Claude Code
+    # page reads it at runtime to build its controls. Keeping one copy inside
+    # the package is what stops the page and the reference from drifting apart.
+    catalog_path = args.catalog_path
+    catalog_path.parent.mkdir(parents=True, exist_ok=True)
     catalog_path.write_text(json.dumps(catalog, indent=2) + "\n", encoding="utf-8")
 
     reference_path = args.out_dir / "CLAUDE-CODE-CONFIG.md"
