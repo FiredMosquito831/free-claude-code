@@ -2,6 +2,7 @@ import asyncio
 import contextlib
 import logging
 import os
+import threading
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
@@ -245,3 +246,42 @@ def _propagate_loguru_to_caplog():
         loguru_logger.remove(
             handler_id
         )  # Handler already removed (e.g. by test_logging_config)
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _no_fcc_threads_leak_at_session_end():
+    """Fail loudly if any FCC-owned background thread survives the whole run.
+
+    The request-log and web-search stores each start a daemon writer thread.
+    Daemon threads cannot prevent interpreter exit, but a store that is never
+    closed keeps its queue, sqlite connection and any held records alive for the
+    rest of the process -- which under xdist accumulates per-worker and reads as
+    a memory leak with "processes that won't die". Every test is responsible
+    for closing what it constructs (the autouse request-log fixture already
+    resets the shared registry); this guard makes forgetting an error at the
+    session boundary instead of a 64 GB surprise hours into a run.
+    """
+    from my_claude_code.core import request_log
+    from my_claude_code.websearch import analytics
+
+    request_log.reset_request_log_stores()
+    analytics.reset_analytics_state()
+    yield
+    request_log.reset_request_log_stores()
+    analytics.reset_analytics_state()
+
+    fcc_writer_threads = [
+        thread.name
+        for thread in threading.enumerate()
+        if thread is not threading.current_thread()
+        and (
+            thread.name.startswith("fcc-request-log-writer")
+            or thread.name.startswith("websearch-log-writer")
+            or thread.name.startswith("chatgpt-oauth-callback")
+            or thread.name.startswith("fcc-open-admin-browser")
+        )
+    ]
+    assert not fcc_writer_threads, (
+        "FCC background threads leaked past the session: "
+        f"{fcc_writer_threads}. Close every store/thread a test creates."
+    )
