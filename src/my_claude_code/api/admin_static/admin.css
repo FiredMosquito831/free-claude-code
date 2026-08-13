@@ -52,6 +52,17 @@
   --glow-accent: 0 0 12px rgba(16, 185, 129, 0.15);
   
   /* Borders and Radius */
+  /* Spacing scale. The Configure Claude Code redesign (5.7.2) started using
+     these without defining them, so every var(--space-N) resolved to an
+     invalid value and the rule was dropped: the connect cards shipped with no
+     padding and no gap. Dense dashboard scale, 4px base. */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+
   --radius-sm: 6px;
   --radius-md: 10px;
   --radius-lg: 14px;
@@ -3971,4 +3982,312 @@ details.turn-pane > summary:focus-visible {
 
 .claude-connect-cta a {
   color: var(--accent);
+}
+
+/* ── Claude Code settings editor ──────────────────────────────────────────
+   Flat and dense: one row per setting, sections that are always open, and a
+   search box instead of accordions. 518 settings only stay legible if the
+   default view is short and finding a specific one costs a keystroke, not a
+   click through a tree. */
+
+/* The search box is self-evident visually but needs a real label for a screen
+   reader. There was no visually-hidden helper in this stylesheet before. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+.cc-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+}
+
+.cc-search {
+  flex: 1 1 260px;
+  min-width: 200px;
+}
+
+.cc-search input {
+  width: 100%;
+}
+
+.cc-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--muted);
+  cursor: pointer;
+  min-height: 44px;
+}
+
+.cc-check input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--accent);
+}
+
+.cc-pending-bar {
+  padding: 10px 14px;
+  margin-bottom: var(--space-3);
+  border: 1px solid var(--accent-border);
+  border-radius: var(--radius-md);
+  background: var(--accent-muted);
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.cc-managed-warning {
+  padding: 12px 14px;
+  margin-bottom: var(--space-3);
+  border: 1px solid var(--warn-border);
+  border-radius: var(--radius-md);
+  background: var(--warn-bg);
+  color: var(--text);
+  font-size: 13px;
+}
+
+.cc-managed-line {
+  margin-top: 6px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.cc-sections {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+
+.cc-section-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 var(--space-2);
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--line);
+  font-size: 13px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+
+.cc-section-count {
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--panel-strong);
+  font-size: 11px;
+  letter-spacing: 0;
+  color: var(--muted);
+}
+
+.cc-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(180px, 280px);
+  align-items: start;
+  gap: var(--space-4);
+  padding: 12px 12px 12px 14px;
+  border-left: 2px solid transparent;
+  border-bottom: 1px solid var(--line);
+}
+
+/* A pending edit is marked structurally, not by recolouring the row, so the
+   marker reads the same under every theme. */
+.cc-row.is-pending {
+  border-left-color: var(--accent);
+  background: var(--accent-muted);
+}
+
+.cc-row-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.cc-row-name {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--text-strong);
+  overflow-wrap: anywhere;
+}
+
+.cc-row-purpose {
+  margin: 4px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+.cc-badge {
+  padding: 1px 6px;
+  border: 1px solid var(--line-strong);
+  border-radius: 4px;
+  background: var(--panel-strong);
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+}
+
+.cc-badge-warn {
+  border-color: var(--warn-border);
+  background: var(--warn-bg);
+  color: var(--warn);
+  cursor: help;
+}
+
+.cc-control {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.cc-control input[type="text"],
+.cc-control input[type="password"],
+.cc-control input[type="number"],
+.cc-control select,
+.cc-control textarea {
+  width: 100%;
+  min-height: 36px;
+}
+
+.cc-control textarea {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  resize: vertical;
+}
+
+.cc-control textarea.is-invalid {
+  border-color: var(--error-border);
+}
+
+.cc-switch {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  cursor: pointer;
+}
+
+.cc-switch input {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.cc-empty {
+  padding: var(--space-5);
+  text-align: center;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.cc-review-card {
+  max-width: 720px;
+}
+
+.cc-review-path {
+  margin: 0 0 var(--space-3);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.cc-review-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 50vh;
+  overflow-y: auto;
+}
+
+.cc-diff {
+  padding: 10px 12px;
+  border-left: 3px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  background: var(--panel-strong);
+  font-size: 13px;
+}
+
+.cc-diff-set {
+  border-left-color: var(--accent);
+}
+
+.cc-diff-unset {
+  border-left-color: var(--warn);
+}
+
+.cc-diff-rejected {
+  border-left-color: var(--error);
+}
+
+.cc-diff-name {
+  display: block;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-strong);
+  overflow-wrap: anywhere;
+}
+
+.cc-diff-detail {
+  display: block;
+  margin-top: 3px;
+  font-size: 12px;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.cc-diff-warning {
+  margin: 6px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--warn);
+}
+
+.cc-review-backup {
+  margin: var(--space-2) 0 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.cc-review-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  margin-top: var(--space-4);
+}
+
+@media (max-width: 720px) {
+  .cc-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .cc-control {
+    justify-content: flex-start;
+  }
+}
+
+/* Upstream descriptions run to several sentences. Two lines keeps the row
+   scannable; the full text is on the element's title attribute. */
+.cc-row-purpose {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }

@@ -49,6 +49,20 @@ const state = {
   versionUpgrading: false,
   claudeSettings: null,
   claudeSettingsBusy: false,
+  claudeConfig: {
+    entries: [],
+    values: {},
+    // Pending edits keyed by the settings.json dotted path. A value of
+    // `undefined` means "remove this key", which is a distinct operation from
+    // writing false and the only way to turn a presence-read variable off.
+    pending: new Map(),
+    query: "",
+    configuredOnly: false,
+    showAll: false,
+    busy: false,
+    path: "",
+    parsed: true,
+  },
   onboarding: null,
   onboardingExpandedStepId: null,
   // Whether the expanded step was opened by a click rather than chosen
@@ -326,6 +340,7 @@ function setActiveView(viewId, { scroll = false } = {}) {
 
   if (activeView.id === "claude") {
     loadClaudeSettings().catch((error) => showMessage(error.message, "error"));
+    loadClaudeConfig().catch((error) => showMessage(error.message, "error"));
   }
 
   if (scroll) {
@@ -4814,7 +4829,638 @@ async function unsetClaudeSettings() {
 byId("claudeSettingsApplyButton").addEventListener("click", () => applyClaudeSettings());
 byId("claudeSettingsRemoveButton").addEventListener("click", () => unsetClaudeSettings());
 byId("claudeSettingsPath").addEventListener("change", (event) => {
-  loadClaudeSettings(event.currentTarget.value.trim());
+  const path = event.currentTarget.value.trim();
+  loadClaudeSettings(path);
+  loadClaudeConfig(path);
+});
+
+// ── The full Claude Code settings editor ────────────────────────────────────
+//
+// The catalog is generated from the official docs and served by
+// /admin/api/claude-config/catalog: 518 entries, each carrying the control it
+// wants. Rendering from that rather than a hardcoded form is what keeps this
+// page correct as Claude Code ships new settings.
+//
+// Three control kinds exist because a plain checkbox would be WRONG for them:
+//
+//   set_or_unset     Read for presence. Writing "0" turns the behaviour ON, so
+//                    the off position must delete the key. The backend rewrites
+//                    a falsey set into an unset, but the UI says so up front
+//                    rather than surprising the reader in the diff.
+//   numeric_boolean  FORCE_HYPERLINK parses as a number, so "false" enables it.
+//   secret           Never round-trip the masked value back as a write.
+
+const CC_CATEGORY_TITLES = {
+  auth: "Authentication",
+  endpoint: "Endpoint and proxy",
+  provider: "Third-party providers",
+  model: "Model, thinking, and effort",
+  context: "Context and caching",
+  network: "Timeouts and retries",
+  tools: "Tool behaviour",
+  subagents: "Subagents and background work",
+  mcp: "MCP",
+  session: "Session and storage",
+  telemetry: "Telemetry",
+  ui: "Terminal and accessibility",
+  plugins: "Plugins and skills",
+  updates: "Updates",
+  commands: "Slash commands",
+  features: "Feature switches",
+  settings: "General",
+  other: "Other",
+};
+
+const CC_CATEGORY_ORDER = [
+  "settings",
+  "model",
+  "context",
+  "tools",
+  "subagents",
+  "mcp",
+  "session",
+  "ui",
+  "network",
+  "endpoint",
+  "auth",
+  "provider",
+  "telemetry",
+  "plugins",
+  "updates",
+  "commands",
+  "features",
+  "other",
+];
+
+const CC_SECRET_MASK = "********";
+
+function ccCategoryTitle(category) {
+  return CC_CATEGORY_TITLES[category] || category;
+}
+
+// The catalog names permission and sandbox keys with their parent prefix
+// already ("permissions.allow"), so grouping by category alone would scatter
+// them. Give those their own sections, which is also how people think of them.
+function ccSectionFor(entry) {
+  if (entry.name.startsWith("permissions.")) return "permissions";
+  if (entry.name.startsWith("sandbox.")) return "sandbox";
+  if (entry.name.startsWith("attribution.")) return "attribution";
+  return entry.category;
+}
+
+const CC_EXTRA_SECTION_TITLES = {
+  permissions: "Permissions",
+  sandbox: "Sandbox",
+  attribution: "Git attribution",
+};
+
+function ccSectionTitle(section) {
+  return CC_EXTRA_SECTION_TITLES[section] || ccCategoryTitle(section);
+}
+
+function ccSectionOrder(section) {
+  if (section === "permissions") return -2;
+  if (section === "sandbox") return -1;
+  if (section === "attribution") return 100;
+  const index = CC_CATEGORY_ORDER.indexOf(section);
+  return index === -1 ? 99 : index;
+}
+
+// settings.json addresses env vars under an "env" object, so the document and
+// the change payloads both use the "env." prefix while the catalog lists the
+// bare variable name.
+function ccKeyFor(entry) {
+  return entry.kind === "env" ? `env.${entry.name}` : entry.name;
+}
+
+function ccCurrentValue(key) {
+  return state.claudeConfig.values[key];
+}
+
+function ccPendingValue(key) {
+  return state.claudeConfig.pending.get(key);
+}
+
+function ccIsPending(key) {
+  return state.claudeConfig.pending.has(key);
+}
+
+// The value a control should display: a pending edit if there is one,
+// otherwise what the file says.
+function ccDisplayValue(key) {
+  return ccIsPending(key) ? ccPendingValue(key) : ccCurrentValue(key);
+}
+
+function ccSetPending(key, value) {
+  const current = ccCurrentValue(key);
+  const same =
+    JSON.stringify(value === undefined ? null : value) ===
+    JSON.stringify(current === undefined ? null : current);
+  if (same) {
+    state.claudeConfig.pending.delete(key);
+  } else {
+    state.claudeConfig.pending.set(key, value);
+  }
+  renderClaudeConfigPending();
+}
+
+function ccTruthy(value) {
+  if (value === undefined || value === null) return false;
+  const text = String(value).trim().toLowerCase();
+  return text === "1" || text === "true" || text === "yes" || text === "on";
+}
+
+function ccMatches(entry, query) {
+  if (!query) return true;
+  const haystack = `${entry.name} ${entry.purpose}`.toLowerCase();
+  return haystack.includes(query);
+}
+
+function ccVisibleEntries() {
+  const config = state.claudeConfig;
+  const query = config.query.trim().toLowerCase();
+
+  return config.entries.filter((entry) => {
+    if (!entry.editable) return false;
+    const key = ccKeyFor(entry);
+    const configured = ccCurrentValue(key) !== undefined || ccIsPending(key);
+
+    // Search always reaches the whole surface: a name you typed in full should
+    // never be hidden by a view filter you forgot was on.
+    if (query) return ccMatches(entry, query);
+    if (config.configuredOnly && !configured) return false;
+    if (!config.showAll && !entry.common && !configured) return false;
+    return true;
+  });
+}
+
+function ccBuildControl(entry) {
+  const key = ccKeyFor(entry);
+  const value = ccDisplayValue(key);
+  const wrapper = document.createElement("div");
+  wrapper.className = "cc-control";
+
+  if (entry.control === "toggle" || entry.control === "set_or_unset") {
+    const label = document.createElement("label");
+    label.className = "cc-switch";
+    const input = document.createElement("input");
+    input.type = "checkbox";
+    input.checked =
+      entry.kind === "env" ? ccTruthy(value) : value === true || ccTruthy(value);
+    input.addEventListener("change", () => {
+      if (!input.checked) {
+        // Off means "remove the key" for a presence-read variable, and for
+        // everything else writing the explicit false is what the user meant.
+        ccSetPending(key, entry.control === "set_or_unset" ? undefined : false);
+      } else {
+        ccSetPending(key, entry.kind === "env" ? "1" : true);
+      }
+    });
+    label.append(input, Object.assign(document.createElement("span"), {}));
+    wrapper.append(label);
+    return wrapper;
+  }
+
+  if (entry.control === "enum" && entry.values?.length) {
+    const select = document.createElement("select");
+    const blank = document.createElement("option");
+    blank.value = "";
+    blank.textContent = entry.default
+      ? `Default (${ccPlainText(entry.default)})`
+      : "Not set";
+    select.append(blank);
+    entry.values.forEach((option) => {
+      const node = document.createElement("option");
+      node.value = option;
+      node.textContent = option;
+      select.append(node);
+    });
+    // A value the file already holds that upstream no longer documents must
+    // still be selectable, or opening the page would silently propose changing it.
+    if (value !== undefined && value !== null && !entry.values.includes(String(value))) {
+      const custom = document.createElement("option");
+      custom.value = String(value);
+      custom.textContent = `${value} (not documented)`;
+      select.append(custom);
+    }
+    select.value = value === undefined || value === null ? "" : String(value);
+    select.addEventListener("change", () => {
+      ccSetPending(key, select.value === "" ? undefined : select.value);
+    });
+    wrapper.append(select);
+    return wrapper;
+  }
+
+  if (entry.control === "array" || entry.control === "object" || entry.control === "json") {
+    const area = document.createElement("textarea");
+    area.rows = 3;
+    area.spellcheck = false;
+    area.value = value === undefined ? "" : JSON.stringify(value, null, 2);
+    area.placeholder = ccPlainText(entry.example) || "JSON";
+    area.addEventListener("change", () => {
+      const text = area.value.trim();
+      if (!text) {
+        ccSetPending(key, undefined);
+        area.classList.remove("is-invalid");
+        return;
+      }
+      try {
+        ccSetPending(key, JSON.parse(text));
+        area.classList.remove("is-invalid");
+      } catch {
+        // Refusing here beats sending malformed JSON and getting a 4xx after
+        // the user has already pressed Apply.
+        area.classList.add("is-invalid");
+        showMessage(`${entry.name}: not valid JSON`, "error");
+      }
+    });
+    wrapper.append(area);
+    return wrapper;
+  }
+
+  const input = document.createElement("input");
+  input.type = entry.control === "number" ? "number" : "text";
+  input.autocomplete = "off";
+  input.spellcheck = false;
+  if (entry.control === "secret") {
+    input.type = "password";
+    input.placeholder = value === CC_SECRET_MASK ? "Set — type to replace" : "Not set";
+  } else {
+    input.placeholder = entry.default
+      ? `Default: ${ccPlainText(entry.default)}`
+      : "Not set";
+  }
+  // A masked secret must not be echoed back as a write: sending "********"
+  // would overwrite the real key with eight asterisks.
+  input.value =
+    value === undefined || value === null || value === CC_SECRET_MASK ? "" : String(value);
+  input.addEventListener("change", () => {
+    const text = input.value.trim();
+    ccSetPending(key, text === "" ? undefined : text);
+  });
+  wrapper.append(input);
+  return wrapper;
+}
+
+function ccBuildRow(entry) {
+  const key = ccKeyFor(entry);
+  const row = document.createElement("div");
+  row.className = "cc-row";
+  if (ccIsPending(key)) row.classList.add("is-pending");
+
+  const head = document.createElement("div");
+  head.className = "cc-row-head";
+
+  const name = document.createElement("code");
+  name.className = "cc-row-name";
+  name.textContent = entry.kind === "env" ? entry.name : entry.name;
+  head.append(name);
+
+  if (entry.kind === "env") {
+    const badge = document.createElement("span");
+    badge.className = "cc-badge";
+    badge.textContent = "env";
+    head.append(badge);
+  }
+  if (entry.managed_only) {
+    const badge = document.createElement("span");
+    badge.className = "cc-badge cc-badge-warn";
+    badge.textContent = "managed only";
+    head.append(badge);
+  }
+  if (entry.control === "set_or_unset") {
+    const badge = document.createElement("span");
+    badge.className = "cc-badge cc-badge-warn";
+    badge.title =
+      "Claude Code reads this for presence, so turning it off removes the key entirely.";
+    badge.textContent = "presence";
+    head.append(badge);
+  }
+
+  const purpose = document.createElement("p");
+  purpose.className = "cc-row-purpose";
+  // Upstream descriptions run to several sentences. Clamped to two lines so a
+  // long one cannot push the next control off the screen; the full text is on
+  // the title attribute for anyone who wants it.
+  purpose.textContent = ccPlainText(entry.purpose);
+  purpose.title = purpose.textContent;
+
+  const body = document.createElement("div");
+  body.className = "cc-row-body";
+  body.append(head, purpose);
+
+  row.append(body, ccBuildControl(entry));
+  return row;
+}
+
+// The catalog carries the docs' own markdown links and backticks. Rendering
+// them raw would be noise, and rendering them as HTML would inject upstream
+// markup into the page, so flatten to text.
+function ccPlainText(markdown) {
+  return String(markdown || "")
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
+    .replace(/`/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function renderClaudeConfig() {
+  const host = byId("ccSections");
+  if (!host) return;
+
+  const config = state.claudeConfig;
+  host.replaceChildren();
+
+  const showAllLabel = byId("ccShowAllLabel");
+  if (showAllLabel) {
+    showAllLabel.textContent = config.entries.length
+      ? `Show all (${config.entries.filter((entry) => entry.editable).length})`
+      : "Show all";
+  }
+
+  const visible = ccVisibleEntries();
+  byId("ccEmpty").hidden = visible.length > 0;
+
+  const grouped = new Map();
+  visible.forEach((entry) => {
+    const section = ccSectionFor(entry);
+    if (!grouped.has(section)) grouped.set(section, []);
+    grouped.get(section).push(entry);
+  });
+
+  [...grouped.keys()]
+    .sort((left, right) => ccSectionOrder(left) - ccSectionOrder(right))
+    .forEach((section) => {
+      const block = document.createElement("section");
+      block.className = "cc-section";
+
+      const heading = document.createElement("h4");
+      heading.className = "cc-section-title";
+      heading.textContent = ccSectionTitle(section);
+      const count = document.createElement("span");
+      count.className = "cc-section-count";
+      count.textContent = String(grouped.get(section).length);
+      heading.append(count);
+
+      block.append(heading);
+      grouped
+        .get(section)
+        .sort((left, right) => left.name.localeCompare(right.name))
+        .forEach((entry) => block.append(ccBuildRow(entry)));
+      host.append(block);
+    });
+
+  renderClaudeConfigPending();
+}
+
+function renderClaudeConfigPending() {
+  const config = state.claudeConfig;
+  const count = config.pending.size;
+
+  const applyButton = byId("ccApplyButton");
+  const discardButton = byId("ccDiscardButton");
+  if (applyButton) applyButton.disabled = count === 0 || config.busy;
+  if (discardButton) discardButton.disabled = count === 0 || config.busy;
+
+  const bar = byId("ccPendingBar");
+  if (bar) {
+    bar.hidden = count === 0;
+    bar.textContent =
+      count === 1 ? "1 pending change" : `${count} pending changes`;
+  }
+
+  document.querySelectorAll("#ccSections .cc-row").forEach((row) => {
+    const name = row.querySelector(".cc-row-name")?.textContent || "";
+    const isEnv = Boolean(row.querySelector(".cc-badge"));
+    const key = isEnv && !name.includes(".") ? `env.${name}` : name;
+    row.classList.toggle("is-pending", config.pending.has(key));
+  });
+}
+
+function renderClaudeConfigManagedWarning(overrides) {
+  const node = byId("ccManagedWarning");
+  if (!node) return;
+  if (!overrides?.length) {
+    node.hidden = true;
+    node.replaceChildren();
+    return;
+  }
+  node.hidden = false;
+  node.replaceChildren();
+  const intro = document.createElement("p");
+  intro.textContent =
+    "A managed policy on this machine outranks this file. Editing these keys " +
+    "here will not change what Claude Code does:";
+  node.append(intro);
+  overrides.forEach((override) => {
+    const line = document.createElement("p");
+    line.className = "cc-managed-line";
+    line.textContent = `${override.path} — ${override.keys.join(", ")}`;
+    node.append(line);
+  });
+}
+
+async function loadClaudeConfig(path) {
+  const host = byId("ccSections");
+  if (!host) return;
+
+  const config = state.claudeConfig;
+  const params = path ? `?path=${encodeURIComponent(path)}` : "";
+
+  try {
+    if (!config.entries.length) {
+      const catalog = await api("/admin/api/claude-config/catalog");
+      config.entries = catalog.entries || [];
+    }
+    const document_ = await api(`/admin/api/claude-config/document${params}`);
+    config.values = document_.values || {};
+    config.path = document_.path;
+    config.parsed = document_.parsed;
+    config.pending.clear();
+    renderClaudeConfigManagedWarning(document_.managed_overrides);
+    if (!document_.parsed) {
+      showMessage(
+        `Claude Code settings file could not be parsed: ${document_.error}`,
+        "error",
+      );
+    }
+  } catch (error) {
+    showMessage(`Could not load Claude Code settings: ${error.message}`, "error");
+    config.values = {};
+  }
+
+  renderClaudeConfig();
+}
+
+function ccChangePayload() {
+  return [...state.claudeConfig.pending.entries()].map(([name, value]) =>
+    value === undefined
+      ? { name, op: "unset" }
+      : { name, op: "set", value },
+  );
+}
+
+function ccFormatValue(value) {
+  if (value === undefined || value === null) return "(not set)";
+  if (typeof value === "string") return value;
+  return JSON.stringify(value);
+}
+
+function ccRenderReview(plan) {
+  const body = byId("ccReviewBody");
+  body.replaceChildren();
+
+  byId("ccReviewPath").textContent = plan.path;
+
+  if (!plan.changes.length && !plan.rejected.length) {
+    const empty = document.createElement("p");
+    empty.textContent = "Nothing would change.";
+    body.append(empty);
+    return;
+  }
+
+  plan.changes
+    .filter((change) => !change.noop)
+    .forEach((change) => {
+      const row = document.createElement("div");
+      row.className = `cc-diff cc-diff-${change.op}`;
+
+      const name = document.createElement("code");
+      name.className = "cc-diff-name";
+      name.textContent = change.name;
+
+      const detail = document.createElement("span");
+      detail.className = "cc-diff-detail";
+      detail.textContent =
+        change.op === "unset"
+          ? `${ccFormatValue(change.before)} → removed`
+          : `${ccFormatValue(change.before)} → ${ccFormatValue(change.after)}`;
+
+      row.append(name, detail);
+
+      // The backend warns when it has to rewrite a falsey set into a removal.
+      // When the control got there first there is no warning to show, but this
+      // is the moment the reader is deciding, so explain the removal here too.
+      const entry = state.claudeConfig.entries.find(
+        (candidate) => ccKeyFor(candidate) === change.name,
+      );
+      const notes = [...change.warnings];
+      if (
+        entry?.control === "set_or_unset" &&
+        change.op === "unset" &&
+        !notes.length
+      ) {
+        notes.push(
+          "Claude Code reads this variable for presence, so writing 0 would " +
+            "leave it enabled. Turning it off removes the key.",
+        );
+      }
+
+      notes.forEach((warning) => {
+        const note = document.createElement("p");
+        note.className = "cc-diff-warning";
+        note.textContent = warning;
+        row.append(note);
+      });
+
+      body.append(row);
+    });
+
+  plan.rejected.forEach((rejection) => {
+    const row = document.createElement("div");
+    row.className = "cc-diff cc-diff-rejected";
+    const name = document.createElement("code");
+    name.className = "cc-diff-name";
+    name.textContent = rejection.name;
+    const detail = document.createElement("span");
+    detail.className = "cc-diff-detail";
+    detail.textContent = `not applied — ${rejection.reason}`;
+    row.append(name, detail);
+    body.append(row);
+  });
+
+  const backup = document.createElement("p");
+  backup.className = "cc-review-backup";
+  backup.textContent =
+    "The current file is copied to a .fcc-backup sibling before the first write.";
+  body.append(backup);
+}
+
+function ccCloseReview() {
+  byId("ccReviewModal").hidden = true;
+}
+
+async function ccOpenReview() {
+  const config = state.claudeConfig;
+  if (!config.pending.size || config.busy) return;
+
+  try {
+    const plan = await api("/admin/api/claude-config/plan", {
+      method: "POST",
+      body: JSON.stringify({
+        path: claudeSettingsPathInputValue() || null,
+        changes: ccChangePayload(),
+      }),
+    });
+    ccRenderReview(plan);
+    byId("ccReviewModal").hidden = false;
+  } catch (error) {
+    showMessage(`Could not build the change list: ${error.message}`, "error");
+  }
+}
+
+async function ccApply() {
+  const config = state.claudeConfig;
+  if (config.busy) return;
+  config.busy = true;
+  renderClaudeConfigPending();
+
+  try {
+    const result = await api("/admin/api/claude-config/apply", {
+      method: "POST",
+      body: JSON.stringify({
+        path: claudeSettingsPathInputValue() || null,
+        changes: ccChangePayload(),
+      }),
+    });
+    const applied = result.applied?.length || 0;
+    showMessage(
+      applied === 1 ? "1 setting written" : `${applied} settings written`,
+      "ok",
+    );
+    ccCloseReview();
+    config.pending.clear();
+    config.values = result.values || {};
+    renderClaudeConfig();
+    // The connect panel reads the same file, so its status is stale now.
+    await loadClaudeSettings(claudeSettingsPathInputValue());
+  } catch (error) {
+    showMessage(`Could not write settings: ${error.message}`, "error");
+  } finally {
+    config.busy = false;
+    renderClaudeConfigPending();
+  }
+}
+
+byId("ccApplyButton").addEventListener("click", () => ccOpenReview());
+byId("ccDiscardButton").addEventListener("click", () => {
+  state.claudeConfig.pending.clear();
+  renderClaudeConfig();
+});
+byId("ccReviewClose").addEventListener("click", () => ccCloseReview());
+byId("ccReviewCancel").addEventListener("click", () => ccCloseReview());
+byId("ccReviewConfirm").addEventListener("click", () => ccApply());
+byId("ccSearch").addEventListener("input", (event) => {
+  state.claudeConfig.query = event.currentTarget.value;
+  renderClaudeConfig();
+});
+byId("ccConfiguredOnly").addEventListener("change", (event) => {
+  state.claudeConfig.configuredOnly = event.currentTarget.checked;
+  renderClaudeConfig();
+});
+byId("ccShowAll").addEventListener("change", (event) => {
+  state.claudeConfig.showAll = event.currentTarget.checked;
+  renderClaudeConfig();
 });
 
 function downloadJson(filename, value) {
