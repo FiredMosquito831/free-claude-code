@@ -264,6 +264,7 @@ async function loadDashboardState() {
   showMessage("");
   await loadVersionInfo();
   await loadClaudeSettings();
+  initClaudeConnectCopyButtons();
   // A restored "on" auto-refresh must actually start polling.
   updateRequestAutoRefresh();
 }
@@ -4621,6 +4622,17 @@ const CLAUDE_SETTINGS_STATUS_CLASS = {
   mismatch: "warn",
   unreadable: "error",
 };
+
+// The "Choose how you connect" cards each carry a copyable command. Wire the
+// copy buttons once: the blocks are static markup, so this runs at startup and
+// is idempotent (addCopyButton is only called once per block).
+function initClaudeConnectCopyButtons() {
+  const blocks = document.querySelectorAll("#view-claude .claude-command-block");
+  blocks.forEach((block) => {
+    if (block.querySelector(".guide-copy-button")) return;
+    addCopyButton(block, () => block.querySelector("code")?.textContent?.trim() || "");
+  });
+}
 
 function claudeSettingsPathInputValue() {
   return byId("claudeSettingsPath").value.trim();

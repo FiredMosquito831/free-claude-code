@@ -137,22 +137,71 @@
                 <p class="eyebrow">Client configuration</p>
                 <h3>Configure Claude Code</h3>
                 <p>
-                  Point the Claude Code CLI at this proxy. One Configure click
-                  writes the proxy URL and token into Claude Code&rsquo;s
-                  settings file so a stale <code>ANTHROPIC_BASE_URL</code> export
-                  can&rsquo;t silently override it.
-                </p>
-                <p class="claude-settings-project-note">
-                  Prefer a per-session setup that keeps normal Claude Code intact?
-                  Instead of configuring the file permanently, run
-                  <code>mcc-claude</code> to point this shell session at My Claude
-                  Code without touching any file, or <code>mcc-claude --discover-models</code>
-                  to also list the gateway models in the <code>/model</code> picker.
-                  Normal <code>claude</code> keeps using your standard Anthropic
-                  account.
+                  Point the Claude Code CLI at this proxy. Choose how you want to
+                  connect: a per-session command that leaves your normal Claude Code
+                  untouched, or a permanent settings file so every session points at
+                  My Claude Code.
                 </p>
               </div>
             </div>
+
+            <section class="settings-section" aria-label="Choose how you connect">
+              <div class="section-heading">
+                <div>
+                  <h3>Choose how you connect</h3>
+                  <p>
+                    Two ways to use Claude Code with My Claude Code. Pick the one
+                    that fits how you work &mdash; you can switch any time.
+                  </p>
+                </div>
+              </div>
+              <div class="claude-connect-options">
+                <article class="claude-connect-option">
+                  <div class="claude-connect-head">
+                    <span class="claude-connect-badge">Per session</span>
+                    <h4>Run <code>mcc-claude</code></h4>
+                  </div>
+                  <p>
+                    Points <em>only the current shell session</em> at My Claude Code,
+                    without touching any file. Your normal <code>claude</code> command
+                    keeps using your standard Anthropic account.
+                  </p>
+                  <p class="claude-connect-when">
+                    <strong>Good for:</strong> trying My Claude Code, or using it
+                    alongside normal Claude Code.
+                  </p>
+                  <div class="claude-command-block">
+                    <code>mcc-claude</code>
+                  </div>
+                  <div class="claude-command-block">
+                    <code>mcc-claude --discover-models</code>
+                    <span class="claude-command-note">
+                      Also lists the gateway models in the <code>/model</code> picker.
+                    </span>
+                  </div>
+                </article>
+                <article class="claude-connect-option">
+                  <div class="claude-connect-head">
+                    <span class="claude-connect-badge">Permanent</span>
+                    <h4>Configure the settings file</h4>
+                  </div>
+                  <p>
+                    Writes the proxy URL and token into Claude Code&rsquo;s
+                    <code>settings.json</code>, so <em>every</em> Claude Code session
+                    points at My Claude Code. The previous file is backed up first.
+                  </p>
+                  <p class="claude-connect-when">
+                    <strong>Good for:</strong> using My Claude Code as your default,
+                    with no per-session setup.
+                  </p>
+                  <div class="claude-connect-cta">
+                    Use the Configure panel below, or read
+                    <a href="#guide-cli">the Guide</a> for editing by hand.
+                  </div>
+                </article>
+              </div>
+            </section>
+
             <section
               class="settings-section"
               id="claudeSettingsPanel"
