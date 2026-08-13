@@ -56,6 +56,10 @@ const state = {
   // someone who deliberately opened a step to re-read it.
   onboardingExpandedByUser: false,
   userNavigated: false,
+  // True while load() is running. Navigation during the initial render must
+  // not persist half-restored state (e.g. empty analytics filters) over the
+  // saved state we are in the middle of restoring.
+  loading: false,
 };
 
 const MASKED_SECRET = "********";
@@ -179,8 +183,21 @@ async function api(path, options = {}) {
 
 async function load() {
   showMessage("Loading admin config");
+  state.loading = true;
+  try {
+    await loadOnboarding().catch((error) => showMessage(error.message, "error"));
+    await loadDashboardState();
+  } finally {
+    state.loading = false;
+  }
+}
+
+async function loadDashboardState() {
+  // Read the persisted state after the first await: at the very start of load()
+  // (during initial script execution) the browser can still be settling
+  // localStorage and a synchronous read returns an empty object. Yielding to
+  // the event loop first makes the read reliable.
   const savedState = restoreDashboardState();
-  await loadOnboarding().catch((error) => showMessage(error.message, "error"));
   if (
     state.onboarding &&
     !state.onboarding.dismissed &&
@@ -201,6 +218,24 @@ async function load() {
     state.webSearchStatsPeriod = savedState.webSearchStatsPeriod;
     const periodSelect = byId("webSearchStatsPeriod");
     if (periodSelect) periodSelect.value = savedState.webSearchStatsPeriod;
+  }
+  // Restore the analytics filters and page so a refresh continues the same query.
+  if (savedState?.reqFilters) {
+    const f = savedState.reqFilters;
+    if (byId("reqFilterProvider")) byId("reqFilterProvider").value = f.provider || "";
+    if (byId("reqFilterModel")) byId("reqFilterModel").value = f.model || "";
+    if (byId("reqFilterKey")) byId("reqFilterKey").value = f.key || "";
+    if (byId("reqFilterSearch")) byId("reqFilterSearch").value = f.search || "";
+    if (f.status && byId("reqFilterStatus")) byId("reqFilterStatus").value = f.status;
+    if (byId("reqFilterEndpoint")) byId("reqFilterEndpoint").value = f.endpoint || "";
+    if (f.window && byId("reqFilterWindow")) byId("reqFilterWindow").value = f.window;
+    if (f.pageSize && byId("reqPageSize")) {
+      byId("reqPageSize").value = f.pageSize;
+      reqState.limit = Number(f.pageSize) || reqState.limit;
+    }
+  }
+  if (savedState?.reqOffset) {
+    reqState.offset = Number(savedState.reqOffset) || 0;
   }
   const config = await api("/admin/api/config");
   state.config = config;
@@ -252,8 +287,10 @@ function setActiveView(viewId, { scroll = false } = {}) {
     VIEW_GROUPS.find((view) => view.id === viewId) || VIEW_GROUPS[0];
   state.activeView = activeView.id;
   byId("pageTitle").textContent = activeView.title;
-  // Persist real navigation, but never the forced onboarding view.
-  if (activeView.id !== "get_started") persistDashboardState();
+  // Persist real navigation, but never the forced onboarding view, and never
+  // while load() is mid-restore (it would clobber the saved state with the
+  // not-yet-restored DOM).
+  if (activeView.id !== "get_started" && !state.loading) persistDashboardState();
 
   document.querySelectorAll(".nav-link").forEach((link) => {
     const selected = link.dataset.view === activeView.id;
@@ -5606,6 +5643,18 @@ function persistDashboardState() {
         ? String(byId("reqAutoRefreshInterval").value)
         : undefined,
       webSearchStatsPeriod: state.webSearchStatsPeriod || undefined,
+      // Analytics filters + page so an F5 refresh continues the same query.
+      reqFilters: {
+        provider: byId("reqFilterProvider")?.value?.trim() || undefined,
+        model: byId("reqFilterModel")?.value?.trim() || undefined,
+        key: byId("reqFilterKey")?.value?.trim() || undefined,
+        search: byId("reqFilterSearch")?.value?.trim() || undefined,
+        status: byId("reqFilterStatus")?.value || undefined,
+        endpoint: byId("reqFilterEndpoint")?.value?.trim() || undefined,
+        window: byId("reqFilterWindow")?.value || undefined,
+        pageSize: byId("reqPageSize")?.value || undefined,
+      },
+      reqOffset: reqState.offset > 0 ? reqState.offset : undefined,
     };
     localStorage.setItem(DASH_STATE_KEY, JSON.stringify(stateToSave));
   } catch (_) {
@@ -6312,7 +6361,24 @@ document.addEventListener("keydown", (event) => {
 });
 byId("reqApplyFilters").addEventListener("click", () => {
   reqState.offset = 0;
+  persistDashboardState();
   loadRequestsView().catch((error) => showMessage(error.message, "error"));
+});
+byId("reqClearFilters").addEventListener("click", () => {
+  // Reset every analytics filter to its default and reload, so the view
+  // returns to "show everything" without a manual page refresh.
+  byId("reqFilterProvider").value = "";
+  byId("reqFilterModel").value = "";
+  byId("reqFilterKey").value = "";
+  byId("reqFilterSearch").value = "";
+  byId("reqFilterStatus").value = "";
+  byId("reqFilterEndpoint").value = "";
+  byId("reqFilterWindow").value = "";
+  byId("reqPageSize").value = "25";
+  reqState.limit = 25;
+  reqState.offset = 0;
+  loadRequestsView().catch((error) => showMessage(error.message, "error"));
+  persistDashboardState();
 });
 byId("reqFilterSearch").addEventListener("keydown", (event) => {
   if (event.key !== "Enter") return;
