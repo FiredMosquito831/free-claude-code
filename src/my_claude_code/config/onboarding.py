@@ -217,7 +217,7 @@ def build_state(
             optional=False,
             done=claude_settings_configured,
             instructions=(
-                "Open the Claude Code page from the left nav.",
+                "Open the Configure Claude Code page from the left nav.",
                 "Click Configure to write MCC's URL and token into settings.json.",
             ),
             target="#claudeSettingsPanel",

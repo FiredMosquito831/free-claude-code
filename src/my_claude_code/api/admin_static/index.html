@@ -135,12 +135,21 @@
             <div class="observability-heading">
               <div>
                 <p class="eyebrow">Client configuration</p>
-                <h3>Claude Code</h3>
+                <h3>Configure Claude Code</h3>
                 <p>
                   Point the Claude Code CLI at this proxy. One Configure click
                   writes the proxy URL and token into Claude Code&rsquo;s
                   settings file so a stale <code>ANTHROPIC_BASE_URL</code> export
                   can&rsquo;t silently override it.
+                </p>
+                <p class="claude-settings-project-note">
+                  Prefer a per-session setup that keeps normal Claude Code intact?
+                  Instead of configuring the file permanently, run
+                  <code>mcc-claude</code> to point this shell session at My Claude
+                  Code without touching any file, or <code>mcc-claude --discover-models</code>
+                  to also list the gateway models in the <code>/model</code> picker.
+                  Normal <code>claude</code> keeps using your standard Anthropic
+                  account.
                 </p>
               </div>
             </div>

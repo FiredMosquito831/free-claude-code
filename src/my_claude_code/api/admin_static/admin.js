@@ -82,8 +82,8 @@ const VIEW_GROUPS = [
   },
   {
     id: "claude",
-    label: "Claude Code",
-    title: "Claude Code",
+    label: "Configure Claude Code",
+    title: "Configure Claude Code",
     sections: [],
     containerId: null,
   },
