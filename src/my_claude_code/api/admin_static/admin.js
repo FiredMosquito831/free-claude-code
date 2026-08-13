@@ -4940,7 +4940,12 @@ const CC_SECRET_MASK = "********";
 
 // Controls made of several inputs, which therefore cannot be the target of a
 // single <label for>.
-const CC_GROUP_CONTROLS = new Set(["array"]);
+const CC_GROUP_CONTROLS = new Set([
+  "array",
+  "toggle",
+  "set_or_unset",
+  "numeric_boolean",
+]);
 
 // Tool names that can start a permission rule, with the shape of what follows.
 // Ordered as the docs present them, most-used first.
@@ -5236,6 +5241,78 @@ function ccControlId(key) {
   return `ccField-${key.replace(/\W/g, '-')}`;
 }
 
+// Every binary setting is three-state, not a checkbox.
+//
+// A checkbox has two positions and a settings file has three states: the key
+// says true, the key says false, or the key is absent and Claude Code uses its
+// own default. Unchecking a box used to write `false`, which is a different
+// instruction from "I have no opinion" -- and for a setting whose default is
+// true, writing false actively changes behaviour the user only meant to stop
+// overriding.
+//
+// The presence-read family is the exception with a reason: Claude Code reads
+// only whether those variables exist, so "false" is not a state they can be
+// in. Those get two options, and the row's `presence` badge says why.
+function ccTriStateOptions(entry) {
+  if (entry.control === "set_or_unset") {
+    return [
+      { id: "on", label: "On", value: "1" },
+      { id: "unset", label: "Not set", value: undefined },
+    ];
+  }
+
+  const onValue = entry.kind === "env" ? "1" : true;
+  const offValue = entry.kind === "env" ? "0" : false;
+  return [
+    { id: "on", label: entry.kind === "env" ? "On" : "True", value: onValue },
+    { id: "off", label: entry.kind === "env" ? "Off" : "False", value: offValue },
+    { id: "unset", label: "Not set", value: undefined },
+  ];
+}
+
+function ccTriStateSelection(entry, value) {
+  if (value === undefined || value === null || value === "") return "unset";
+  // A presence-read variable is on whenever it exists at all, whatever it says.
+  if (entry.control === "set_or_unset") return "on";
+  if (typeof value === "boolean") return value ? "on" : "off";
+  return ccTruthy(value) ? "on" : "off";
+}
+
+function ccBuildTriState(entry, key, value, controlId) {
+  const group = document.createElement("div");
+  group.className = "cc-tristate";
+  group.setAttribute("role", "radiogroup");
+  group.setAttribute("aria-labelledby", `${controlId}-label`);
+
+  const selected = ccTriStateSelection(entry, value);
+  const defaultHint = entry.default ? ` (default ${ccPlainText(entry.default)})` : "";
+
+  ccTriStateOptions(entry).forEach((option) => {
+    const optionId = `${controlId}-${option.id}`;
+
+    const input = document.createElement("input");
+    input.type = "radio";
+    input.name = controlId;
+    input.id = optionId;
+    input.checked = option.id === selected;
+    input.addEventListener("change", () => {
+      ccSetPending(key, option.value);
+    });
+
+    const label = document.createElement("label");
+    label.className = "cc-tristate-option";
+    label.htmlFor = optionId;
+    label.textContent = option.label;
+    if (option.id === "unset") {
+      label.title = `Remove the key so Claude Code uses its default${defaultHint}`;
+    }
+
+    group.append(input, label);
+  });
+
+  return group;
+}
+
 function ccBuildControl(entry) {
   const key = ccKeyFor(entry);
   const controlId = ccControlId(key);
@@ -5243,28 +5320,12 @@ function ccBuildControl(entry) {
   const wrapper = document.createElement("div");
   wrapper.className = "cc-control";
 
-  if (entry.control === "toggle" || entry.control === "set_or_unset") {
-    // A span, not a second <label>: the row's setting name is already the
-    // label, and wrapping the box in another one leaves the checkbox with no
-    // id for that label to point at.
-    const shell = document.createElement("span");
-    shell.className = "cc-switch";
-    const input = document.createElement("input");
-    input.id = controlId;
-    input.type = "checkbox";
-    input.checked =
-      entry.kind === "env" ? ccTruthy(value) : value === true || ccTruthy(value);
-    input.addEventListener("change", () => {
-      if (!input.checked) {
-        // Off means "remove the key" for a presence-read variable, and for
-        // everything else writing the explicit false is what the user meant.
-        ccSetPending(key, entry.control === "set_or_unset" ? undefined : false);
-      } else {
-        ccSetPending(key, entry.kind === "env" ? "1" : true);
-      }
-    });
-    shell.append(input);
-    wrapper.append(shell);
+  if (
+    entry.control === "toggle" ||
+    entry.control === "set_or_unset" ||
+    entry.control === "numeric_boolean"
+  ) {
+    wrapper.append(ccBuildTriState(entry, key, value, controlId));
     return wrapper;
   }
 
