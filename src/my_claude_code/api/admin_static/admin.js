@@ -341,6 +341,9 @@ function setActiveView(viewId, { scroll = false } = {}) {
   if (activeView.id === "claude") {
     loadClaudeSettings().catch((error) => showMessage(error.message, "error"));
     loadClaudeConfig().catch((error) => showMessage(error.message, "error"));
+    // Wiring at startup alone is not enough: the view is hidden then, and a
+    // hidden block still needs its button before the reader first sees it.
+    initClaudeConnectCopyButtons();
   }
 
   if (scroll) {
@@ -4850,80 +4853,59 @@ byId("claudeSettingsPath").addEventListener("change", (event) => {
 //   numeric_boolean  FORCE_HYPERLINK parses as a number, so "false" enables it.
 //   secret           Never round-trip the masked value back as a write.
 
-const CC_CATEGORY_TITLES = {
-  auth: "Authentication",
-  endpoint: "Endpoint and proxy",
-  provider: "Third-party providers",
-  model: "Model, thinking, and effort",
-  context: "Context and caching",
-  network: "Timeouts and retries",
-  tools: "Tool behaviour",
-  subagents: "Subagents and background work",
-  mcp: "MCP",
-  session: "Session and storage",
-  telemetry: "Telemetry",
-  ui: "Terminal and accessibility",
-  plugins: "Plugins and skills",
-  updates: "Updates",
-  commands: "Slash commands",
-  features: "Feature switches",
-  settings: "General",
-  other: "Other",
-};
-
-const CC_CATEGORY_ORDER = [
-  "settings",
-  "model",
-  "context",
-  "tools",
-  "subagents",
-  "mcp",
-  "session",
-  "ui",
-  "network",
-  "endpoint",
-  "auth",
-  "provider",
-  "telemetry",
-  "plugins",
-  "updates",
-  "commands",
-  "features",
-  "other",
+// The catalog carries a `group` for every entry: nine sections named for what
+// you are configuring, rather than the docs' sixteen mechanical categories,
+// several of which hold one or two rows. Grouping lives in the generator so the
+// page and docs/CLAUDE-CODE-CONFIG.md can never disagree about where a setting
+// is.
+const CC_GROUPS = [
+  ["model", "Model and reasoning"],
+  ["context", "Context and cost"],
+  ["permissions", "Permissions and safety"],
+  ["tools", "Tools"],
+  ["agents", "Agents, skills, and automation"],
+  ["mcp", "MCP"],
+  ["connection", "Connection and providers"],
+  ["interface", "Interface"],
+  ["privacy", "Privacy, telemetry, and updates"],
 ];
+
+const CC_GROUP_TITLES = new Map(CC_GROUPS);
+const CC_GROUP_ORDER = new Map(CC_GROUPS.map(([key], index) => [key, index]));
 
 const CC_SECRET_MASK = "********";
 
-function ccCategoryTitle(category) {
-  return CC_CATEGORY_TITLES[category] || category;
+// Controls made of several inputs, which therefore cannot be the target of a
+// single <label for>.
+const CC_GROUP_CONTROLS = new Set(["array"]);
+
+// Tool names that can start a permission rule, with the shape of what follows.
+// Ordered as the docs present them, most-used first.
+const CC_RULE_TOOLS = [
+  { tool: "Bash", hint: "npm run test *", help: "Command prefix. * matches anything, including spaces." },
+  { tool: "PowerShell", hint: "Get-ChildItem *", help: "Same shape as Bash. Aliases are canonicalised." },
+  { tool: "Read", hint: "./.env", help: "// absolute, ~/ home, / settings-relative, ./ current directory." },
+  { tool: "Edit", hint: "/src/**", help: "Covers every built-in tool that edits files." },
+  { tool: "WebFetch", hint: "domain:example.com", help: "Matched against the hostname. *.example.com covers subdomains." },
+  { tool: "Agent", hint: "Explore", help: "Names a subagent." },
+  { tool: "Cd", hint: "~/code/**", help: "Governs the /cd command, not a model tool." },
+  { tool: "WebSearch", hint: "", help: "Bare name matches every use." },
+  { tool: "mcp__server", hint: "", help: "One MCP server; add __tool for a single tool." },
+];
+
+const CC_RULE_KEYS = new Set([
+  "permissions.allow",
+  "permissions.ask",
+  "permissions.deny",
+]);
+
+function ccGroupTitle(group) {
+  return CC_GROUP_TITLES.get(group) || group;
 }
 
-// The catalog names permission and sandbox keys with their parent prefix
-// already ("permissions.allow"), so grouping by category alone would scatter
-// them. Give those their own sections, which is also how people think of them.
-function ccSectionFor(entry) {
-  if (entry.name.startsWith("permissions.")) return "permissions";
-  if (entry.name.startsWith("sandbox.")) return "sandbox";
-  if (entry.name.startsWith("attribution.")) return "attribution";
-  return entry.category;
-}
-
-const CC_EXTRA_SECTION_TITLES = {
-  permissions: "Permissions",
-  sandbox: "Sandbox",
-  attribution: "Git attribution",
-};
-
-function ccSectionTitle(section) {
-  return CC_EXTRA_SECTION_TITLES[section] || ccCategoryTitle(section);
-}
-
-function ccSectionOrder(section) {
-  if (section === "permissions") return -2;
-  if (section === "sandbox") return -1;
-  if (section === "attribution") return 100;
-  const index = CC_CATEGORY_ORDER.indexOf(section);
-  return index === -1 ? 99 : index;
+function ccGroupOrder(group) {
+  const index = CC_GROUP_ORDER.get(group);
+  return index === undefined ? CC_GROUPS.length : index;
 }
 
 // settings.json addresses env vars under an "env" object, so the document and
@@ -4994,16 +4976,218 @@ function ccVisibleEntries() {
   });
 }
 
+// An array setting is a list of things you add and remove, not a blob of JSON.
+// Rendering it as a textarea made the most common edit in the file -- adding
+// one permission rule -- an exercise in matching brackets.
+function ccCurrentList(key) {
+  const value = ccDisplayValue(key);
+  return Array.isArray(value) ? value.map(String) : [];
+}
+
+function ccWriteList(key, items) {
+  ccSetPending(key, items.length ? items : undefined);
+}
+
+function ccListRow(key, item, index, items) {
+  const row = document.createElement("li");
+  row.className = "cc-list-row";
+
+  const text = document.createElement("code");
+  text.className = "cc-list-value";
+  text.textContent = item;
+
+  const remove = document.createElement("button");
+  remove.type = "button";
+  remove.className = "cc-list-remove";
+  remove.setAttribute("aria-label", `Remove ${item}`);
+  remove.textContent = "×";
+  remove.addEventListener("click", () => {
+    const next = items.slice();
+    next.splice(index, 1);
+    ccWriteList(key, next);
+    renderClaudeConfig();
+  });
+
+  row.append(text, remove);
+  return row;
+}
+
+// The rule builder. A tool dropdown plus a specifier is enough structure to
+// stop the two mistakes the docs warn about: writing a rule for a tool that is
+// never consulted for paths, and forgetting that a bare tool name in `deny`
+// removes the tool from Claude's context entirely.
+function ccRuleBuilder(key, items) {
+  const form = document.createElement("div");
+  form.className = "cc-rule-builder";
+
+  const toolId = `ccRuleTool-${key.replace(/W/g, "-")}`;
+  const specId = `ccRuleSpec-${key.replace(/W/g, "-")}`;
+
+  const toolLabel = document.createElement("label");
+  toolLabel.className = "sr-only";
+  toolLabel.htmlFor = toolId;
+  toolLabel.textContent = "Tool";
+
+  const select = document.createElement("select");
+  select.id = toolId;
+  CC_RULE_TOOLS.forEach((option) => {
+    const node = document.createElement("option");
+    node.value = option.tool;
+    node.textContent = option.tool;
+    select.append(node);
+  });
+
+  const specLabel = document.createElement("label");
+  specLabel.className = "sr-only";
+  specLabel.htmlFor = specId;
+  specLabel.textContent = "Specifier";
+
+  const spec = document.createElement("input");
+  spec.id = specId;
+  spec.type = "text";
+  spec.autocomplete = "off";
+  spec.spellcheck = false;
+
+  const preview = document.createElement("code");
+  preview.className = "cc-rule-preview";
+
+  const help = document.createElement("p");
+  help.className = "cc-rule-help";
+
+  const add = document.createElement("button");
+  add.type = "button";
+  add.className = "secondary-button cc-rule-add";
+  add.textContent = "Add";
+
+  const composed = () => {
+    const tool = select.value;
+    const specifier = spec.value.trim();
+    return specifier ? `${tool}(${specifier})` : tool;
+  };
+
+  const refresh = () => {
+    const option = CC_RULE_TOOLS.find((entry) => entry.tool === select.value);
+    spec.placeholder = option?.hint || "(no specifier — matches every use)";
+    help.textContent = option?.help || "";
+    preview.textContent = composed();
+    add.disabled = items.includes(composed());
+  };
+
+  select.addEventListener("change", refresh);
+  spec.addEventListener("input", refresh);
+  add.addEventListener("click", () => {
+    const rule = composed();
+    if (!rule || items.includes(rule)) return;
+    ccWriteList(key, [...items, rule]);
+    renderClaudeConfig();
+  });
+
+  refresh();
+
+  const controls = document.createElement("div");
+  controls.className = "cc-rule-controls";
+  controls.append(toolLabel, select, specLabel, spec, add);
+
+  const result = document.createElement("p");
+  result.className = "cc-rule-result";
+  result.append(document.createTextNode("Adds "), preview);
+
+  form.append(controls, result, help);
+  return form;
+}
+
+function ccBuildListEditor(entry, key) {
+  const wrapper = document.createElement("div");
+  wrapper.className = "cc-list-editor";
+
+  const items = ccCurrentList(key);
+
+  if (items.length) {
+    const list = document.createElement("ul");
+    list.className = "cc-list";
+    items.forEach((item, index) => list.append(ccListRow(key, item, index, items)));
+    wrapper.append(list);
+  } else {
+    const empty = document.createElement("p");
+    empty.className = "cc-list-empty";
+    empty.textContent = "Nothing set.";
+    wrapper.append(empty);
+  }
+
+  if (CC_RULE_KEYS.has(key)) {
+    wrapper.append(ccRuleBuilder(key, items));
+    return wrapper;
+  }
+
+  const addRow = document.createElement("div");
+  addRow.className = "cc-list-add";
+
+  const input = document.createElement("input");
+  input.type = "text";
+  input.autocomplete = "off";
+  input.spellcheck = false;
+  input.placeholder = ccPlainText(entry.example) || "Add an entry";
+  input.setAttribute("aria-label", `Add an entry to ${entry.name}`);
+
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "secondary-button";
+  button.textContent = "Add";
+
+  const commit = () => {
+    const value = input.value.trim();
+    if (!value || items.includes(value)) return;
+    ccWriteList(key, [...items, value]);
+    renderClaudeConfig();
+  };
+
+  button.addEventListener("click", commit);
+  input.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      commit();
+    }
+  });
+
+  addRow.append(input, button);
+  wrapper.append(addRow);
+  return wrapper;
+}
+
+function ccSetFieldError(wrapper, message) {
+  let node = wrapper.querySelector(".cc-field-error");
+  if (!message) {
+    node?.remove();
+    return;
+  }
+  if (!node) {
+    node = document.createElement("p");
+    node.className = "cc-field-error";
+    node.setAttribute("role", "alert");
+    wrapper.append(node);
+  }
+  node.textContent = message;
+}
+
+function ccControlId(key) {
+  return `ccField-${key.replace(/\W/g, '-')}`;
+}
+
 function ccBuildControl(entry) {
   const key = ccKeyFor(entry);
+  const controlId = ccControlId(key);
   const value = ccDisplayValue(key);
   const wrapper = document.createElement("div");
   wrapper.className = "cc-control";
 
   if (entry.control === "toggle" || entry.control === "set_or_unset") {
-    const label = document.createElement("label");
-    label.className = "cc-switch";
+    // A span, not a second <label>: the row's setting name is already the
+    // label, and wrapping the box in another one leaves the checkbox with no
+    // id for that label to point at.
+    const shell = document.createElement("span");
+    shell.className = "cc-switch";
     const input = document.createElement("input");
+    input.id = controlId;
     input.type = "checkbox";
     input.checked =
       entry.kind === "env" ? ccTruthy(value) : value === true || ccTruthy(value);
@@ -5016,13 +5200,14 @@ function ccBuildControl(entry) {
         ccSetPending(key, entry.kind === "env" ? "1" : true);
       }
     });
-    label.append(input, Object.assign(document.createElement("span"), {}));
-    wrapper.append(label);
+    shell.append(input);
+    wrapper.append(shell);
     return wrapper;
   }
 
   if (entry.control === "enum" && entry.values?.length) {
     const select = document.createElement("select");
+    select.id = controlId;
     const blank = document.createElement("option");
     blank.value = "";
     blank.textContent = entry.default
@@ -5051,8 +5236,18 @@ function ccBuildControl(entry) {
     return wrapper;
   }
 
-  if (entry.control === "array" || entry.control === "object" || entry.control === "json") {
+  if (entry.control === "array") {
+    const editor = ccBuildListEditor(entry, key);
+    editor.setAttribute("role", "group");
+    editor.setAttribute("aria-labelledby", `${controlId}-label`);
+    wrapper.append(editor);
+    wrapper.classList.add("cc-control-wide");
+    return wrapper;
+  }
+
+  if (entry.control === "object" || entry.control === "json") {
     const area = document.createElement("textarea");
+    area.id = controlId;
     area.rows = 3;
     area.spellcheck = false;
     area.value = value === undefined ? "" : JSON.stringify(value, null, 2);
@@ -5062,15 +5257,23 @@ function ccBuildControl(entry) {
       if (!text) {
         ccSetPending(key, undefined);
         area.classList.remove("is-invalid");
+        area.removeAttribute("aria-invalid");
+        ccSetFieldError(wrapper, "");
         return;
       }
       try {
         ccSetPending(key, JSON.parse(text));
         area.classList.remove("is-invalid");
-      } catch {
+        area.removeAttribute("aria-invalid");
+        ccSetFieldError(wrapper, "");
+      } catch (error) {
         // Refusing here beats sending malformed JSON and getting a 4xx after
-        // the user has already pressed Apply.
+        // the user has already pressed Apply. The message goes next to the
+        // field as well as into the toast: an error only at the top of the page
+        // is an error the reader has to hunt for.
         area.classList.add("is-invalid");
+        area.setAttribute("aria-invalid", "true");
+        ccSetFieldError(wrapper, `Not valid JSON: ${error.message}`);
         showMessage(`${entry.name}: not valid JSON`, "error");
       }
     });
@@ -5079,6 +5282,7 @@ function ccBuildControl(entry) {
   }
 
   const input = document.createElement("input");
+  input.id = controlId;
   input.type = entry.control === "number" ? "number" : "text";
   input.autocomplete = "off";
   input.spellcheck = false;
@@ -5111,10 +5315,26 @@ function ccBuildRow(entry) {
   const head = document.createElement("div");
   head.className = "cc-row-head";
 
+  // A real <label for> rather than styled text: the setting name is the only
+  // thing identifying the control, so a screen reader has to reach it. List and
+  // rule editors have no single control to point at, so those are labelled as a
+  // group instead -- a <label for> aimed at an id that does not exist is worse
+  // than none, because it reads as labelled and is not.
+  const singleControl = !CC_GROUP_CONTROLS.has(entry.control);
+  const label = document.createElement(singleControl ? "label" : "span");
+  label.className = "cc-row-label";
+  if (singleControl) {
+    label.htmlFor = ccControlId(key);
+  } else {
+    label.id = `${ccControlId(key)}-label`;
+  }
+
   const name = document.createElement("code");
   name.className = "cc-row-name";
-  name.textContent = entry.kind === "env" ? entry.name : entry.name;
-  head.append(name);
+  name.textContent = entry.name;
+
+  label.append(name);
+  head.append(label);
 
   if (entry.kind === "env") {
     const badge = document.createElement("span");
@@ -5159,6 +5379,8 @@ function ccBuildRow(entry) {
 function ccPlainText(markdown) {
   return String(markdown || "")
     .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
+    .replace(/\*\*([^*]+)\*\*/g, "$1")
+    .replace(/\\([\\`*_[\]])/g, "$1")
     .replace(/`/g, "")
     .replace(/\s+/g, " ")
     .trim();
@@ -5183,20 +5405,20 @@ function renderClaudeConfig() {
 
   const grouped = new Map();
   visible.forEach((entry) => {
-    const section = ccSectionFor(entry);
+    const section = entry.group || "interface";
     if (!grouped.has(section)) grouped.set(section, []);
     grouped.get(section).push(entry);
   });
 
   [...grouped.keys()]
-    .sort((left, right) => ccSectionOrder(left) - ccSectionOrder(right))
+    .sort((left, right) => ccGroupOrder(left) - ccGroupOrder(right))
     .forEach((section) => {
       const block = document.createElement("section");
       block.className = "cc-section";
 
       const heading = document.createElement("h4");
       heading.className = "cc-section-title";
-      heading.textContent = ccSectionTitle(section);
+      heading.textContent = ccGroupTitle(section);
       const count = document.createElement("span");
       count.className = "cc-section-count";
       count.textContent = String(grouped.get(section).length);

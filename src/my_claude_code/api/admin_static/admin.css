@@ -2232,7 +2232,7 @@ textarea:focus-visible,
   padding: 5px 8px;
   border: 1px solid var(--line-strong);
   border-radius: var(--radius-sm);
-  background: var(--input-bg, var(--surface));
+  background: var(--input);
   color: var(--text);
 }
 
@@ -3888,65 +3888,14 @@ details.turn-pane > summary:focus-visible {
    "what it does / good for" and a copyable command block. Flat + dense: no
    grouping or accordions, the choice is visible at a glance. */
 
-.claude-connect-options {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-  gap: var(--space-4);
-}
 
-.claude-connect-option {
-  padding: var(--space-4);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-md);
-  background: var(--card);
-}
 
-.claude-connect-option h4 {
-  margin: 0;
-  font-size: 15px;
-  font-weight: 650;
-  color: var(--text);
-}
 
-.claude-connect-option h4 code {
-  font-size: 13px;
-}
 
-.claude-connect-head {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-  margin-bottom: var(--space-3);
-}
 
-.claude-connect-badge {
-  flex: none;
-  padding: 2px 8px;
-  border: 1px solid var(--accent-border);
-  border-radius: 999px;
-  background: var(--accent-muted);
-  color: var(--accent);
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-}
 
-.claude-connect-option > p {
-  margin: 0 0 var(--space-3);
-  font-size: 13px;
-  line-height: 1.5;
-  color: var(--muted);
-}
 
-.claude-connect-when {
-  font-size: 12px;
-  color: var(--muted);
-}
 
-.claude-connect-when strong {
-  color: var(--text);
-}
 
 .claude-command-block {
   position: relative;
@@ -3974,15 +3923,7 @@ details.turn-pane > summary:focus-visible {
   color: var(--muted);
 }
 
-.claude-connect-cta {
-  margin-top: var(--space-3);
-  font-size: 13px;
-  color: var(--muted);
-}
 
-.claude-connect-cta a {
-  color: var(--accent);
-}
 
 /* ── Claude Code settings editor ──────────────────────────────────────────
    Flat and dense: one row per setting, sections that are always open, and a
@@ -4290,4 +4231,217 @@ details.turn-pane > summary:focus-visible {
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
+}
+
+/* ── Launcher list (the "no setup needed" section) ──────────────────────────
+   A list, not cards: five commands with one job each read faster stacked than
+   tiled, and the copy button lands in the same place on every row. */
+
+.claude-launchers {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.claude-launcher {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(240px, 360px);
+  align-items: center;
+  gap: var(--space-4);
+  padding: 14px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.claude-launcher:last-child {
+  border-bottom: 0;
+}
+
+.claude-launcher-info h4 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-strong);
+}
+
+.claude-launcher-info p {
+  margin: 3px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+.claude-launcher .claude-command-block {
+  margin: 0;
+}
+
+.claude-launcher-note {
+  margin: var(--space-4) 0 0;
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--line);
+  font-size: 12px;
+  color: var(--muted);
+}
+
+/* ── Array settings: a list you add to and remove from ──────────────────── */
+
+.cc-control-wide {
+  justify-content: stretch;
+}
+
+.cc-list-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+}
+
+.cc-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.cc-list-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 6px 5px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--panel-strong);
+}
+
+.cc-list-value {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+.cc-list-remove {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--muted);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.cc-list-remove:hover {
+  border-color: var(--error-border);
+  background: var(--error-bg);
+  color: var(--error);
+}
+
+.cc-list-empty {
+  margin: 0;
+  font-size: 12px;
+  font-style: italic;
+  color: var(--muted);
+}
+
+.cc-list-add {
+  display: flex;
+  gap: 6px;
+}
+
+.cc-list-add input {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 36px;
+}
+
+.cc-list-add button {
+  flex: 0 0 auto;
+}
+
+/* ── Permission rule builder ────────────────────────────────────────────── */
+
+.cc-rule-builder {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px;
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--radius-sm);
+}
+
+.cc-rule-controls {
+  display: flex;
+  gap: 6px;
+}
+
+.cc-rule-controls select {
+  flex: 0 0 auto;
+  min-width: 120px;
+  min-height: 36px;
+}
+
+.cc-rule-controls input {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 36px;
+}
+
+.cc-rule-result {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.cc-rule-preview {
+  font-family: var(--font-mono);
+  color: var(--accent);
+  overflow-wrap: anywhere;
+}
+
+.cc-rule-help {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+.cc-field-error {
+  margin: 6px 0 0;
+  font-size: 12px;
+  color: var(--error);
+}
+
+.cc-row-label {
+  cursor: pointer;
+}
+
+@media (max-width: 720px) {
+  .claude-launcher {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .cc-rule-controls {
+    flex-wrap: wrap;
+  }
+}
+
+/* The copy button is absolutely positioned inside the block, so a command long
+   enough to wrap ran underneath it. Reserve the button's width. */
+.claude-launcher .claude-command-block {
+  display: flex;
+  align-items: center;
+  min-height: 44px;
+  padding-right: 72px;
 }

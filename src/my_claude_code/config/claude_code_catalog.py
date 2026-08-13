@@ -80,6 +80,7 @@ class CatalogEntry:
     kind: str
     control: ControlKind
     category: str
+    group: str
     purpose: str
     common: bool
     default: str | None = None
@@ -120,6 +121,7 @@ class CatalogEntry:
             "kind": self.kind,
             "control": self.control,
             "category": self.category,
+            "group": self.group,
             "purpose": self.purpose,
             "common": self.common,
             "editable": self.editable,
@@ -193,6 +195,7 @@ def _coerce_entry(raw: dict[str, Any], *, kind: str) -> CatalogEntry:
         kind=kind,
         control=control,
         category=str(raw.get("category", "settings")),
+        group=str(raw.get("group", "interface")),
         purpose=str(raw.get("purpose", "")),
         common=bool(raw.get("common", False)),
         default=raw.get("default") if isinstance(raw.get("default"), str) else None,

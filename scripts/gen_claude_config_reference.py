@@ -345,6 +345,259 @@ def categorise(name: str) -> str:
     return "other"
 
 
+# --------------------------------------------------------------------------
+# Grouping for the Configure Claude Code page.
+#
+# The docs' own categories are mechanical -- 16 of them, several holding one or
+# two rows, and every settings.json key falling into a single "settings"
+# bucket. These nine groups are by *what you are configuring*, which is how
+# someone arrives at the page. The catalog carries the group so the page and
+# the reference never disagree about where a setting lives.
+# --------------------------------------------------------------------------
+GROUPS: tuple[tuple[str, str], ...] = (
+    ("model", "Model and reasoning"),
+    ("context", "Context and cost"),
+    ("permissions", "Permissions and safety"),
+    ("tools", "Tools"),
+    ("agents", "Agents, skills, and automation"),
+    ("mcp", "MCP"),
+    ("connection", "Connection and providers"),
+    ("interface", "Interface"),
+    ("privacy", "Privacy, telemetry, and updates"),
+)
+
+# Env-var categories map straight onto a group.
+CATEGORY_GROUP = {
+    "model": "model",
+    "context": "context",
+    "tools": "tools",
+    "subagents": "agents",
+    "plugins": "agents",
+    "mcp": "mcp",
+    "endpoint": "connection",
+    "auth": "connection",
+    "provider": "connection",
+    "network": "connection",
+    "ui": "interface",
+    "commands": "interface",
+    "session": "interface",
+    "telemetry": "privacy",
+    "updates": "privacy",
+}
+
+# settings.json keys all share one category, so they are placed by name.
+SETTING_GROUP = {
+    "model": {
+        "advisorModel",
+        "alwaysThinkingEnabled",
+        "availableModels",
+        "effortLevel",
+        "enforceAvailableModels",
+        "fallbackModel",
+        "fastMode",
+        "fastModePerSessionOptIn",
+        "model",
+        "modelOverrides",
+        "showThinkingSummaries",
+        "switchModelsOnFlag",
+        "ultracode",
+    },
+    "context": {
+        "autoCompactEnabled",
+        "autoCompactWindow",
+        "autoMemoryDirectory",
+        "autoMemoryEnabled",
+        "claudeMd",
+        "claudeMdExcludes",
+        "cleanupPeriodDays",
+        "fileCheckpointingEnabled",
+        "outputStyle",
+        "plansDirectory",
+        "showClearContextOnPlanAccept",
+    },
+    "permissions": {
+        "autoMode",
+        "autoMode.classifyAllShell",
+        "disableAutoMode",
+        "disableSkillShellExecution",
+        "isolatePeerMachines",
+        "permissions",
+        "allowManagedPermissionRulesOnly",
+        "skipWebFetchPreflight",
+        "crossSessionInbound",
+        "disableSideloadFlags",
+    },
+    "tools": {
+        "defaultShell",
+        "disableArtifact",
+        "enableArtifact",
+        "respectGitignore",
+        "respondToBashCommands",
+        "includeGitInstructions",
+        "attribution",
+        "prUrlTemplate",
+        "browserExternalPageTools",
+        "disableBrowserExternalNavigation",
+        "disableMobileSimulatorTools",
+    },
+    "agents": {
+        "agent",
+        "allowedChannelPlugins",
+        "allowedHttpHookUrls",
+        "allowManagedHooksOnly",
+        "blockedMarketplaces",
+        "channelsEnabled",
+        "disableAgentView",
+        "disableAllHooks",
+        "disableBundledSkills",
+        "disableWorkflows",
+        "fileSuggestion",
+        "hooks",
+        "httpHookAllowedEnvVars",
+        "pluginSuggestionMarketplaces",
+        "pluginTrustMessage",
+        "skillOverrides",
+        "skillListingBudgetFraction",
+        "skillListingMaxDescChars",
+        "strictKnownMarketplaces",
+        "strictPluginOnlyCustomization",
+        "statusLine",
+        "subagentStatusLine",
+        "teammateMode",
+        "useAutoModeDuringPlan",
+        "workflowKeywordTriggerEnabled",
+        "workflowSizeGuideline",
+        "worktree.baseRef",
+        "worktree.bgIsolation",
+        "worktree.sparsePaths",
+        "worktree.symlinkDirectories",
+    },
+    "mcp": {
+        "allowAllClaudeAiMcps",
+        "allowedMcpServers",
+        "allowManagedMcpServersOnly",
+        "deniedMcpServers",
+        "disabledMcpjsonServers",
+        "disableClaudeAiConnectors",
+        "enableAllProjectMcpServers",
+        "enabledMcpjsonServers",
+    },
+    "connection": {
+        "apiKeyHelper",
+        "awsAuthRefresh",
+        "awsCredentialExport",
+        "env",
+        "forceLoginGatewayUrl",
+        "forceLoginMethod",
+        "forceLoginOrgUUID",
+        "gcpAuthRefresh",
+        "processWrapper",
+        "remote.defaultEnvironmentId",
+        "disableRemoteControl",
+        "remoteControlAtStartup",
+        "sshConfigs",
+        "wslInheritsWindowsSettings",
+        "disableDeepLinkRegistration",
+    },
+    "interface": {
+        "agentPushNotifEnabled",
+        "askUserQuestionTimeout",
+        "autoScrollEnabled",
+        "awaySummaryEnabled",
+        "axScreenReader",
+        "companyAnnouncements",
+        "dialogExpiry",
+        "editorMode",
+        "emojiCompletionEnabled",
+        "inputNeededNotifEnabled",
+        "language",
+        "footerLinksRegexes",
+        "preferredNotifChannel",
+        "prefersReducedMotion",
+        "promptSuggestionEnabled",
+        "showTurnDuration",
+        "spinnerTipsEnabled",
+        "spinnerTipsOverride",
+        "spinnerVerbs",
+        "syntaxHighlightingDisabled",
+        "terminalProgressBarEnabled",
+        "theme",
+        "tui",
+        "verbose",
+        "viewMode",
+        "vimInsertModeRemaps",
+        "voice",
+        "voiceEnabled",
+        "wheelScrollAccelerationEnabled",
+    },
+    "privacy": {
+        "autoUpdatesChannel",
+        "feedbackSurveyRate",
+        "forceRemoteSettingsRefresh",
+        "minimumVersion",
+        "otelHeadersHelper",
+        "parentSettingsBehavior",
+        "policyHelper",
+        "requiredMaximumVersion",
+        "requiredMinimumVersion",
+    },
+}
+
+SETTING_GROUP_BY_NAME = {
+    name: group for group, names in SETTING_GROUP.items() for name in names
+}
+
+
+# The docs' "features" and "other" categories are grab-bags, so those variables
+# are placed by what the name is about rather than dropped into one bucket.
+ENV_NAME_GROUP: tuple[tuple[str, str], ...] = (
+    (
+        "privacy",
+        r"TELEMETRY|SURVEY|GROWTHBOOK|DO_NOT_TRACK|ERROR_REPORTING|NONESSENTIAL|ATTRIBUTION_HEADER|PROPAGATE_TRACEPARENT|OTEL|AUTOUPDATER|UPDATES|INSTALLATION_CHECKS|PACKAGE_MANAGER",
+    ),
+    (
+        "connection",
+        r"AUTH|BEDROCK|VERTEX|FOUNDRY|MANTLE|PROXY|CERT|BASE_URL|API_KEY|CUSTOM_HEADERS|BETAS|EXTRA_BODY|GATEWAY|PROVIDER_MANAGED",
+    ),
+    (
+        "context",
+        r"MEMORY|CLAUDE_MDS|COMPACT|CACHING|CONTEXT|ATTACHMENTS|CHECKPOINTING|THINKING",
+    ),
+    (
+        "agents",
+        r"ARTIFACT|SKILL|PLUGIN|MARKETPLACE|CRON|WORKFLOW|EXPLORE_PLAN|ADVISOR|AGENT|SUBAGENT|BACKGROUND|TASK|HOOK|TEAM",
+    ),
+    (
+        "interface",
+        r"MOUSE|SCROLL|FLICKER|TERMINAL|CURSOR|HYPERLINK|STRIKETHROUGH|SYNTAX|SPINNER|NATIVE|ALT_SCREEN|VIRTUAL|DEMO|TMUX|ACCESSIBILITY|AX_|NOTIFICATION|DIALOG|PROMPT_SUGGESTION|AWAY_SUMMARY|HIDE_CWD|SIMPLE|NEW_INIT|COMMAND",
+    ),
+    ("permissions", r"SANDBOX|SAFE_MODE|SCRUB|SCRIPT_CAPS|PERFORCE|AUTO_MODE"),
+)
+
+ENV_NAME_GROUP_PATTERNS = tuple(
+    (group, re.compile(pattern)) for group, pattern in ENV_NAME_GROUP
+)
+
+
+def group_for(name: str, kind: str, category: str) -> str:
+    """Return the page section a value belongs in."""
+
+    if name.startswith(("permissions.", "sandbox.")):
+        return "permissions"
+    if name.startswith("attribution."):
+        return "tools"
+    if kind != "env":
+        return SETTING_GROUP_BY_NAME.get(name, "interface")
+
+    mapped = CATEGORY_GROUP.get(category)
+    if mapped is not None:
+        return mapped
+    for group, pattern in ENV_NAME_GROUP_PATTERNS:
+        if pattern.search(name):
+            return group
+    return "tools"
+
+
 DEFAULT_PATTERNS = [
     re.compile(r"\(default:\s*`?([^`,;)]+?)`?\s*[,;)]"),
     re.compile(r"\(default:\s*`?([^`)]+?)`?\)"),
@@ -486,6 +739,7 @@ def build_catalog(docs: Path) -> dict:
             "default": extract_default(purpose),
             "purpose": purpose.strip(),
             "common": name in COMMON_ENV,
+            "group": group_for(name, "env", categorise(name)),
         }
         if control == "enum":
             entry["values"] = ENV_ENUMS[name]
@@ -524,6 +778,7 @@ def build_catalog(docs: Path) -> dict:
                 "example": example.strip(),
                 "purpose": description.strip(),
                 "common": key in COMMON_SETTINGS or kind == "permission_setting",
+                "group": group_for(key, kind, "settings"),
                 "managed_only": "(Managed settings only)" in description
                 or "Managed settings only." in description,
             }
