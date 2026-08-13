@@ -81,6 +81,13 @@ const VIEW_GROUPS = [
     containerId: "providersSections",
   },
   {
+    id: "claude",
+    label: "Claude Code",
+    title: "Claude Code",
+    sections: [],
+    containerId: null,
+  },
+  {
     id: "model_config",
     label: "Model Config",
     title: "Model Config",
@@ -314,6 +321,10 @@ function setActiveView(viewId, { scroll = false } = {}) {
 
   if (activeView.id === "web_search") {
     loadWebSearchAnalytics().catch((error) => showMessage(error.message, "error"));
+  }
+
+  if (activeView.id === "claude") {
+    loadClaudeSettings().catch((error) => showMessage(error.message, "error"));
   }
 
   if (scroll) {

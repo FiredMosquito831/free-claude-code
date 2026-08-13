@@ -297,6 +297,7 @@ class TestStepInstructionsAndTargets:
         known_views = {
             "get_started",
             "providers",
+            "claude",
             "model_config",
             "messaging",
             "requests",
