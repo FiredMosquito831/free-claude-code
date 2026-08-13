@@ -4125,20 +4125,6 @@ details.turn-pane > summary:focus-visible {
   border-color: var(--error-border);
 }
 
-.cc-switch {
-  display: inline-flex;
-  align-items: center;
-  min-height: 44px;
-  cursor: pointer;
-}
-
-.cc-switch input {
-  width: 18px;
-  height: 18px;
-  accent-color: var(--accent);
-  cursor: pointer;
-}
-
 .cc-empty {
   padding: var(--space-5);
   text-align: center;
@@ -4585,4 +4571,76 @@ details.turn-pane > summary:focus-visible {
   font-size: 12px;
   color: var(--accent) !important;
   overflow-wrap: anywhere;
+}
+
+/* ── Three-state binary control ────────────────────────────────────────────
+   A settings file has three states for a boolean -- true, false, and absent --
+   and a checkbox can only say two of them. Segmented radios so all three are
+   visible at once and reachable in one click, rather than a dropdown that
+   hides the current value behind an interaction. */
+
+.cc-tristate {
+  display: inline-flex;
+  padding: 2px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  background: var(--input);
+}
+
+.cc-tristate input[type="radio"] {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.cc-tristate-option {
+  display: grid;
+  place-items: center;
+  min-width: 56px;
+  min-height: 32px;
+  padding: 0 10px;
+  border-radius: calc(var(--radius-sm) - 1px);
+  /* Reserved so selecting an option does not shift the row by 2px. */
+  border-bottom: 2px solid transparent;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+  cursor: pointer;
+  transition:
+    background var(--transition-fast),
+    color var(--transition-fast);
+}
+
+.cc-tristate-option:hover {
+  color: var(--text);
+}
+
+/* The selected segment is a neutral raised surface marked with an accent
+   underline, not accent-coloured text. Accent text is the convention elsewhere
+   in this dashboard, but at 12px on the light theme's raised surface
+   (#059669 on #eef0f4) it measures ~3.4:1, under the 4.5:1 floor. The
+   underline carries the same meaning at any contrast, and --text-strong on
+   --panel-strong clears 15:1 in every theme. */
+.cc-tristate input[type="radio"]:checked + .cc-tristate-option {
+  background: var(--panel-strong);
+  /* A border rather than an inset shadow: the High Contrast theme sets
+     --shadow-sm to none, and `box-shadow: none, inset ...` is an invalid list,
+     so the whole declaration was dropped and that theme lost both the marker
+     and the raised surface. */
+  border-bottom-color: var(--accent);
+  color: var(--text-strong);
+}
+
+/* "Not set" is the absence of an opinion, so it takes the raised surface
+   without the accent marker the two real values carry. */
+.cc-tristate input[type="radio"]:checked + .cc-tristate-option:last-of-type {
+  border-bottom-color: transparent;
+}
+
+.cc-tristate input[type="radio"]:focus-visible + .cc-tristate-option {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }

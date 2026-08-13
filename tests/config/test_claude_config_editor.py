@@ -423,3 +423,46 @@ class TestGrouping:
 
         common = [entry for entry in load_catalog().entries if entry.common]
         assert {entry.group for entry in common} >= self.GROUPS
+
+
+class TestBooleanIsThreeStates:
+    """`false` and "not set" are different instructions, and both are reachable.
+
+    A checkbox has two positions and a settings file has three states: the key
+    says true, the key says false, or the key is absent and Claude Code applies
+    its own default. Writing `false` to a setting whose default is true changes
+    behaviour the user may only have meant to stop overriding, so the editor
+    has to be able to express both.
+    """
+
+    def test_writing_false_keeps_the_key(self, tmp_path: Path) -> None:
+        path = _write(tmp_path / "settings.json", {"verbose": True})
+        apply_plan(_plan(path, ChangeRequest("verbose", "set", False)))
+        assert json.loads(path.read_text(encoding="utf-8")) == {"verbose": False}
+
+    def test_unsetting_removes_the_key(self, tmp_path: Path) -> None:
+        path = _write(tmp_path / "settings.json", {"verbose": True})
+        apply_plan(_plan(path, ChangeRequest("verbose", "unset")))
+        assert json.loads(path.read_text(encoding="utf-8")) == {}
+
+    def test_false_and_unset_are_not_the_same_plan(self, tmp_path: Path) -> None:
+        path = _write(tmp_path / "settings.json", {"verbose": True})
+        false_plan = _plan(path, ChangeRequest("verbose", "set", False))
+        unset_plan = _plan(path, ChangeRequest("verbose", "unset"))
+        assert false_plan.changes[0].after is False
+        assert unset_plan.changes[0].after is None
+        assert false_plan.changes[0].op != unset_plan.changes[0].op
+
+    def test_an_env_boolean_writes_zero_for_false(self, tmp_path: Path) -> None:
+        """env values are strings, so "off" is the string "0", not a removal."""
+
+        path = _write(tmp_path / "settings.json", {})
+        apply_plan(_plan(path, ChangeRequest("env.DEBUG", "set", "0")))
+        assert json.loads(path.read_text(encoding="utf-8")) == {"env": {"DEBUG": "0"}}
+
+    def test_a_presence_read_variable_has_no_false(self, tmp_path: Path) -> None:
+        """Which is why the UI offers only On and Not set for these six."""
+
+        path = _write(tmp_path / "settings.json", {"env": {"DISABLE_TELEMETRY": "1"}})
+        plan = _plan(path, ChangeRequest("env.DISABLE_TELEMETRY", "set", "0"))
+        assert plan.changes[0].op == "unset"
