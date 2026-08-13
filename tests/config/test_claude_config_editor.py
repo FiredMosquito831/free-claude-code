@@ -324,3 +324,47 @@ class TestCatalogContract:
         assert 80 <= len(common) <= 140
         names = {entry.name for entry in common}
         assert {"model", "permissions.allow", "ANTHROPIC_BASE_URL"} <= names
+
+
+class TestNestedValuesRoundTrip:
+    """A value the editor writes must read back under the key it wrote.
+
+    Found in a real browser, not by the unit tests: after writing
+    ``permissions.defaultMode`` the page showed it as unset, because
+    ``read_values`` returned only the ``permissions`` object and the UI
+    addresses the dotted leaf.
+    """
+
+    def test_a_nested_value_is_readable_by_its_dotted_key(self, tmp_path: Path) -> None:
+        path = _write(
+            tmp_path / "settings.json",
+            {"permissions": {"defaultMode": "acceptEdits", "allow": ["Bash(ls *)"]}},
+        )
+        values = read_values(load_document(path))
+        assert values["permissions.defaultMode"] == "acceptEdits"
+        assert values["permissions.allow"] == ["Bash(ls *)"]
+
+    def test_the_parent_object_is_still_returned(self, tmp_path: Path) -> None:
+        """The `permissions` row itself is an object control and needs it."""
+
+        path = _write(
+            tmp_path / "settings.json", {"permissions": {"defaultMode": "plan"}}
+        )
+        values = read_values(load_document(path))
+        assert values["permissions"] == {"defaultMode": "plan"}
+
+    def test_two_levels_deep_is_reachable(self, tmp_path: Path) -> None:
+        path = _write(
+            tmp_path / "settings.json",
+            {"sandbox": {"filesystem": {"allowWrite": ["/tmp/build"]}}},
+        )
+        values = read_values(load_document(path))
+        assert values["sandbox.filesystem.allowWrite"] == ["/tmp/build"]
+
+    def test_writing_then_reading_agrees(self, tmp_path: Path) -> None:
+        path = _write(tmp_path / "settings.json", {})
+        apply_plan(
+            _plan(path, ChangeRequest("permissions.defaultMode", "set", "acceptEdits"))
+        )
+        values = read_values(load_document(path))
+        assert values["permissions.defaultMode"] == "acceptEdits"

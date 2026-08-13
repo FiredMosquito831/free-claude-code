@@ -252,6 +252,92 @@
                 precedence over the user file configured above.
               </p>
             </section>
+
+            <section
+              class="settings-section"
+              id="claudeConfigEditor"
+              aria-label="All Claude Code settings"
+            >
+              <div class="section-heading">
+                <div>
+                  <h3>All Claude Code settings</h3>
+                  <p>
+                    Every setting the Claude Code CLI reads, with the values it
+                    accepts. Edits collect below and are written only when you
+                    apply them; the file is backed up first.
+                  </p>
+                </div>
+                <div class="observability-actions">
+                  <button id="ccApplyButton" class="primary-button" type="button" disabled>
+                    Review changes
+                  </button>
+                  <button
+                    id="ccDiscardButton"
+                    class="secondary-button"
+                    type="button"
+                    disabled
+                  >
+                    Discard
+                  </button>
+                </div>
+              </div>
+
+              <div class="cc-toolbar">
+                <div class="cc-search">
+                  <label class="sr-only" for="ccSearch">Search settings</label>
+                  <input
+                    id="ccSearch"
+                    type="search"
+                    autocomplete="off"
+                    placeholder="Search settings by name or description&hellip;"
+                  />
+                </div>
+                <label class="cc-check">
+                  <input id="ccConfiguredOnly" type="checkbox" />
+                  <span>Configured only</span>
+                </label>
+                <label class="cc-check">
+                  <input id="ccShowAll" type="checkbox" />
+                  <span id="ccShowAllLabel">Show all</span>
+                </label>
+              </div>
+
+              <div id="ccPendingBar" class="cc-pending-bar" aria-live="polite" hidden></div>
+              <div id="ccManagedWarning" class="cc-managed-warning" hidden></div>
+              <div id="ccSections" class="cc-sections"></div>
+              <p id="ccEmpty" class="cc-empty" hidden>
+                Nothing matches. Clear the search, or turn off
+                <strong>Configured only</strong> to see settings you have not set.
+              </p>
+            </section>
+
+            <div
+              id="ccReviewModal"
+              class="requests-modal"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="ccReviewTitle"
+              hidden
+            >
+              <div class="requests-modal-card cc-review-card">
+                <div class="requests-modal-header">
+                  <h3 id="ccReviewTitle">Review changes</h3>
+                  <button id="ccReviewClose" class="secondary-button" type="button">
+                    Close
+                  </button>
+                </div>
+                <p id="ccReviewPath" class="cc-review-path"></p>
+                <div id="ccReviewBody" class="cc-review-body"></div>
+                <div class="cc-review-actions">
+                  <button id="ccReviewCancel" class="secondary-button" type="button">
+                    Cancel
+                  </button>
+                  <button id="ccReviewConfirm" class="primary-button" type="button">
+                    Apply
+                  </button>
+                </div>
+              </div>
+            </div>
           </section>
 
           <section id="view-model_config" class="admin-view" data-view="model_config" hidden>

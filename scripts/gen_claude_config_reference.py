@@ -397,8 +397,25 @@ def classify_env(name: str, purpose: str) -> tuple[str, str]:
     return "string", "no stronger signal"
 
 
-def classify_setting(key: str, description: str, example: str) -> tuple[str, str]:
+def setting_enum_values(key: str) -> list[str] | None:
+    """Return the documented value set for a settings key, prefixed or bare.
+
+    Nested sections are catalogued with their parent prefix
+    (``permissions.defaultMode``) while the enum table is keyed by the name the
+    docs use in its own table (``defaultMode``). Looking up only one spelling
+    silently downgraded every nested enum to a free-text field, which no test
+    caught because "every enum entry has values" was still true -- the entries
+    just were not enums any more.
+    """
+
     if key in SETTING_ENUMS:
+        return SETTING_ENUMS[key]
+    _, _, bare = key.rpartition(".")
+    return SETTING_ENUMS.get(bare)
+
+
+def classify_setting(key: str, description: str, example: str) -> tuple[str, str]:
+    if setting_enum_values(key) is not None:
         return "enum", "documented value set"
     ex = example.strip().strip("`")
     if ex in {"true", "false"}:
@@ -511,7 +528,7 @@ def build_catalog(docs: Path) -> dict:
                 or "Managed settings only." in description,
             }
             if control == "enum":
-                entry["values"] = SETTING_ENUMS[key]
+                entry["values"] = setting_enum_values(key) or []
             out.append(entry)
         return out
 

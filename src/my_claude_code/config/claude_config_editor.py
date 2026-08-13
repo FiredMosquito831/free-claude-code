@@ -232,9 +232,33 @@ def read_values(
                     _masked(env_value) if env_name in secrets else env_value
                 )
             continue
+
         values[key] = value
 
+        # Nested groups are also addressed by their dotted leaf, because that is
+        # the name the catalog gives them and therefore the key a caller edits.
+        # Returning only the parent object made a value the editor had just
+        # written read back as unset.
+        if isinstance(value, dict):
+            values.update(_flatten(key, value))
+
     return values
+
+
+def _flatten(prefix: str, value: dict[str, Any], depth: int = 3) -> dict[str, Any]:
+    """Expand a nested object into dotted leaf keys, parents included."""
+
+    flattened: dict[str, Any] = {}
+    if depth <= 0:
+        return flattened
+
+    for key, nested in value.items():
+        name = f"{prefix}.{key}"
+        flattened[name] = nested
+        if isinstance(nested, dict):
+            flattened.update(_flatten(name, nested, depth - 1))
+
+    return flattened
 
 
 def _validate(

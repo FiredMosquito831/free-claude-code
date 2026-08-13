@@ -5017,35 +5017,50 @@
     {
       "name": "permissions.defaultMode",
       "kind": "permission_setting",
-      "control": "string",
-      "classification_evidence": "example is a scalar string",
+      "control": "enum",
+      "classification_evidence": "documented value set",
       "default": null,
       "example": "`\"acceptEdits\"`",
       "purpose": "Default [permission mode](/docs/en/permission-modes) for new sessions. In sessions the [VS Code extension](/docs/en/vs-code) starts, the extension resolves the starting mode instead. Valid values: `default`, `acceptEdits`, `plan`, `auto`, `dontAsk`, `bypassPermissions`, and `manual` as an alias for `default`, the mode labeled Manual in the CLI, the VS Code and JetBrains extensions, and the desktop app. The `manual` alias requires Claude Code v2.1.200 or later. `auto` is ignored when set in project or local settings, so a repository can't grant itself auto mode; set it in `~/.claude/settings.json` instead. Before v2.1.142, project settings could set `auto`. The `--permission-mode` CLI flag overrides this setting for a single session",
       "common": true,
-      "managed_only": false
+      "managed_only": false,
+      "values": [
+        "default",
+        "manual",
+        "acceptEdits",
+        "plan",
+        "auto",
+        "dontAsk",
+        "bypassPermissions"
+      ]
     },
     {
       "name": "permissions.disableAutoMode",
       "kind": "permission_setting",
-      "control": "string",
-      "classification_evidence": "example is a scalar string",
+      "control": "enum",
+      "classification_evidence": "documented value set",
       "default": null,
       "example": "`\"disable\"`",
       "purpose": "Set to `\"disable\"` to prevent [auto mode](/docs/en/permission-modes#eliminate-prompts-with-auto-mode) from being activated. Equivalent to the top-level [`disableAutoMode`](#available-settings) setting, which describes the full effect. Most useful in [managed settings](/docs/en/permissions#managed-settings) where users cannot override it",
       "common": true,
-      "managed_only": false
+      "managed_only": false,
+      "values": [
+        "disable"
+      ]
     },
     {
       "name": "permissions.disableBypassPermissionsMode",
       "kind": "permission_setting",
-      "control": "string",
-      "classification_evidence": "example is a scalar string",
+      "control": "enum",
+      "classification_evidence": "documented value set",
       "default": null,
       "example": "`\"disable\"`",
       "purpose": "Set to `\"disable\"` to prevent `bypassPermissions` mode from being activated. This disables the `--dangerously-skip-permissions` command-line flag, and Claude Code ignores an [agent definition's](/docs/en/sub-agents#permission-modes) `permissionMode: bypassPermissions`, so the subagent runs with the parent session's mode. Before v2.1.223, Claude Code applied the frontmatter mode even with bypass disabled. Typically placed in [managed settings](/docs/en/permissions#managed-settings) to enforce organizational policy, but works from any scope",
       "common": true,
-      "managed_only": false
+      "managed_only": false,
+      "values": [
+        "disable"
+      ]
     },
     {
       "name": "permissions.skipDangerousModePermissionPrompt",
