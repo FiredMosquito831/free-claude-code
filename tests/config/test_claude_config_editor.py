@@ -7,7 +7,9 @@ behind, or writing a plan the file has since moved out from under.
 """
 
 import json
+from collections import Counter
 from pathlib import Path
+from typing import ClassVar
 
 import pytest
 
@@ -368,3 +370,56 @@ class TestNestedValuesRoundTrip:
         )
         values = read_values(load_document(path))
         assert values["permissions.defaultMode"] == "acceptEdits"
+
+
+class TestGrouping:
+    """The page draws its sections from the catalog's `group`.
+
+    Grouping lives in the generator rather than the browser so the page and
+    docs/CLAUDE-CODE-CONFIG.md cannot disagree about where a setting is. A
+    missing group silently collapsed all 101 default rows into one section.
+    """
+
+    GROUPS: ClassVar[set[str]] = {
+        "model",
+        "context",
+        "permissions",
+        "tools",
+        "agents",
+        "mcp",
+        "connection",
+        "interface",
+        "privacy",
+    }
+
+    def test_every_entry_has_a_known_group(self) -> None:
+        for entry in load_catalog().entries:
+            assert entry.group in self.GROUPS, (entry.name, entry.group)
+
+    def test_no_group_swallows_the_catalog(self) -> None:
+        """One giant section is the failure mode this replaced."""
+
+        entries = load_catalog().entries
+        counts = Counter(entry.group for entry in entries)
+        assert len(counts) == len(self.GROUPS)
+        assert max(counts.values()) < len(entries) / 3
+
+    def test_permission_and_sandbox_keys_group_together(self) -> None:
+        catalog = load_catalog()
+        for entry in catalog.entries:
+            if entry.name.startswith(("permissions.", "sandbox.")):
+                assert entry.group == "permissions", entry.name
+
+    def test_the_rule_editor_keys_are_arrays(self) -> None:
+        """The page renders a rule builder for these three, so they must be lists."""
+
+        catalog = load_catalog()
+        for name in ("permissions.allow", "permissions.ask", "permissions.deny"):
+            entry = next(e for e in catalog.entries if e.name == name)
+            assert entry.control == "array", (name, entry.control)
+
+    def test_the_default_view_stays_scannable(self) -> None:
+        """Every group should be reachable without turning on Show all."""
+
+        common = [entry for entry in load_catalog().entries if entry.common]
+        assert {entry.group for entry in common} >= self.GROUPS

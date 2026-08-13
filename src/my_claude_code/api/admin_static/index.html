@@ -137,85 +137,28 @@
                 <p class="eyebrow">Client configuration</p>
                 <h3>Configure Claude Code</h3>
                 <p>
-                  Point the Claude Code CLI at this proxy. Choose how you want to
-                  connect: a per-session command that leaves your normal Claude Code
-                  untouched, or a permanent settings file so every session points at
-                  My Claude Code.
+                  Point Claude Code &mdash; and Codex and Pi &mdash; at this proxy,
+                  then tune how Claude Code behaves. Connect permanently with one
+                  click, or run a launcher command and change nothing on disk.
                 </p>
               </div>
             </div>
 
-            <section class="settings-section" aria-label="Choose how you connect">
-              <div class="section-heading">
-                <div>
-                  <h3>Choose how you connect</h3>
-                  <p>
-                    Two ways to use Claude Code with My Claude Code. Pick the one
-                    that fits how you work &mdash; you can switch any time.
-                  </p>
-                </div>
-              </div>
-              <div class="claude-connect-options">
-                <article class="claude-connect-option">
-                  <div class="claude-connect-head">
-                    <span class="claude-connect-badge">Per session</span>
-                    <h4>Run <code>mcc-claude</code></h4>
-                  </div>
-                  <p>
-                    Points <em>only the current shell session</em> at My Claude Code,
-                    without touching any file. Your normal <code>claude</code> command
-                    keeps using your standard Anthropic account.
-                  </p>
-                  <p class="claude-connect-when">
-                    <strong>Good for:</strong> trying My Claude Code, or using it
-                    alongside normal Claude Code.
-                  </p>
-                  <div class="claude-command-block">
-                    <code>mcc-claude</code>
-                  </div>
-                  <div class="claude-command-block">
-                    <code>mcc-claude --discover-models</code>
-                    <span class="claude-command-note">
-                      Also lists the gateway models in the <code>/model</code> picker.
-                    </span>
-                  </div>
-                </article>
-                <article class="claude-connect-option">
-                  <div class="claude-connect-head">
-                    <span class="claude-connect-badge">Permanent</span>
-                    <h4>Configure the settings file</h4>
-                  </div>
-                  <p>
-                    Writes the proxy URL and token into Claude Code&rsquo;s
-                    <code>settings.json</code>, so <em>every</em> Claude Code session
-                    points at My Claude Code. The previous file is backed up first.
-                  </p>
-                  <p class="claude-connect-when">
-                    <strong>Good for:</strong> using My Claude Code as your default,
-                    with no per-session setup.
-                  </p>
-                  <div class="claude-connect-cta">
-                    Use the Configure panel below, or read
-                    <a href="#guide-cli">the Guide</a> for editing by hand.
-                  </div>
-                </article>
-              </div>
-            </section>
-
             <section
               class="settings-section"
               id="claudeSettingsPanel"
-              aria-label="Claude Code settings file"
+              aria-labelledby="claudeConnectionTitle"
             >
               <div class="section-heading">
                 <div>
-                  <h3>Claude Code settings file</h3>
+                  <h3 id="claudeConnectionTitle">Connection</h3>
                   <p>
-                    Claude Code reads <code>settings.json</code> before it reads
-                    environment variables, so a stale file silently overrides
-                    <code>ANTHROPIC_BASE_URL</code>/<code>ANTHROPIC_AUTH_TOKEN</code> exports.
-                    The previous file is backed up next to it with a
-                    <code>.fcc-backup</code> suffix on first write.
+                    Writes <code>ANTHROPIC_BASE_URL</code> and
+                    <code>ANTHROPIC_AUTH_TOKEN</code> into Claude Code&rsquo;s
+                    <code>settings.json</code>, so <em>every</em> session points
+                    here. Claude Code reads that file before your environment, so
+                    a stale one silently overrides your exports. The previous file
+                    is backed up with a <code>.fcc-backup</code> suffix.
                   </p>
                 </div>
                 <div class="observability-actions">
@@ -250,6 +193,73 @@
                 Not detected here, but worth knowing: a <code>.claude/settings.json</code>
                 or <code>.claude/settings.local.json</code> in a project directory takes
                 precedence over the user file configured above.
+              </p>
+            </section>
+
+            <section
+              class="settings-section"
+              aria-labelledby="claudeLaunchersTitle"
+            >
+              <div class="section-heading">
+                <div>
+                  <h3 id="claudeLaunchersTitle">No setup needed</h3>
+                  <p>
+                    Each command starts its coding agent pointed at this proxy for
+                    that shell session only. No file is written, and your normal
+                    <code>claude</code> and <code>codex</code> keep using whatever
+                    account they already use.
+                  </p>
+                </div>
+              </div>
+              <ul class="claude-launchers">
+                <li class="claude-launcher">
+                  <div class="claude-launcher-info">
+                    <h4>Claude Code</h4>
+                    <p>The Claude Code CLI, routed through My Claude Code.</p>
+                  </div>
+                  <div class="claude-command-block"><code>mcc-claude</code></div>
+                </li>
+                <li class="claude-launcher">
+                  <div class="claude-launcher-info">
+                    <h4>Claude Code, with model discovery</h4>
+                    <p>
+                      Same, and fills the <code>/model</code> picker with the models
+                      your configured providers expose.
+                    </p>
+                  </div>
+                  <div class="claude-command-block">
+                    <code>mcc-claude --discover-models</code>
+                  </div>
+                </li>
+                <li class="claude-launcher">
+                  <div class="claude-launcher-info">
+                    <h4>Codex</h4>
+                    <p>OpenAI&rsquo;s Codex CLI, served through this proxy.</p>
+                  </div>
+                  <div class="claude-command-block"><code>mcc-codex</code></div>
+                </li>
+                <li class="claude-launcher">
+                  <div class="claude-launcher-info">
+                    <h4>Pi</h4>
+                    <p>The Pi coding agent, served through this proxy.</p>
+                  </div>
+                  <div class="claude-command-block"><code>mcc-pi</code></div>
+                </li>
+                <li class="claude-launcher">
+                  <div class="claude-launcher-info">
+                    <h4>Previous Claude Code build</h4>
+                    <p>
+                      Launches the older Claude Code you had installed before, for
+                      when a new release regresses something you depend on.
+                    </p>
+                  </div>
+                  <div class="claude-command-block"><code>mcc-claude-old</code></div>
+                </li>
+              </ul>
+              <p class="claude-launcher-note">
+                The <code>fcc-</code> spellings of every command still work, so
+                existing scripts and muscle memory keep working.
+                Run <code>mcc-help</code> for the full command reference.
               </p>
             </section>
 
