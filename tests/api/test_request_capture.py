@@ -9,6 +9,7 @@ import pytest
 
 from my_claude_code.api.request_capture import (
     RequestCapture,
+    _image_pixels,
     build_capture,
     extract_input_text,
     extract_request_params,
@@ -16,6 +17,7 @@ from my_claude_code.api.request_capture import (
 from my_claude_code.api.response_streams import ManagedStreamingResponse
 from my_claude_code.application.routing import ModelRouter
 from my_claude_code.config.settings import Settings
+from my_claude_code.core.anthropic import request_image_inputs
 from my_claude_code.core.anthropic.models import Message, MessagesRequest
 from my_claude_code.core.async_iterators import AsyncCloseable
 from my_claude_code.core.failures import ExecutionFailure, FailureKind
@@ -708,3 +710,98 @@ def test_route_attempt_indexes_the_recorded_chain(store: RequestLogStore) -> Non
     assert row["route_attempt"] == len(plan.attempts) - 1
     assert chain[row["route_attempt"]] == "groq/backup"
     assert chain[row["route_attempt"]] == f"{row['provider']}/{row['resolved_model']}"
+
+
+def _png_data() -> str:
+    import base64
+    import io
+
+    from PIL import Image
+
+    buffer = io.BytesIO()
+    Image.new("RGB", (900, 700), (12, 90, 200)).save(buffer, format="PNG")
+    return base64.b64encode(buffer.getvalue()).decode("ascii")
+
+
+def _image_request() -> MessagesRequest:
+    """A screenshot delivered the way a tool delivers one."""
+    return MessagesRequest.model_validate(
+        {
+            "model": "claude-sonnet-5",
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": "t1",
+                            "content": [
+                                {
+                                    "type": "image",
+                                    "source": {
+                                        "type": "base64",
+                                        "media_type": "image/png",
+                                        "data": _png_data(),
+                                    },
+                                }
+                            ],
+                        }
+                    ],
+                }
+            ],
+        }
+    )
+
+
+def test_capture_stores_a_tool_delivered_image(store: RequestLogStore) -> None:
+    """The end the user sees: a screenshot a tool returned reaches the row."""
+    capture = _make_capture(
+        store,
+        request_id="req_img",
+        images=request_image_inputs(_image_request()),
+        capture_images_pixels=512,
+    )
+    capture.finish_success("done")
+    store.close()
+
+    reader = RequestLogStore(store.db_path)
+    try:
+        row = reader.get_request("req_img")
+        assert row is not None
+        assert row["input_image_count"] == 1
+        image = row["input_images"][0]
+        assert image["width"] == 900
+        assert image["media_type"] == "image/png"
+        assert image["thumbnail_base64"]
+    finally:
+        reader.close()
+
+
+def test_capture_records_the_image_without_pixels_when_disabled(
+    store: RequestLogStore,
+) -> None:
+    capture = _make_capture(
+        store,
+        request_id="req_nopix",
+        images=request_image_inputs(_image_request()),
+        capture_images_pixels=0,
+    )
+    capture.finish_success("done")
+    store.close()
+
+    reader = RequestLogStore(store.db_path)
+    try:
+        row = reader.get_request("req_nopix")
+        assert row is not None
+        # The fact that an image arrived survives; only the pixels are dropped.
+        assert row["input_image_count"] == 1
+        assert row["input_images"][0]["thumbnail_base64"] is None
+    finally:
+        reader.close()
+
+
+def test_the_thumbnail_setting_decides_whether_pixels_are_kept(monkeypatch) -> None:
+    monkeypatch.setenv("REQUEST_LOG_IMAGE_MAX_PIXELS", "256")
+    assert _image_pixels(Settings()) == 256
+    monkeypatch.setenv("REQUEST_LOG_CAPTURE_IMAGES", "false")
+    assert _image_pixels(Settings()) == 0

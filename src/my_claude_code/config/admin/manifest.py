@@ -1013,6 +1013,33 @@ _NON_PROVIDER_FIELDS: tuple[ConfigFieldSpec, ...] = (
         ),
     ),
     ConfigFieldSpec(
+        "REQUEST_LOG_CAPTURE_IMAGES",
+        "Store image thumbnails",
+        "limits",
+        "boolean",
+        settings_attr="request_log_capture_images",
+        default="true",
+        restart_required=True,
+        description=(
+            "Keeps a downscaled copy of every image or document a request "
+            "carried, so the request detail can show what the model was "
+            "looking at. The count is recorded either way."
+        ),
+    ),
+    ConfigFieldSpec(
+        "REQUEST_LOG_IMAGE_MAX_PIXELS",
+        "Thumbnail size",
+        "limits",
+        "number",
+        settings_attr="request_log_image_max_pixels",
+        default="512",
+        restart_required=True,
+        description=(
+            "Longest edge of a stored thumbnail. The same image re-sent on "
+            "later turns of a conversation is stored once."
+        ),
+    ),
+    ConfigFieldSpec(
         "REQUEST_LOG_TEXT_MAX_CHARS",
         "Longest text stored",
         "limits",

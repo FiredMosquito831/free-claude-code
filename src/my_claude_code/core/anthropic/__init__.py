@@ -34,7 +34,11 @@ from .models import (
     Tool,
     Usage,
 )
-from .request_modalities import request_carries_image
+from .request_modalities import (
+    ImageInput,
+    request_carries_image,
+    request_image_inputs,
+)
 from .request_serialization import dump_messages_request, serialize_tool_result_content
 from .request_snapshot import anthropic_request_snapshot
 from .sse_aggregation import aggregate_anthropic_sse_to_message
@@ -66,6 +70,7 @@ __all__ = [
     "ContentChunk",
     "ContentType",
     "HeuristicToolParser",
+    "ImageInput",
     "Message",
     "MessagesRequest",
     "MessagesResponse",
@@ -95,6 +100,7 @@ __all__ = [
     "get_token_count",
     "map_stop_reason",
     "request_carries_image",
+    "request_image_inputs",
     "serialize_tool_result_content",
     "set_if_not_none",
 ]

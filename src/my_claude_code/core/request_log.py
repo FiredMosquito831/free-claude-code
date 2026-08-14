@@ -1,5 +1,6 @@
 """SQLite-backed request log with a non-blocking background writer."""
 
+import base64
 import contextlib
 import hashlib
 import json
@@ -17,6 +18,8 @@ from pathlib import Path
 from typing import Any, Literal
 
 from loguru import logger
+
+from my_claude_code.core.request_images import CapturedImage
 
 # ``core`` must not import ``config`` (import-boundary contract), so the
 # ``~/.fcc`` dirname convention from ``config.paths`` is mirrored here.
@@ -85,6 +88,9 @@ _LIST_METADATA_COLUMNS = (
     # can show what a turn contained without loading the transcript.
     "thinking_chars",
     "tool_call_count",
+    # How many images or documents the request carried. A count, not pixels,
+    # so a list row can say "this turn had a screenshot in it" for free.
+    "input_image_count",
 )
 
 _SCHEMA = """
@@ -124,7 +130,8 @@ CREATE TABLE IF NOT EXISTS requests (
     thinking_text TEXT,
     thinking_chars INTEGER,
     tool_calls TEXT,
-    tool_call_count INTEGER
+    tool_call_count INTEGER,
+    input_image_count INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_requests_ts ON requests(ts_epoch);
 CREATE INDEX IF NOT EXISTS idx_requests_status ON requests(status);
@@ -209,6 +216,28 @@ CREATE TABLE IF NOT EXISTS body_dictionaries (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     created_at REAL NOT NULL,
     content BLOB NOT NULL
+);
+-- Images a request carried, content-addressed on the *source* bytes. Claude
+-- Code re-sends the whole conversation every turn, so one pasted screenshot
+-- reaches the proxy again on every following request; keying on the image
+-- itself stores it once instead of once per turn. Only a downscaled copy is
+-- kept -- the request detail needs to show what the model looked at, not to
+-- reproduce the original file.
+CREATE TABLE IF NOT EXISTS image_blobs (
+    sha TEXT PRIMARY KEY,
+    kind TEXT NOT NULL,
+    media_type TEXT,
+    source_bytes INTEGER,
+    width INTEGER,
+    height INTEGER,
+    thumbnail_media_type TEXT,
+    thumbnail BLOB
+);
+CREATE TABLE IF NOT EXISTS request_images (
+    request_id TEXT NOT NULL,
+    position INTEGER NOT NULL,
+    sha TEXT NOT NULL,
+    PRIMARY KEY (request_id, position)
 );
 """
 
@@ -302,6 +331,10 @@ _ADDED_COLUMNS = (
         "ALTER TABLE requests ADD COLUMN route_diverted_from TEXT",
     ),
     ("route_diversion", "ALTER TABLE requests ADD COLUMN route_diversion TEXT"),
+    (
+        "input_image_count",
+        "ALTER TABLE requests ADD COLUMN input_image_count INTEGER",
+    ),
 )
 
 # Indexes over post-release columns, created only once those columns exist.
@@ -451,6 +484,10 @@ class RequestRecord:
     # case under Claude Code) still records what the model actually did.
     thinking_text: str | None = None
     thinking_chars: int | None = None
+    # Images and documents the request carried. The count is a column so list
+    # rows can show it; the pictures themselves live in their own tables.
+    input_image_count: int | None = None
+    images: tuple[CapturedImage, ...] = ()
     tool_calls: list[dict[str, Any]] | None = None
     tool_call_count: int | None = None
 
@@ -1194,6 +1231,81 @@ class RequestLogStore:
             packed, level=level, zstd_dict=self._dictionary(dict_id)
         )
 
+    @staticmethod
+    def _store_images(conn: sqlite3.Connection, batch: list[RequestRecord]) -> None:
+        """Point each request at its images, storing unseen pictures once.
+
+        A screenshot re-sent on every turn of a conversation has the same
+        content address every time, so ``INSERT OR IGNORE`` keeps exactly one
+        copy however many requests reference it.
+        """
+        blobs: dict[str, tuple[Any, ...]] = {}
+        links: list[tuple[str, int, str]] = []
+        for record in batch:
+            for position, image in enumerate(record.images):
+                blobs.setdefault(
+                    image.sha256,
+                    (
+                        image.sha256,
+                        image.kind,
+                        image.media_type,
+                        image.source_bytes,
+                        image.width,
+                        image.height,
+                        image.thumbnail_media_type,
+                        image.thumbnail,
+                    ),
+                )
+                links.append((record.id, position, image.sha256))
+        if not links:
+            return
+        conn.executemany(
+            "INSERT OR IGNORE INTO image_blobs (sha, kind, media_type,"
+            " source_bytes, width, height, thumbnail_media_type, thumbnail)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            list(blobs.values()),
+        )
+        conn.executemany(
+            "INSERT OR REPLACE INTO request_images (request_id, position, sha)"
+            " VALUES (?, ?, ?)",
+            links,
+        )
+
+    @staticmethod
+    def _fetch_images(
+        conn: sqlite3.Connection, request_id: str
+    ) -> list[dict[str, Any]]:
+        """Return one request's images in the order they appeared."""
+        rows = conn.execute(
+            "SELECT i.sha, i.kind, i.media_type, i.source_bytes, i.width,"
+            " i.height, i.thumbnail_media_type, i.thumbnail"
+            " FROM request_images AS r JOIN image_blobs AS i ON i.sha = r.sha"
+            " WHERE r.request_id = ? ORDER BY r.position",
+            (request_id,),
+        ).fetchall()
+        images: list[dict[str, Any]] = []
+        for row in rows:
+            thumbnail = row["thumbnail"]
+            images.append(
+                {
+                    "sha256": row["sha"],
+                    "kind": row["kind"],
+                    "media_type": row["media_type"],
+                    "source_bytes": row["source_bytes"],
+                    "width": row["width"],
+                    "height": row["height"],
+                    "thumbnail_media_type": row["thumbnail_media_type"],
+                    # Base64 so the payload is JSON, and the client can use it
+                    # directly as a data URI without a second round trip.
+                    "thumbnail_base64": (
+                        base64.b64encode(thumbnail).decode("ascii")
+                        if isinstance(thumbnail, bytes | bytearray)
+                        else None
+                    ),
+                }
+            )
+        return images
+
     def _store_bodies(
         self,
         conn: sqlite3.Connection,
@@ -1266,12 +1378,13 @@ class RequestLogStore:
                         key_index, key_label, thinking_text, thinking_chars,
                         tool_calls, tool_call_count, route_attempt,
                         route_primary_model, route_chain, route_diverted_from,
-                        route_diversion
-                    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                        route_diversion, input_image_count
+                    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                     """,
                     rows,
                 )
                 self._store_bodies(conn, packed)
+                self._store_images(conn, batch)
                 self._accumulate_totals(
                     conn,
                     [record for record in batch if record.id not in already_stored],
@@ -1335,6 +1448,7 @@ class RequestLogStore:
             record.route_chain,
             record.route_diverted_from,
             record.route_diversion,
+            record.input_image_count,
         )
 
     def close(self, *, timeout: float = _CLOSE_TIMEOUT_SECONDS) -> None:
@@ -1513,9 +1627,12 @@ class RequestLogStore:
             if row is None:
                 return None
             bodies = self._fetch_bodies(conn, [request_id])
-        return self._row_to_dict(
+            images = self._fetch_images(conn, request_id)
+        data = self._row_to_dict(
             row, body_preview_chars=None, bodies=bodies.get(request_id)
         )
+        data["input_images"] = images
+        return data
 
     def iter_export_rows(
         self,
@@ -1784,6 +1901,8 @@ class RequestLogStore:
                            AS route_reported,
                        SUM(CASE WHEN route_diversion IS NOT NULL THEN 1 ELSE 0 END)
                            AS diverted,
+                       SUM(CASE WHEN input_image_count > 0 THEN 1 ELSE 0 END)
+                           AS with_images,
                        AVG(duration_ms) AS avg_duration_ms,
                        AVG(ttft_ms) AS avg_ttft_ms
                 FROM requests{where}
@@ -1869,6 +1988,10 @@ class RequestLogStore:
             "fallback_routes": fallback_routes,
             "diverted": totals["diverted"] or 0,
             "diverted_routes": diverted_routes,
+            # Requests that carried an image or a document, whether or not the
+            # route had to divert: a vision-capable primary needs no diversion
+            # and still received a picture.
+            "with_images": totals["with_images"] or 0,
             "avg_duration_ms": _rounded(totals["avg_duration_ms"]),
             "p50_duration_ms": _rounded(percentiles[0.50]),
             "p95_duration_ms": _rounded(percentiles[0.95]),
@@ -2088,6 +2211,19 @@ class RequestLogStore:
                     " SELECT 1 FROM request_bodies WHERE request_bodies.sha ="
                     " body_blobs.sha OR request_bodies.input_sha = body_blobs.sha)"
                 )
+                # Images follow the same rule as bodies: the link goes when its
+                # request does, and the picture itself only once no surviving
+                # request still points at it.
+                conn.execute(
+                    "DELETE FROM request_images WHERE NOT EXISTS ("
+                    " SELECT 1 FROM requests WHERE requests.id ="
+                    " request_images.request_id)"
+                )
+                conn.execute(
+                    "DELETE FROM image_blobs WHERE NOT EXISTS ("
+                    " SELECT 1 FROM request_images WHERE request_images.sha ="
+                    " image_blobs.sha)"
+                )
             if removed:
                 # Return the freed pages to the filesystem instead of leaving
                 # them on the freelist, where they would grow the file forever.
@@ -2114,6 +2250,8 @@ class RequestLogStore:
             conn.execute("DELETE FROM request_totals")
             conn.execute("DELETE FROM request_bodies")
             conn.execute("DELETE FROM body_blobs")
+            conn.execute("DELETE FROM request_images")
+            conn.execute("DELETE FROM image_blobs")
             return cursor.rowcount
 
     def lifetime(self) -> dict[str, Any]:
