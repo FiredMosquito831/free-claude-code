@@ -3586,6 +3586,14 @@ details.turn-pane > summary:focus-visible {
   line-height: 1.5;
 }
 
+/* Same reasoning as the badge: --warn is 4.4:1 here on the light theme, so the
+   sentence stays readable and the warn colour marks its edge instead. */
+.route-trace-note-warn {
+  color: var(--text);
+  border-left: 2px solid var(--warn-border);
+  padding-left: 8px;
+}
+
 .route-trace-hops {
   display: flex;
   flex-direction: column;
@@ -3654,6 +3662,17 @@ details.turn-pane > summary:focus-visible {
   border-color: var(--accent-border);
   background: var(--accent-muted);
   color: var(--accent);
+}
+
+/* Not a diversion: an image that had nowhere to go. Warn, not accent -- the
+   accent means "the safety net worked", and here it had nothing to catch it. */
+.route-badge-blind {
+  border-color: var(--warn-border);
+  background: var(--warn-bg);
+  /* Warn carries the meaning through the border and fill. The label itself
+     stays neutral: --warn on the light theme measures 4.1:1 at this size,
+     under AA, and a badge nobody can read is not a warning. */
+  color: var(--text-strong);
 }
 
 /* Where a tier sends an image ----------------------------------------------

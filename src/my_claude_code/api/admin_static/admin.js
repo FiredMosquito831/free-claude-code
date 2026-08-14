@@ -6096,6 +6096,12 @@ function formatRouteAttempt(row) {
   const diverted = row.route_diverted_from
     ? `${routeDiversionLabel(row.route_diversion)}, instead of ${row.route_diverted_from}`
     : null;
+  if (routeVisionUnavailable(row)) {
+    const note = "no model on this route can read the attached image";
+    return Number(attempt) === 0
+      ? `Primary model (${note})`
+      : `Fallback ${attempt} (${note})`;
+  }
   if (Number(attempt) === 0) return diverted || "Primary model";
   const fallback = row.route_primary_model
     ? `Fallback ${attempt}, after ${row.route_primary_model}`
@@ -6105,7 +6111,13 @@ function formatRouteAttempt(row) {
 
 const ROUTE_DIVERSION_LABELS = {
   vision: "Vision adapter",
+  vision_unavailable: "No vision route",
 };
+
+/** True when an image arrived and nothing on the route could read it. */
+function routeVisionUnavailable(row) {
+  return row.route_diversion === "vision_unavailable";
+}
 
 function routeDiversionLabel(reason) {
   return ROUTE_DIVERSION_LABELS[reason] || reason;
@@ -6141,6 +6153,14 @@ function renderRequestRouteTrace(row) {
     note.textContent =
       `${routeDiversionLabel(row.route_diversion)}: this route resolved to ` +
       `${row.route_diverted_from}, which cannot read the attached image.`;
+    container.appendChild(note);
+  } else if (routeVisionUnavailable(row)) {
+    const note = document.createElement("p");
+    note.className = "route-trace-note route-trace-note-warn";
+    note.textContent =
+      "No vision route: this request carried an image and no model in this " +
+      "chain is known to accept one, so it was sent anyway. Set a Vision " +
+      "adapter (MODEL_VISION) on the Model Routing page.";
     container.appendChild(note);
   }
 
@@ -6264,6 +6284,10 @@ function renderRequestStatsCards(stats) {
     // image without any diversion at all, so "how many had a picture in them"
     // and "how many had to be rerouted" are different questions.
     ["With image input", formatAnalyticsNumber(stats.with_images || 0)],
+    [
+      "Image, no vision route",
+      formatAnalyticsNumber(stats.vision_unavailable || 0),
+    ],
     ["Cancelled", stats.cancelled],
     ["Total input", formatAnalyticsNumber(totalInputTokens(stats))],
     ["Input (uncached)", formatAnalyticsNumber(uncachedInputTokens(stats))],
@@ -6514,6 +6538,16 @@ function buildModelCell(row) {
     badge.className = "fallback-badge route-badge-diverted";
     badge.textContent = row.route_diversion || "diverted";
     badge.title = `Diverted from ${row.route_diverted_from}`;
+    td.appendChild(badge);
+  } else if (routeVisionUnavailable(row)) {
+    // Nothing was diverted, and that is the finding: the image went to a
+    // model documented not to accept one because there was no alternative.
+    const badge = document.createElement("span");
+    badge.className = "fallback-badge route-badge-blind";
+    badge.textContent = "no vision route";
+    badge.title =
+      "This request carried an image and no model on this route is known to " +
+      "accept one. Set a Vision adapter (MODEL_VISION).";
     td.appendChild(badge);
   }
   if (Number(row.route_attempt || 0) > 0) {
@@ -6840,6 +6874,7 @@ async function openRequestDetail(requestId) {
     ["Provider", row.provider],
     ["Resolved model", row.resolved_model],
     ["Route attempt", formatRouteAttempt(row)],
+    ["Vision model", formatVisionModel(row)],
     ["Status", row.status],
     ["Error", row.error_kind ? `${row.error_kind}: ${row.error_message || ""}` : ""],
     ["Key", row.key_label],
@@ -6909,6 +6944,29 @@ function formatTurnSummary(row) {
   }
   if (row.output_chars) parts.push(`${row.output_chars.toLocaleString()} chars reply`);
   return parts.join(" · ");
+}
+
+/** Name the vision model this request was handed to, and how it went.
+ *
+ * The adapter is the head of the chain on a diverted request, which is a fact
+ * you can only read off the trace if you already know how diversion works.
+ * Saying it outright is the difference between "gpt-5.6-luna answered" and
+ * "the vision adapter took this one".
+ */
+function formatVisionModel(row) {
+  if (row.route_diversion !== "vision") return "";
+  const chain = (row.route_chain || "")
+    .split(",")
+    .map((ref) => ref.trim())
+    .filter(Boolean);
+  const adapter = chain[0];
+  if (!adapter) return "";
+  const attempt = Number(row.route_attempt ?? 0);
+  if (attempt === 0) return `${adapter} — answered`;
+  const served = row.provider
+    ? `${row.provider}/${row.resolved_model}`
+    : row.resolved_model || "a fallback";
+  return `${adapter} — failed, answered by ${served}`;
 }
 
 /** One line naming what arrived, whether or not its pixels were kept. */

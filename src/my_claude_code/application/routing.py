@@ -56,9 +56,16 @@ class RoutedTokenCountRequest:
 
 
 class RouteDiversion(StrEnum):
-    """Why a plan does not start where the route's own model points."""
+    """Why a plan does not start where the route's own model points.
+
+    ``VISION_UNAVAILABLE`` is the exception: nothing moved, because there was
+    nowhere to move to. It is recorded anyway -- an image sent to a route with
+    no sighted model on it is the one case the operator most needs to see, and
+    without a marker it is indistinguishable from an ordinary request.
+    """
 
     VISION = "vision"
+    VISION_UNAVAILABLE = "vision_unavailable"
 
 
 @dataclass(frozen=True, slots=True)
@@ -275,12 +282,18 @@ class ModelRouter:
     def resolve_messages_plan(self, request: MessagesRequest) -> RoutedMessagesPlan:
         """Return the primary routed request plus its configured fallbacks."""
         route_chain = self.resolve_chain(request.model)
-        chain = self._apply_vision_policy(request, route_chain)
+        chain, vision_unavailable = self._apply_vision_policy(request, route_chain)
         diverted = chain[0].provider_model_ref != route_chain[0].provider_model_ref
+        if diverted:
+            diversion = RouteDiversion.VISION
+        elif vision_unavailable:
+            diversion = RouteDiversion.VISION_UNAVAILABLE
+        else:
+            diversion = None
         plan = RoutedMessagesPlan(
             tuple(self._route_for(request, resolved) for resolved in chain),
             diverted_from=(route_chain[0].provider_model_ref if diverted else None),
-            diversion=RouteDiversion.VISION if diverted else None,
+            diversion=diversion,
         )
         if plan.has_fallbacks or diverted:
             logger.debug(
@@ -292,7 +305,7 @@ class ModelRouter:
 
     def _apply_vision_policy(
         self, request: MessagesRequest, chain: tuple[ResolvedModel, ...]
-    ) -> tuple[ResolvedModel, ...]:
+    ) -> tuple[tuple[ResolvedModel, ...], bool]:
         """Keep an image-carrying request away from models known to be blind.
 
         Only a model *known* to reject images is diverted. An unknown
@@ -307,9 +320,9 @@ class ModelRouter:
         received.
         """
         if not request_carries_image(request):
-            return chain
+            return chain, False
         if self._supports_vision(chain[0]) is not False:
-            return chain
+            return chain, False
 
         vision_chain = self._vision_adapter_chain(chain[0])
         vision_model = vision_chain[0] if vision_chain else None
@@ -334,7 +347,7 @@ class ModelRouter:
                 chain[0].provider_model_ref,
                 vision_model.provider_model_ref,
             )
-            return (vision_model, *sighted)
+            return (vision_model, *sighted), False
         if sighted:
             logger.info(
                 "VISION ROUTE: '{}' carries an image and '{}' cannot read it;"
@@ -343,14 +356,14 @@ class ModelRouter:
                 chain[0].provider_model_ref,
                 sighted[0].provider_model_ref,
             )
-            return sighted
+            return sighted, False
         logger.warning(
             "VISION ROUTE UNAVAILABLE: '{}' carries an image and no model on"
             " this route is known to accept one; trying '{}' anyway",
             chain[0].original_model,
             chain[0].provider_model_ref,
         )
-        return chain
+        return chain, True
 
     def _vision_adapter_chain(
         self, primary: ResolvedModel

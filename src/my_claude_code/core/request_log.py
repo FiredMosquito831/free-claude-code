@@ -1202,7 +1202,9 @@ class RequestLogStore:
             counters[7] += record.cache_write_tokens or 0
             counters[8] += record.tool_call_count or 0
             counters[9] += bool(record.route_attempt)
-            counters[10] += record.route_diversion is not None
+            # Counts a real diversion only. ``route_diversion`` also carries
+            # ``vision_unavailable``, where nothing was replaced.
+            counters[10] += record.route_diverted_from is not None
         conn.executemany(
             _TOTALS_UPSERT_SQL,
             [(*key, *counters) for key, counters in buckets.items()],
@@ -1899,8 +1901,10 @@ class RequestLogStore:
                            AS served_by_fallback,
                        SUM(CASE WHEN route_attempt IS NOT NULL THEN 1 ELSE 0 END)
                            AS route_reported,
-                       SUM(CASE WHEN route_diversion IS NOT NULL THEN 1 ELSE 0 END)
+                       SUM(CASE WHEN route_diverted_from IS NOT NULL THEN 1 ELSE 0 END)
                            AS diverted,
+                       SUM(CASE WHEN route_diversion = 'vision_unavailable'
+                           THEN 1 ELSE 0 END) AS vision_unavailable,
                        SUM(CASE WHEN input_image_count > 0 THEN 1 ELSE 0 END)
                            AS with_images,
                        AVG(duration_ms) AS avg_duration_ms,
@@ -1992,6 +1996,11 @@ class RequestLogStore:
             # route had to divert: a vision-capable primary needs no diversion
             # and still received a picture.
             "with_images": totals["with_images"] or 0,
+            # An image arrived and no model on the route could read it, so
+            # nothing was diverted and the request went out anyway. Counted
+            # apart from ``diverted``: one is the safety net working, the
+            # other is the safety net having nowhere to put the request.
+            "vision_unavailable": totals["vision_unavailable"] or 0,
             "avg_duration_ms": _rounded(totals["avg_duration_ms"]),
             "p50_duration_ms": _rounded(percentiles[0.50]),
             "p95_duration_ms": _rounded(percentiles[0.95]),
