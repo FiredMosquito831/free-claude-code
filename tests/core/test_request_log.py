@@ -1080,12 +1080,23 @@ def test_lifetime_counts_statuses_fallbacks_and_diversions(
     store.enqueue(_record("bad", status="error"))
     store.enqueue(_record("gone", status="cancelled"))
     store.enqueue(_record("fell", route_attempt=2))
-    store.enqueue(_record("saw", route_diversion="vision"))
+    # The router writes both halves together: the reason, and what was
+    # replaced. A row with only the reason is not a shape it can produce.
+    store.enqueue(
+        _record(
+            "saw",
+            route_diversion="vision",
+            route_diverted_from="nous_portal/tencent/hy3:free",
+        )
+    )
+    # Nothing was replaced here -- the image had nowhere to go -- so it must
+    # not be counted as a diversion.
+    store.enqueue(_record("blind", route_diversion="vision_unavailable"))
     store.close()
 
     lifetime = store.lifetime()
-    assert lifetime["requests"] == 5
-    assert (lifetime["success"], lifetime["error"], lifetime["cancelled"]) == (3, 1, 1)
+    assert lifetime["requests"] == 6
+    assert (lifetime["success"], lifetime["error"], lifetime["cancelled"]) == (4, 1, 1)
     assert lifetime["served_by_fallback"] == 1
     assert lifetime["diverted"] == 1
 

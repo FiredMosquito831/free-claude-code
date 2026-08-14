@@ -219,6 +219,32 @@ def test_no_vision_adapter_configured_leaves_the_route_alone(settings):
     assert _refs(router, _request(image=True)) == ("nvidia_nim/fallback-model",)
 
 
+def test_an_image_with_nowhere_to_go_is_recorded_as_unavailable(settings):
+    """Nothing moved, and that is exactly what has to be visible.
+
+    An image sent to a route where every model is known blind used to look
+    identical to an ordinary request in the log.
+    """
+    settings.model_fallbacks = "groq/also-blind"
+    router = ModelRouter(
+        settings,
+        vision_lookup=_blind("nvidia_nim/fallback-model", "groq/also-blind"),
+    )
+
+    plan = router.resolve_messages_plan(_request(image=True))
+    assert plan.model_refs() == ("nvidia_nim/fallback-model", "groq/also-blind")
+    assert plan.diversion is RouteDiversion.VISION_UNAVAILABLE
+    # Nothing was replaced, so there is nothing it was diverted from.
+    assert plan.diverted_from is None
+
+
+def test_a_text_request_on_a_blind_route_records_no_diversion(settings):
+    router = ModelRouter(settings, vision_lookup=_blind("nvidia_nim/fallback-model"))
+
+    plan = router.resolve_messages_plan(_request(image=False))
+    assert plan.diversion is None
+
+
 def test_blind_fallbacks_are_dropped_from_a_diverted_chain(settings):
     settings.model_fallbacks = "groq/also-blind,cerebras/unknown"
     settings.model_vision = "open_router/sees-images"

@@ -188,3 +188,41 @@ def test_stats_counts_requests_that_carried_an_image(tmp_path: Path):
         assert reader.stats()["with_images"] == 1
     finally:
         reader.close()
+
+
+def _diverted(request_id: str, *, diverted_from: str | None, diversion: str | None):
+    record = _record(request_id, (_image(request_id),))
+    record.route_chain = "chatgpt_oauth/gpt-5.6-luna,nous_portal/step-3.7:free"
+    record.route_attempt = 0
+    record.route_diverted_from = diverted_from
+    record.route_diversion = diversion
+    return record
+
+
+def test_an_image_with_no_vision_route_is_counted_apart_from_a_diversion(
+    tmp_path: Path,
+):
+    """The safety net working and the safety net having nowhere to put the
+    request are different facts, and the counters must not merge them."""
+    path = tmp_path / "requests.db"
+    store = RequestLogStore(path)
+    store.enqueue(
+        _diverted(
+            "real", diverted_from="nous_portal/tencent/hy3:free", diversion="vision"
+        )
+    )
+    store.enqueue(
+        _diverted("blind", diverted_from=None, diversion="vision_unavailable")
+    )
+    store.close()
+
+    reader = RequestLogStore(path)
+    try:
+        stats = reader.stats()
+        assert stats["diverted"] == 1
+        assert stats["vision_unavailable"] == 1
+        assert stats["with_images"] == 2
+        # The lifetime counter must agree with the window one.
+        assert reader.lifetime()["diverted"] == 1
+    finally:
+        reader.close()
