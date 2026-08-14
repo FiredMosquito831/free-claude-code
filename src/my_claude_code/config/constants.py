@@ -67,3 +67,7 @@ REQUEST_LOG_MAX_ROWS_DEFAULT = 50_000
 REQUEST_LOG_TEXT_MAX_CHARS_DEFAULT = 50_000
 REQUEST_LOG_COMPRESSION_LEVEL_DEFAULT = 9
 REQUEST_LOG_QUEUE_MAX_SIZE_DEFAULT = 10_000
+# Longest edge of the thumbnail kept for an image a request carried. A pasted
+# screenshot is megabytes; at 512px it is tens of kilobytes and still legible,
+# and identical images are stored once however many turns re-send them.
+REQUEST_LOG_IMAGE_MAX_PIXELS_DEFAULT = 512

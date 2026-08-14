@@ -20,11 +20,16 @@ from my_claude_code.application.routing import (
 )
 from my_claude_code.config.model_refs import format_model_ref_list
 from my_claude_code.config.settings import Settings
-from my_claude_code.core.anthropic import MessagesRequest
+from my_claude_code.core.anthropic import (
+    ImageInput,
+    MessagesRequest,
+    request_image_inputs,
+)
 from my_claude_code.core.async_iterators import try_close_async_iterator
 from my_claude_code.core.credential_attribution import install_attribution
 from my_claude_code.core.diagnostics import safe_exception_message
 from my_claude_code.core.failures import find_execution_failure
+from my_claude_code.core.request_images import capture_images
 from my_claude_code.core.request_log import (
     MAX_TEXT_CHARS,
     RequestLogStore,
@@ -50,9 +55,16 @@ class RequestCapture:
         input_text: str | None,
         params: dict[str, Any] | None,
         capture_bodies: bool = True,
+        images: tuple[ImageInput, ...] = (),
+        capture_images_pixels: int = 0,
     ) -> None:
         self._store = store
         self._capture_bodies = capture_bodies
+        # Held undecoded until the request is over. Thumbnailing is real CPU
+        # work and there is no reason for it to sit between the client and its
+        # first token, so it happens at finalize time instead.
+        self._images = images
+        self._capture_images_pixels = capture_images_pixels
         self._start = time.perf_counter()
         self._ttft_ms: float | None = None
         self._output_parts: list[str] = []
@@ -371,6 +383,13 @@ class RequestCapture:
             record.tool_calls = tool_calls or None
         if self._error is not None:
             record.error_kind, record.error_message = self._error
+        record.input_image_count = len(self._images) or None
+        if self._images:
+            record.images = capture_images(
+                self._images,
+                max_pixels=self._capture_images_pixels,
+                store_pixels=self._capture_images_pixels > 0,
+            )
         record.key_index = self._credential.index
         record.key_label = self._credential.label
         self._store.enqueue(record)
@@ -396,7 +415,16 @@ def build_capture(
         input_text=extract_input_text(request),
         params=extract_request_params(request),
         capture_bodies=bool(getattr(settings, "request_log_capture_bodies", True)),
+        images=request_image_inputs(request),
+        capture_images_pixels=_image_pixels(settings),
     )
+
+
+def _image_pixels(settings: Settings) -> int:
+    """Return the thumbnail edge to store, or 0 to record images without pixels."""
+    if not getattr(settings, "request_log_capture_images", True):
+        return 0
+    return int(getattr(settings, "request_log_image_max_pixels", 0) or 0)
 
 
 def extract_input_text(request: MessagesRequest) -> str | None:

@@ -18,6 +18,7 @@ from .constants import (
     PROVIDER_RETRY_ATTEMPTS_DEFAULT,
     RATE_LIMIT_COOLDOWN_SECONDS_DEFAULT,
     REQUEST_LOG_COMPRESSION_LEVEL_DEFAULT,
+    REQUEST_LOG_IMAGE_MAX_PIXELS_DEFAULT,
     REQUEST_LOG_QUEUE_MAX_SIZE_DEFAULT,
     REQUEST_LOG_TEXT_MAX_CHARS_DEFAULT,
     SERVER_GRACEFUL_SHUTDOWN_SECONDS_DEFAULT,
@@ -587,6 +588,16 @@ class Settings(BaseSettings):
     # the same retention. Rows written before it was enabled are still read.
     request_log_compress_bodies: bool = Field(
         default=True, validation_alias="REQUEST_LOG_COMPRESS_BODIES"
+    )
+    # Keep a thumbnail of every image a request carried, so the request detail
+    # can show what the model was actually looking at. Counts and sizes are
+    # recorded either way; this only decides whether pixels are stored.
+    request_log_capture_images: bool = Field(
+        default=True, validation_alias="REQUEST_LOG_CAPTURE_IMAGES"
+    )
+    request_log_image_max_pixels: int = Field(
+        default=REQUEST_LOG_IMAGE_MAX_PIXELS_DEFAULT,
+        validation_alias="REQUEST_LOG_IMAGE_MAX_PIXELS",
     )
 
     # ==================== NIM Settings ====================

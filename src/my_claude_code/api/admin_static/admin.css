@@ -2485,6 +2485,67 @@ details.turn-pane > summary:focus-visible {
   color: var(--accent);
 }
 
+.turn-chip[data-kind="image"] {
+  border-color: var(--info-border, var(--line-strong));
+  color: var(--info, var(--text-strong));
+}
+
+/* What the model was looking at. Thumbnails are stored small, so they are
+   shown at their natural size rather than stretched to a grid cell -- a
+   scaled-up 512px screenshot reads as a broken image. */
+.req-images {
+  margin: 12px 0 4px;
+}
+
+.req-images h4 {
+  margin: 0 0 6px;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+
+.req-image-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.req-image {
+  margin: 0;
+  max-width: 240px;
+}
+
+.req-image img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  /* A screenshot with alpha needs something behind it, and the raised panel
+     is the only neutral that stays right in all four themes. */
+  background: var(--panel-strong);
+}
+
+.req-image-missing {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 120px;
+  height: 80px;
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--radius-sm);
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.req-image figcaption {
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--muted);
+  word-break: break-word;
+}
+
 @media (prefers-reduced-motion: reduce) {
   details.turn-pane > summary h4::before {
     transition: none;

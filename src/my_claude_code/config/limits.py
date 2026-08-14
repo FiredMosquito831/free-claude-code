@@ -61,6 +61,11 @@ LIMIT_RANGES: dict[str, LimitRange] = {
     "request_log_max_rows": LimitRange(0, 100_000_000, "0 keeps every request"),
     "request_log_text_max_chars": LimitRange(0, 10_000_000, "0 stores no text"),
     "request_log_compression_level": LimitRange(1, ZSTD_MAX_LEVEL),
+    # Longest edge of a stored image thumbnail. The ceiling is a full-HD edge:
+    # past that it stops being a thumbnail and starts being the original.
+    "request_log_image_max_pixels": LimitRange(
+        0, 1920, "0 records that an image arrived without storing any pixels"
+    ),
     # Below a few hundred a burst drops records; the queue is a buffer, not a
     # throttle.
     "request_log_queue_max_size": LimitRange(100, 10_000_000),

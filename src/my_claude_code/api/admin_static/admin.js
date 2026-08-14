@@ -6260,6 +6260,10 @@ function renderRequestStatsCards(stats) {
     ["Success rate", `${successRate}%`],
     ["Error rate", `${((stats.error_rate || 0) * 100).toFixed(1)}%`],
     ["Served by fallback", formatFallbackShare(stats)],
+    // Counted separately from the diversion: a vision-capable primary takes an
+    // image without any diversion at all, so "how many had a picture in them"
+    // and "how many had to be rerouted" are different questions.
+    ["With image input", formatAnalyticsNumber(stats.with_images || 0)],
     ["Cancelled", stats.cancelled],
     ["Total input", formatAnalyticsNumber(totalInputTokens(stats))],
     ["Input (uncached)", formatAnalyticsNumber(uncachedInputTokens(stats))],
@@ -6588,6 +6592,13 @@ function buildTurnShapeCell(row) {
   const wrap = document.createElement("div");
   wrap.className = "turn-chips";
   const chips = [];
+  // Listed first: an image is what went *in*, ahead of what came back.
+  if (row.input_image_count) {
+    chips.push([
+      "image",
+      row.input_image_count === 1 ? "image" : `${row.input_image_count} images`,
+    ]);
+  }
   if (row.thinking_chars) chips.push(["thinking", "thinking"]);
   if (row.tool_call_count) {
     chips.push(["tools", row.tool_call_count === 1 ? "1 tool" : `${row.tool_call_count} tools`]);
@@ -6842,6 +6853,7 @@ async function openRequestDetail(requestId) {
     ["TTFT", row.ttft_ms != null ? `${Math.round(row.ttft_ms)} ms` : "—"],
     ["Duration", row.duration_ms != null ? `${Math.round(row.duration_ms)} ms` : "—"],
     ["Turn", formatTurnSummary(row)],
+    ["Image input", formatImageSummary(row)],
     ["Reasoning policy", row.reasoning],
     ["Params", row.params ? JSON.stringify(row.params) : ""],
     ["Input SHA-256", row.input_sha256],
@@ -6856,6 +6868,7 @@ async function openRequestDetail(requestId) {
     meta.append(dt, dd);
   });
   renderRequestRouteTrace(row);
+  renderRequestImages(row);
   renderTurnTranscript(row);
   byId("reqDetailModal").hidden = false;
   byId("reqDetailClose").focus();
@@ -6896,6 +6909,91 @@ function formatTurnSummary(row) {
   }
   if (row.output_chars) parts.push(`${row.output_chars.toLocaleString()} chars reply`);
   return parts.join(" · ");
+}
+
+/** One line naming what arrived, whether or not its pixels were kept. */
+function formatImageSummary(row) {
+  const count = Number(row.input_image_count || 0);
+  if (!count) return "";
+  const images = row.input_images || [];
+  const kinds = new Set(images.map((image) => image.kind).filter(Boolean));
+  const bytes = images.reduce((total, image) => total + (image.source_bytes || 0), 0);
+  const noun = kinds.size === 1 && kinds.has("document") ? "document" : "image";
+  const label = count === 1 ? noun : `${count} ${noun}s`;
+  return bytes ? `${label} · ${formatImageBytes(bytes)}` : label;
+}
+
+function formatImageBytes(bytes) {
+  if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  if (bytes >= 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${bytes} B`;
+}
+
+/**
+ * Show what the model was actually looking at.
+ *
+ * Only a downscaled copy is stored, so a thumbnail is the whole picture rather
+ * than a link to one; clicking opens it at its stored size. An image whose
+ * pixels were not kept (capture disabled, or a format the decoder refused)
+ * still gets a row, because "an image arrived" is the fact that matters for
+ * reading the route beneath it.
+ */
+function renderRequestImages(row) {
+  const container = byId("reqDetailImages");
+  if (!container) return;
+  container.innerHTML = "";
+  const images = row.input_images || [];
+  if (!images.length) {
+    container.hidden = true;
+    return;
+  }
+  container.hidden = false;
+  const heading = document.createElement("h4");
+  heading.textContent = images.length === 1 ? "Image input" : `Image input (${images.length})`;
+  container.appendChild(heading);
+  const grid = document.createElement("div");
+  grid.className = "req-image-grid";
+  images.forEach((image, index) => {
+    grid.appendChild(buildRequestImage(image, index));
+  });
+  container.appendChild(grid);
+}
+
+function buildRequestImage(image, index) {
+  const figure = document.createElement("figure");
+  figure.className = "req-image";
+  const source = requestImageSource(image);
+  if (source) {
+    const link = document.createElement("a");
+    link.href = source;
+    link.target = "_blank";
+    link.rel = "noopener";
+    const img = document.createElement("img");
+    img.src = source;
+    img.alt = `Image ${index + 1} sent with this request`;
+    img.loading = "lazy";
+    link.appendChild(img);
+    figure.appendChild(link);
+  } else {
+    const placeholder = document.createElement("div");
+    placeholder.className = "req-image-missing";
+    placeholder.textContent = "no preview stored";
+    figure.appendChild(placeholder);
+  }
+  const caption = document.createElement("figcaption");
+  const parts = [];
+  if (image.media_type) parts.push(image.media_type.replace(/^(image|application)\//, ""));
+  if (image.width && image.height) parts.push(`${image.width}×${image.height}`);
+  if (image.source_bytes) parts.push(formatImageBytes(image.source_bytes));
+  caption.textContent = parts.join(" · ") || image.kind || "image";
+  figure.appendChild(caption);
+  return figure;
+}
+
+function requestImageSource(image) {
+  if (!image.thumbnail_base64) return "";
+  const type = image.thumbnail_media_type || "image/webp";
+  return `data:${type};base64,${image.thumbnail_base64}`;
 }
 
 /**

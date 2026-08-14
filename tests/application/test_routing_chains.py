@@ -138,6 +138,66 @@ def test_an_image_reroutes_to_the_vision_adapter_when_the_route_is_blind(setting
     assert _refs(router, _request(image=True)) == ("open_router/sees-images",)
 
 
+def test_an_image_a_tool_returned_reroutes_the_same_way(settings):
+    """A screenshot from Read or an MCP tool arrives inside its tool_result.
+
+    Scanning only top-level blocks made these invisible, so the request went
+    to a model documented not to accept images and analytics recorded an
+    ordinary route.
+    """
+    settings.model_vision = "open_router/sees-images"
+    router = ModelRouter(settings, vision_lookup=_blind("nvidia_nim/fallback-model"))
+    request = MessagesRequest.model_validate(
+        {
+            "model": "claude-opus-4",
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": "t1",
+                            "content": [_IMAGE_BLOCK],
+                        }
+                    ],
+                }
+            ],
+        }
+    )
+
+    plan = router.resolve_messages_plan(request)
+    assert plan.model_refs() == ("open_router/sees-images",)
+    assert plan.diversion is RouteDiversion.VISION
+    assert plan.diverted_from == "nvidia_nim/fallback-model"
+
+
+def test_a_pdf_document_reroutes_like_an_image(settings):
+    settings.model_vision = "open_router/sees-images"
+    router = ModelRouter(settings, vision_lookup=_blind("nvidia_nim/fallback-model"))
+    request = MessagesRequest.model_validate(
+        {
+            "model": "claude-opus-4",
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "document",
+                            "source": {
+                                "type": "base64",
+                                "media_type": "application/pdf",
+                                "data": "JVBERi0=",
+                            },
+                        }
+                    ],
+                }
+            ],
+        }
+    )
+
+    assert _refs(router, request) == ("open_router/sees-images",)
+
+
 def test_a_text_only_request_never_reaches_the_vision_adapter(settings):
     settings.model_vision = "open_router/sees-images"
     router = ModelRouter(settings, vision_lookup=_blind("nvidia_nim/fallback-model"))
