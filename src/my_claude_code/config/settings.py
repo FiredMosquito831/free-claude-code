@@ -189,6 +189,43 @@ class Settings(BaseSettings):
         default="", validation_alias="AZURE_OPENAI_BASE_URL"
     )
 
+    # ==================== Amazon Bedrock Mantle ====================
+    bedrock_api_key: str = Field(
+        default="", validation_alias="AWS_BEARER_TOKEN_BEDROCK"
+    )
+    bedrock_base_url: str = Field(
+        default="https://bedrock-mantle.us-east-1.api.aws/v1",
+        validation_alias="BEDROCK_BASE_URL",
+    )
+
+    # ==================== TokenRouter Config ====================
+    tokenrouter_api_key: str = Field(default="", validation_alias="TOKENROUTER_API_KEY")
+    tokenrouter_base_url: str = Field(
+        default="https://api.tokenrouter.com/v1",
+        validation_alias="TOKENROUTER_BASE_URL",
+    )
+
+    # ==================== NaraRoute Config ====================
+    nararoute_api_key: str = Field(default="", validation_alias="NARAROUTE_API_KEY")
+    nararoute_base_url: str = Field(
+        default="https://router.bynara.id/v1",
+        validation_alias="NARAROUTE_BASE_URL",
+    )
+
+    # ==================== QwenCloud Token Plan (OpenAI-compatible) ====================
+    qwencloud_api_key: str = Field(default="", validation_alias="QWENCLOUD_API_KEY")
+
+    # ==================== QwenCloud Coding Plan (OpenAI-compatible) ====================
+    qwencloud_coding_api_key: str = Field(
+        default="", validation_alias="QWENCLOUD_CODING_API_KEY"
+    )
+
+    # ==================== Agnes AI (OpenAI-compatible) ====================
+    agnes_api_key: str = Field(default="", validation_alias="AGNES_API_KEY")
+
+    # ==================== W&B Inference (OpenAI-compatible) ====================
+    wandb_api_key: str = Field(default="", validation_alias="WANDB_API_KEY")
+
     # ==================== Messaging Platform Selection ====================
     # Valid: "telegram" | "discord" | "none"
     messaging_platform: str = Field(
@@ -393,6 +430,15 @@ class Settings(BaseSettings):
     groq_proxy: str = Field(default="", validation_alias="GROQ_PROXY")
     cerebras_proxy: str = Field(default="", validation_alias="CEREBRAS_PROXY")
     ollama_cloud_proxy: str = Field(default="", validation_alias="OLLAMA_CLOUD_PROXY")
+    qwencloud_proxy: str = Field(default="", validation_alias="QWENCLOUD_PROXY")
+    qwencloud_coding_proxy: str = Field(
+        default="", validation_alias="QWENCLOUD_CODING_PROXY"
+    )
+    agnes_proxy: str = Field(default="", validation_alias="AGNES_PROXY")
+    wandb_proxy: str = Field(default="", validation_alias="WANDB_PROXY")
+    bedrock_proxy: str = Field(default="", validation_alias="BEDROCK_PROXY")
+    tokenrouter_proxy: str = Field(default="", validation_alias="TOKENROUTER_PROXY")
+    nararoute_proxy: str = Field(default="", validation_alias="NARAROUTE_PROXY")
 
     # ==================== Provider Rate Limiting ====================
     provider_rate_limit: int = Field(default=40, validation_alias="PROVIDER_RATE_LIMIT")

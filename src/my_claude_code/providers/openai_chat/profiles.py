@@ -21,6 +21,7 @@ from .reasoning import (
     LLAMACPP_REASONING,
     NO_REASONING,
     SPLIT_REASONING_OUTPUT,
+    ChatTemplateReasoning,
     NamedEffortReasoning,
     ReasoningEncoder,
     ReasoningObject,
@@ -356,6 +357,63 @@ OPENAI_CHAT_PROFILES: dict[str, OpenAIChatProfile] = {
             enabled={"type": "enabled", "clear_thinking": False},
             disabled={"type": "disabled"},
         ),
+    ),
+    "qwencloud": OpenAIChatProfile(
+        _policy(
+            "QWENCLOUD",
+            ReasoningReplayMode.REASONING_CONTENT,
+            default_max_tokens=ANTHROPIC_DEFAULT_MAX_OUTPUT_TOKENS,
+        ),
+        NO_REASONING,
+    ),
+    "qwencloud_coding": OpenAIChatProfile(
+        _policy(
+            "QWENCLOUD_CODING",
+            ReasoningReplayMode.REASONING_CONTENT,
+        ),
+        NO_REASONING,
+    ),
+    "agnes": OpenAIChatProfile(
+        _policy(
+            "AGNES",
+            ReasoningReplayMode.THINK_TAGS,
+            include_extra_body=True,
+            extra_body_validator=validate_extra_body_does_not_override_reasoning_fields,
+            default_max_tokens=ANTHROPIC_DEFAULT_MAX_OUTPUT_TOKENS,
+        ),
+        ChatTemplateReasoning(field="enable_thinking"),
+    ),
+    "wandb": OpenAIChatProfile(
+        _policy(
+            "WANDB",
+            ReasoningReplayMode.DISABLED,
+            include_extra_body=True,
+            extra_body_validator=validate_extra_body_does_not_override_reasoning_fields,
+            default_max_tokens=ANTHROPIC_DEFAULT_MAX_OUTPUT_TOKENS,
+            max_tokens_field="max_completion_tokens",
+        ),
+        ChatTemplateReasoning(field="enable_thinking"),
+        reasoning_delta_field="reasoning",
+    ),
+    "bedrock": OpenAIChatProfile(
+        _policy("BEDROCK", ReasoningReplayMode.THINK_TAGS),
+        NO_REASONING,
+        normalize_base_url=True,
+    ),
+    "nararoute": OpenAIChatProfile(
+        _policy(
+            "NARAROUTE",
+            ReasoningReplayMode.DISABLED,
+            default_max_tokens=ANTHROPIC_DEFAULT_MAX_OUTPUT_TOKENS,
+        ),
+        NamedEffortReasoning(_LOW_MEDIUM_HIGH, enabled_value="medium"),
+    ),
+    "tokenrouter": OpenAIChatProfile(
+        _policy(
+            "TOKENROUTER",
+            ReasoningReplayMode.DISABLED,
+        ),
+        NO_REASONING,
     ),
     # Alibaba Model Studio speaks OpenAI Chat Completions and streams thinking
     # back as ``reasoning_content``, so reasoning is READ. It is deliberately not
