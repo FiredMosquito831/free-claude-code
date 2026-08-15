@@ -10,6 +10,7 @@ from my_claude_code.config.constants import ANTHROPIC_DEFAULT_MAX_OUTPUT_TOKENS
 from my_claude_code.core.anthropic import ReasoningReplayMode
 from my_claude_code.core.anthropic.models import MessagesRequest
 from my_claude_code.core.reasoning import ReasoningEffort, ReasoningPolicy
+from my_claude_code.providers.model_listing import RequiredPathValues
 
 from .base_url import openai_v1_base_url
 from .extra_body import (
@@ -47,12 +48,45 @@ _LOW_TO_MAX = (
 
 
 @dataclass(frozen=True, slots=True)
+class OpenAIModelPagination:
+    """Bounded numbered-pagination metadata for a model-list endpoint."""
+
+    page_param: str = "page"
+    first_page: int = 1
+    current_page_path: tuple[str, ...] = ("pagination", "current_page")
+    total_pages_path: tuple[str, ...] = ("pagination", "total_pages")
+    max_pages: int = 100
+
+
+@dataclass(frozen=True, slots=True)
+class OpenAIModelListing:
+    """Declarative model-list endpoint and response shape."""
+
+    path: str | None = None
+    query_params: tuple[tuple[str, str], ...] = ()
+    collection_field: str | None = "data"
+    id_field: str = "id"
+    aliases_field: str | None = None
+    required_path_values: RequiredPathValues = ()
+    required_null_field: str | None = None
+    required_sequence_items: tuple[tuple[str, str], ...] = ()
+    exclude_missing_sequence_fields: bool = False
+    tags_field: str | None = None
+    thinking_tag: str = "reasoning"
+    non_thinking_tag: str | None = None
+    thinking_boolean_path: tuple[str, ...] | None = None
+    pagination: OpenAIModelPagination | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class OpenAIChatProfile:
     """Immutable transport and reasoning behavior for one provider."""
 
     request_policy: OpenAIChatRequestPolicy
     reasoning: ReasoningEncoder
     postprocessors: tuple[OpenAIChatPostprocessor, ...] = ()
+    model_ids_are_routable: bool = True
+    model_listing: OpenAIModelListing = OpenAIModelListing()
     normalize_base_url: bool = False
     reasoning_delta_field: Literal["reasoning_content", "reasoning"] = (
         "reasoning_content"

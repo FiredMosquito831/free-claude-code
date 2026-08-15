@@ -3,13 +3,14 @@
 import asyncio
 import sys
 import uuid
-from collections.abc import AsyncIterator, Iterator, Mapping
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterator, Mapping
 from typing import Any
 
 import httpx
 from loguru import logger
 from openai import AsyncOpenAI
 
+from my_claude_code.application.model_metadata import ProviderModelInfo
 from my_claude_code.core.anthropic import (
     ContentType,
     HeuristicToolParser,
@@ -35,7 +36,12 @@ from my_claude_code.providers.http import (
     close_provider_stream,
     maybe_await_aclose,
 )
-from my_claude_code.providers.model_listing import extract_openai_model_ids
+from my_claude_code.providers.model_listing import (
+    extract_openai_model_ids,
+    extract_openai_model_infos,
+    merge_model_list_pages,
+    validate_model_list_page,
+)
 from my_claude_code.providers.rate_limit import ProviderRateLimiter
 from my_claude_code.providers.stream_recovery import (
     MIDSTREAM_RECOVERY_ATTEMPTS,
@@ -64,6 +70,8 @@ from .usage import (
     usage_int,
 )
 
+OpenAIAsyncCredentialProvider = Callable[[], Awaitable[str]]
+
 
 class OpenAIChatProvider(BaseProvider):
     """OpenAI-compatible ``/chat/completions`` provider configured by a profile."""
@@ -75,10 +83,15 @@ class OpenAIChatProvider(BaseProvider):
         profile: OpenAIChatProfile,
         rate_limiter: ProviderRateLimiter,
         default_headers: Mapping[str, str] | None = None,
+        api_key_provider: OpenAIAsyncCredentialProvider | None = None,
     ):
         super().__init__(config)
         self._profile = profile
         self._provider_name = profile.provider_name
+        if config.api_key is None and api_key_provider is None:
+            raise ValueError(
+                f"{profile.provider_name} requires an API key or credential provider"
+            )
         self._api_key = config.api_key
         self._base_url = profile.base_url(config.base_url).rstrip("/")
         # Learned per-model output-token caps from upstream 400 rejections, so
@@ -97,7 +110,7 @@ class OpenAIChatProvider(BaseProvider):
                 ),
             )
         self._client = AsyncOpenAI(
-            api_key=self._api_key,
+            api_key=api_key_provider or self._api_key,
             base_url=self._base_url,
             max_retries=0,
             default_headers=default_headers,
@@ -128,6 +141,84 @@ class OpenAIChatProvider(BaseProvider):
         """Return model ids from the provider's OpenAI-compatible models endpoint."""
         payload = await self.list_models_payload()
         return extract_openai_model_ids(payload, provider_name=self._provider_name)
+
+    async def list_model_infos(self) -> frozenset[ProviderModelInfo]:
+        """Return model metadata from the OpenAI-compatible models endpoint."""
+        payload = await self._list_models_payload()
+        if not self._profile.model_ids_are_routable:
+            return frozenset()
+        listing = self._profile.model_listing
+        return extract_openai_model_infos(
+            payload,
+            provider_name=self._provider_name,
+            collection_field=listing.collection_field,
+            id_field=listing.id_field,
+            aliases_field=listing.aliases_field,
+            required_path_values=listing.required_path_values,
+            required_null_field=listing.required_null_field,
+            required_sequence_items=listing.required_sequence_items,
+            exclude_missing_sequence_fields=listing.exclude_missing_sequence_fields,
+            tags_field=listing.tags_field,
+            thinking_tag=listing.thinking_tag,
+            non_thinking_tag=listing.non_thinking_tag,
+            thinking_boolean_path=listing.thinking_boolean_path,
+        )
+
+    async def _list_models_payload(self) -> Any:
+        """Fetch one OpenAI-compatible model-list payload through the fetcher."""
+        return await self._fetch_models_payload()
+
+    async def _fetch_models_payload(self) -> Any:
+        """Fetch the profile-selected model-list endpoint once."""
+        listing = self._profile.model_listing
+        path = listing.path
+        if path is None:
+            return await self.list_models_payload()
+        if listing.pagination is not None:
+            return await self._fetch_paginated_models_payload(path)
+        if listing.query_params:
+            return await self._client.get(
+                path,
+                cast_to=object,
+                options={"params": dict(listing.query_params)},
+            )
+        return await self._client.get(path, cast_to=object)
+
+    async def _fetch_paginated_models_payload(self, path: str) -> Any:
+        """Fetch one complete bounded model catalog."""
+        listing = self._profile.model_listing
+        pagination = listing.pagination
+        if pagination is None:
+            raise RuntimeError("paginated model fetch requires a pagination policy")
+
+        payloads: list[Any] = []
+        total_pages: int | None = None
+        page = pagination.first_page
+        while total_pages is None or page < pagination.first_page + total_pages:
+            params = dict(listing.query_params)
+            params[pagination.page_param] = str(page)
+            payload = await self._client.get(
+                path,
+                cast_to=object,
+                options={"params": params},
+            )
+            total_pages = validate_model_list_page(
+                payload,
+                provider_name=self._provider_name,
+                expected_page=page,
+                current_page_path=pagination.current_page_path,
+                total_pages_path=pagination.total_pages_path,
+                max_pages=pagination.max_pages,
+                expected_total_pages=total_pages,
+            )
+            payloads.append(payload)
+            page += 1
+
+        return merge_model_list_pages(
+            payloads,
+            provider_name=self._provider_name,
+            collection_field=listing.collection_field,
+        )
 
     def _build_request_body(
         self,
