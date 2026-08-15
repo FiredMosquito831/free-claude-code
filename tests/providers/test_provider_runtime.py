@@ -120,6 +120,20 @@ def _make_settings(**overrides):
     mock.commandcode_api_key = "test_commandcode_key"
     mock.cline_proxy = ""
     mock.cline_api_key = "test_cline_key"
+    mock.xai_api_key = "test_xai_key"
+    mock.together_api_key = "test_together_key"
+    mock.deepinfra_api_key = "test_deepinfra_key"
+    mock.siliconflow_api_key = "test_siliconflow_key"
+    mock.nebius_api_key = "test_nebius_key"
+    mock.chutes_api_key = "test_chutes_key"
+    mock.featherless_api_key = "test_featherless_key"
+    mock.xai_proxy = ""
+    mock.together_proxy = ""
+    mock.deepinfra_proxy = ""
+    mock.siliconflow_proxy = ""
+    mock.nebius_proxy = ""
+    mock.chutes_proxy = ""
+    mock.featherless_proxy = ""
     mock.cloudflare_api_token = "test_cloudflare_token"
     mock.cloudflare_account_id = "test_cloudflare_account"
     mock.cloudflare_proxy = ""
@@ -428,6 +442,13 @@ def test_create_provider_instantiates_each_builtin():
         bedrock_api_key="test_bedrock_key",
         tokenrouter_api_key="test_tokenrouter_key",
         nararoute_api_key="test_nararoute_key",
+        xai_api_key="test_xai_key",
+        together_api_key="test_together_key",
+        deepinfra_api_key="test_deepinfra_key",
+        siliconflow_api_key="test_siliconflow_key",
+        nebius_api_key="test_nebius_key",
+        chutes_api_key="test_chutes_key",
+        featherless_api_key="test_featherless_key",
     )
     cases = {
         "nvidia_nim": NvidiaNimProvider,
@@ -474,6 +495,13 @@ def test_create_provider_instantiates_each_builtin():
         "bedrock": OpenAIChatProvider,
         "tokenrouter": OpenAIChatProvider,
         "nararoute": OpenAIChatProvider,
+        "xai": OpenAIChatProvider,
+        "together": OpenAIChatProvider,
+        "deepinfra": OpenAIChatProvider,
+        "siliconflow": OpenAIChatProvider,
+        "nebius": OpenAIChatProvider,
+        "chutes": OpenAIChatProvider,
+        "featherless": OpenAIChatProvider,
     }
     sentinel_limiter = MagicMock(spec=ProviderRateLimiter)
 

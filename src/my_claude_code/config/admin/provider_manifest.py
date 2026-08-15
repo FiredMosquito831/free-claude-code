@@ -311,6 +311,54 @@ _PROVIDER_FIELD_OVERRIDES: dict[str, dict[str, Any]] = {
             "Agnes AI OpenAI-compatible API key for apihub.agnes-ai.com/v1."
         ),
     },
+    "XAI_API_KEY": {
+        "label": "xAI API Key",
+        "description": (
+            "xAI OpenAI-compatible API key for Grok chat and image-understanding "
+            "models."
+        ),
+    },
+    "TOGETHER_API_KEY": {
+        "label": "Together AI API Key",
+        "description": (
+            "Together AI OpenAI-compatible API key for serverless and dedicated "
+            "chat models."
+        ),
+    },
+    "DEEPINFRA_API_KEY": {
+        "label": "DeepInfra API Key",
+        "description": (
+            "DeepInfra API key for OpenAI-compatible chat and reasoning models."
+        ),
+    },
+    "SILICONFLOW_API_KEY": {
+        "label": "SiliconFlow API Key",
+        "description": (
+            "SiliconFlow API key for OpenAI-compatible chat, reasoning, and "
+            "vision models."
+        ),
+    },
+    "NEBIUS_API_KEY": {
+        "label": "Nebius Token Factory API Key",
+        "description": (
+            "Nebius Token Factory API key for OpenAI-compatible chat, reasoning, "
+            "and tool-capable models."
+        ),
+    },
+    "CHUTES_API_KEY": {
+        "label": "Chutes API Key",
+        "description": (
+            "Chutes API key for OpenAI-compatible chat, reasoning, and "
+            "tool-capable models."
+        ),
+    },
+    "FEATHERLESS_API_KEY": {
+        "label": "Featherless AI API Key",
+        "description": (
+            "Featherless AI API key for plan-available OpenAI-compatible chat, "
+            "reasoning, and tool-capable models."
+        ),
+    },
     "WANDB_API_KEY": {
         "label": "W&B Inference API Key",
         "description": (

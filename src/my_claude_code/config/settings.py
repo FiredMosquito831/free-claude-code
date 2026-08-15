@@ -226,6 +226,27 @@ class Settings(BaseSettings):
     # ==================== W&B Inference (OpenAI-compatible) ====================
     wandb_api_key: str = Field(default="", validation_alias="WANDB_API_KEY")
 
+    # ==================== xAI (Grok) ====================
+    xai_api_key: str = Field(default="", validation_alias="XAI_API_KEY")
+
+    # ==================== Together AI ====================
+    together_api_key: str = Field(default="", validation_alias="TOGETHER_API_KEY")
+
+    # ==================== DeepInfra ====================
+    deepinfra_api_key: str = Field(default="", validation_alias="DEEPINFRA_API_KEY")
+
+    # ==================== SiliconFlow ====================
+    siliconflow_api_key: str = Field(default="", validation_alias="SILICONFLOW_API_KEY")
+
+    # ==================== Nebius Token Factory ====================
+    nebius_api_key: str = Field(default="", validation_alias="NEBIUS_API_KEY")
+
+    # ==================== Chutes ====================
+    chutes_api_key: str = Field(default="", validation_alias="CHUTES_API_KEY")
+
+    # ==================== Featherless AI ====================
+    featherless_api_key: str = Field(default="", validation_alias="FEATHERLESS_API_KEY")
+
     # ==================== Messaging Platform Selection ====================
     # Valid: "telegram" | "discord" | "none"
     messaging_platform: str = Field(
@@ -439,6 +460,13 @@ class Settings(BaseSettings):
     bedrock_proxy: str = Field(default="", validation_alias="BEDROCK_PROXY")
     tokenrouter_proxy: str = Field(default="", validation_alias="TOKENROUTER_PROXY")
     nararoute_proxy: str = Field(default="", validation_alias="NARAROUTE_PROXY")
+    xai_proxy: str = Field(default="", validation_alias="XAI_PROXY")
+    together_proxy: str = Field(default="", validation_alias="TOGETHER_PROXY")
+    deepinfra_proxy: str = Field(default="", validation_alias="DEEPINFRA_PROXY")
+    siliconflow_proxy: str = Field(default="", validation_alias="SILICONFLOW_PROXY")
+    nebius_proxy: str = Field(default="", validation_alias="NEBIUS_PROXY")
+    chutes_proxy: str = Field(default="", validation_alias="CHUTES_PROXY")
+    featherless_proxy: str = Field(default="", validation_alias="FEATHERLESS_PROXY")
 
     # ==================== Provider Rate Limiting ====================
     provider_rate_limit: int = Field(default=40, validation_alias="PROVIDER_RATE_LIMIT")

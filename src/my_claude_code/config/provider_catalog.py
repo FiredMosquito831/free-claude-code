@@ -87,6 +87,20 @@ BEDROCK_DEFAULT_BASE = "https://bedrock-mantle.us-east-1.api.aws/v1"
 TOKENROUTER_DEFAULT_BASE = "https://api.tokenrouter.com/v1"
 # NaraRoute OpenAI-compatible Chat Completions gateway.
 NARAROUTE_DEFAULT_BASE = "https://router.bynara.id/v1"
+# xAI OpenAI-compatible Chat Completions API.
+XAI_DEFAULT_BASE = "https://api.x.ai/v1"
+# Together AI OpenAI-compatible Chat Completions API.
+TOGETHER_DEFAULT_BASE = "https://api.together.ai/v1"
+# DeepInfra OpenAI-compatible Chat Completions API.
+DEEPINFRA_DEFAULT_BASE = "https://api.deepinfra.com/v1/openai"
+# SiliconFlow OpenAI-compatible Chat Completions API.
+SILICONFLOW_DEFAULT_BASE = "https://api.siliconflow.com/v1"
+# Nebius Token Factory OpenAI-compatible Chat Completions API.
+NEBIUS_DEFAULT_BASE = "https://api.tokenfactory.nebius.com/v1"
+# Chutes OpenAI-compatible Chat Completions API.
+CHUTES_DEFAULT_BASE = "https://llm.chutes.ai/v1"
+# Featherless AI OpenAI-compatible Chat Completions API.
+FEATHERLESS_DEFAULT_BASE = "https://api.featherless.ai/v1"
 
 
 @dataclass(frozen=True, slots=True)
@@ -532,6 +546,76 @@ PROVIDER_CATALOG: dict[str, ProviderDescriptor] = {
         base_url_attr="nararoute_base_url",
         proxy_attr="nararoute_proxy",
         group="gateway",
+    ),
+    "xai": ProviderDescriptor(
+        provider_id="xai",
+        display_name="xAI (Grok)",
+        credential_env="XAI_API_KEY",
+        credential_url="https://console.x.ai/team/default/api-keys",
+        credential_attr="xai_api_key",
+        default_base_url=XAI_DEFAULT_BASE,
+        proxy_attr="xai_proxy",
+        group="direct",
+    ),
+    "together": ProviderDescriptor(
+        provider_id="together",
+        display_name="Together AI",
+        credential_env="TOGETHER_API_KEY",
+        credential_url="https://api.together.ai/settings/api-keys",
+        credential_attr="together_api_key",
+        default_base_url=TOGETHER_DEFAULT_BASE,
+        proxy_attr="together_proxy",
+        group="inference",
+    ),
+    "deepinfra": ProviderDescriptor(
+        provider_id="deepinfra",
+        display_name="DeepInfra",
+        credential_env="DEEPINFRA_API_KEY",
+        credential_url="https://deepinfra.com/dash/api_keys",
+        credential_attr="deepinfra_api_key",
+        default_base_url=DEEPINFRA_DEFAULT_BASE,
+        proxy_attr="deepinfra_proxy",
+        group="inference",
+    ),
+    "siliconflow": ProviderDescriptor(
+        provider_id="siliconflow",
+        display_name="SiliconFlow",
+        credential_env="SILICONFLOW_API_KEY",
+        credential_url="https://cloud.siliconflow.com/account/ak",
+        credential_attr="siliconflow_api_key",
+        default_base_url=SILICONFLOW_DEFAULT_BASE,
+        proxy_attr="siliconflow_proxy",
+        group="inference",
+    ),
+    "nebius": ProviderDescriptor(
+        provider_id="nebius",
+        display_name="Nebius Token Factory",
+        credential_env="NEBIUS_API_KEY",
+        credential_url="https://tokenfactory.nebius.com/project/api-keys",
+        credential_attr="nebius_api_key",
+        default_base_url=NEBIUS_DEFAULT_BASE,
+        proxy_attr="nebius_proxy",
+        group="inference",
+    ),
+    "chutes": ProviderDescriptor(
+        provider_id="chutes",
+        display_name="Chutes",
+        credential_env="CHUTES_API_KEY",
+        credential_url="https://chutes.ai/docs/getting-started/authentication",
+        credential_attr="chutes_api_key",
+        default_base_url=CHUTES_DEFAULT_BASE,
+        proxy_attr="chutes_proxy",
+        group="inference",
+    ),
+    "featherless": ProviderDescriptor(
+        provider_id="featherless",
+        display_name="Featherless AI",
+        credential_env="FEATHERLESS_API_KEY",
+        credential_url="https://featherless.ai/account/api-keys",
+        credential_attr="featherless_api_key",
+        default_base_url=FEATHERLESS_DEFAULT_BASE,
+        proxy_attr="featherless_proxy",
+        group="inference",
     ),
     "alibaba_coding": ProviderDescriptor(
         provider_id="alibaba_coding",
