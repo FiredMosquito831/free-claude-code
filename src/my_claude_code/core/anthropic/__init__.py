@@ -6,6 +6,7 @@ from .conversion import (
     OpenAIConversionError,
     ReasoningReplayMode,
     build_base_request_body,
+    is_synthetic_openai_tool_turn_boundary,
 )
 from .errors import (
     anthropic_error_payload,
@@ -34,6 +35,7 @@ from .models import (
     Tool,
     Usage,
 )
+from .openai_tool_names import OpenAIToolNameCodec
 from .request_modalities import (
     ImageInput,
     request_carries_image,
@@ -51,7 +53,7 @@ from .streaming import (
 )
 from .thinking import ContentChunk, ContentType, ThinkTagParser
 from .tokens import get_token_count
-from .tools import HeuristicToolParser
+from .tools import FunctionTagToolParser, HeuristicToolParser
 from .utils import set_if_not_none
 
 __all__ = [
@@ -69,12 +71,14 @@ __all__ = [
     "ContentBlockWebSearchToolResult",
     "ContentChunk",
     "ContentType",
+    "FunctionTagToolParser",
     "HeuristicToolParser",
     "ImageInput",
     "Message",
     "MessagesRequest",
     "MessagesResponse",
     "OpenAIConversionError",
+    "OpenAIToolNameCodec",
     "ReasoningReplayMode",
     "StreamBlockLedger",
     "SystemContent",
@@ -98,6 +102,7 @@ __all__ = [
     "get_block_attr",
     "get_block_type",
     "get_token_count",
+    "is_synthetic_openai_tool_turn_boundary",
     "map_stop_reason",
     "request_carries_image",
     "request_image_inputs",
