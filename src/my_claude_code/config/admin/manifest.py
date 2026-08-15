@@ -788,6 +788,48 @@ _NON_PROVIDER_FIELDS: tuple[ConfigFieldSpec, ...] = (
         advanced=True,
     ),
     ConfigFieldSpec(
+        "FCC_SMOKE_MODEL_QWENCLOUD",
+        "Smoke QwenCloud Token Plan Model",
+        "smoke",
+        advanced=True,
+    ),
+    ConfigFieldSpec(
+        "FCC_SMOKE_MODEL_QWENCLOUD_CODING",
+        "Smoke QwenCloud Coding Plan Model",
+        "smoke",
+        advanced=True,
+    ),
+    ConfigFieldSpec(
+        "FCC_SMOKE_MODEL_AGNES",
+        "Smoke Agnes AI Model",
+        "smoke",
+        advanced=True,
+    ),
+    ConfigFieldSpec(
+        "FCC_SMOKE_MODEL_WANDB",
+        "Smoke W&B Inference Model",
+        "smoke",
+        advanced=True,
+    ),
+    ConfigFieldSpec(
+        "FCC_SMOKE_MODEL_BEDROCK",
+        "Smoke Amazon Bedrock Model",
+        "smoke",
+        advanced=True,
+    ),
+    ConfigFieldSpec(
+        "FCC_SMOKE_MODEL_TOKENROUTER",
+        "Smoke TokenRouter Model",
+        "smoke",
+        advanced=True,
+    ),
+    ConfigFieldSpec(
+        "FCC_SMOKE_MODEL_NARAROUTE",
+        "Smoke NaraRoute Model",
+        "smoke",
+        advanced=True,
+    ),
+    ConfigFieldSpec(
         "FCC_SMOKE_NIM_MODELS",
         "Smoke NIM Models",
         "smoke",

@@ -70,6 +70,23 @@ ALIBABA_CODING_CN_DEFAULT_BASE = "https://coding.dashscope.aliyuncs.com/v1"
 # the one that speaks plain OpenAI Chat Completions with no ``api-version``
 # query parameter and no deployment path segment.
 AZURE_OPENAI_BASE_URL_EXAMPLE = "https://YOUR-RESOURCE.openai.azure.com/openai/v1/"
+# QwenCloud Token Plan OpenAI-compatible Chat Completions API.
+QWENCLOUD_DEFAULT_BASE = (
+    "https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1"
+)
+# QwenCloud Coding Plan OpenAI-compatible Chat Completions API.
+QWENCLOUD_CODING_DEFAULT_BASE = "https://coding-intl.dashscope.aliyuncs.com/v1"
+# Agnes AI OpenAI-compatible Chat Completions API.
+AGNES_DEFAULT_BASE = "https://apihub.agnes-ai.com/v1"
+# W&B Serverless Inference OpenAI-compatible API.
+WANDB_INFERENCE_DEFAULT_BASE = "https://api.inference.wandb.ai/v1"
+# Amazon Bedrock Mantle OpenAI-compatible endpoint. The base URL remains
+# configurable because API keys and model availability are region-scoped.
+BEDROCK_DEFAULT_BASE = "https://bedrock-mantle.us-east-1.api.aws/v1"
+# TokenRouter OpenAI-compatible Chat Completions gateway.
+TOKENROUTER_DEFAULT_BASE = "https://api.tokenrouter.com/v1"
+# NaraRoute OpenAI-compatible Chat Completions gateway.
+NARAROUTE_DEFAULT_BASE = "https://router.bynara.id/v1"
 
 
 @dataclass(frozen=True, slots=True)
@@ -442,6 +459,79 @@ PROVIDER_CATALOG: dict[str, ProviderDescriptor] = {
         default_base_url=ZAI_DEFAULT_BASE,
         proxy_attr="zai_proxy",
         group="subscription",
+    ),
+    "qwencloud": ProviderDescriptor(
+        provider_id="qwencloud",
+        display_name="QwenCloud Token Plan",
+        credential_env="QWENCLOUD_API_KEY",
+        credential_url="https://home.qwencloud.com/api-keys",
+        credential_attr="qwencloud_api_key",
+        default_base_url=QWENCLOUD_DEFAULT_BASE,
+        proxy_attr="qwencloud_proxy",
+        group="direct",
+    ),
+    "qwencloud_coding": ProviderDescriptor(
+        provider_id="qwencloud_coding",
+        display_name="QwenCloud Coding Plan",
+        credential_env="QWENCLOUD_CODING_API_KEY",
+        credential_url="https://home.qwencloud.com/api-keys",
+        credential_attr="qwencloud_coding_api_key",
+        default_base_url=QWENCLOUD_CODING_DEFAULT_BASE,
+        proxy_attr="qwencloud_coding_proxy",
+        group="subscription",
+    ),
+    "agnes": ProviderDescriptor(
+        provider_id="agnes",
+        display_name="Agnes AI",
+        credential_env="AGNES_API_KEY",
+        credential_url="https://agnes-ai.com/",
+        credential_attr="agnes_api_key",
+        default_base_url=AGNES_DEFAULT_BASE,
+        proxy_attr="agnes_proxy",
+        group="gateway",
+    ),
+    "wandb": ProviderDescriptor(
+        provider_id="wandb",
+        display_name="W&B Inference",
+        credential_env="WANDB_API_KEY",
+        credential_url="https://wandb.ai/settings",
+        credential_attr="wandb_api_key",
+        default_base_url=WANDB_INFERENCE_DEFAULT_BASE,
+        proxy_attr="wandb_proxy",
+        group="inference",
+    ),
+    "bedrock": ProviderDescriptor(
+        provider_id="bedrock",
+        display_name="Amazon Bedrock",
+        credential_env="AWS_BEARER_TOKEN_BEDROCK",
+        credential_url="https://console.aws.amazon.com/bedrock/",
+        credential_attr="bedrock_api_key",
+        default_base_url=BEDROCK_DEFAULT_BASE,
+        base_url_attr="bedrock_base_url",
+        proxy_attr="bedrock_proxy",
+        group="direct",
+    ),
+    "tokenrouter": ProviderDescriptor(
+        provider_id="tokenrouter",
+        display_name="TokenRouter",
+        credential_env="TOKENROUTER_API_KEY",
+        credential_url="https://www.tokenrouter.com/",
+        credential_attr="tokenrouter_api_key",
+        default_base_url=TOKENROUTER_DEFAULT_BASE,
+        base_url_attr="tokenrouter_base_url",
+        proxy_attr="tokenrouter_proxy",
+        group="gateway",
+    ),
+    "nararoute": ProviderDescriptor(
+        provider_id="nararoute",
+        display_name="NaraRoute",
+        credential_env="NARAROUTE_API_KEY",
+        credential_url="https://router.bynara.id/keys",
+        credential_attr="nararoute_api_key",
+        default_base_url=NARAROUTE_DEFAULT_BASE,
+        base_url_attr="nararoute_base_url",
+        proxy_attr="nararoute_proxy",
+        group="gateway",
     ),
     "alibaba_coding": ProviderDescriptor(
         provider_id="alibaba_coding",

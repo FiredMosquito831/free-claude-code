@@ -421,6 +421,13 @@ def test_create_provider_instantiates_each_builtin():
         # Azure ships no default endpoint: the host names the user's own
         # resource, so construction needs one supplied here.
         azure_openai_base_url="https://unit-test.openai.azure.com/openai/v1/",
+        qwencloud_api_key="test_qwencloud_key",
+        qwencloud_coding_api_key="test_qwencloud_coding_key",
+        agnes_api_key="test_agnes_key",
+        wandb_api_key="test_wandb_key",
+        bedrock_api_key="test_bedrock_key",
+        tokenrouter_api_key="test_tokenrouter_key",
+        nararoute_api_key="test_nararoute_key",
     )
     cases = {
         "nvidia_nim": NvidiaNimProvider,
@@ -460,6 +467,13 @@ def test_create_provider_instantiates_each_builtin():
         "nous_portal": NousPortalProvider,
         "kilo": KiloProvider,
         "commandcode": CommandCodeProvider,
+        "qwencloud": OpenAIChatProvider,
+        "qwencloud_coding": OpenAIChatProvider,
+        "agnes": OpenAIChatProvider,
+        "wandb": OpenAIChatProvider,
+        "bedrock": OpenAIChatProvider,
+        "tokenrouter": OpenAIChatProvider,
+        "nararoute": OpenAIChatProvider,
     }
     sentinel_limiter = MagicMock(spec=ProviderRateLimiter)
 
