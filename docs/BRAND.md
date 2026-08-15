@@ -109,7 +109,7 @@ compatibility, even though the product is now My Claude Code:
 
 - `FCC_*` environment variables (e.g. `FCC_ENV_FILE`, `FCC_OPEN_BROWSER`,
   `FCC_SMOKE_TARGETS`).
-- Release repository `FiredMosquito831/free-claude-code` (RELEASE_REPO).
+- Release repository `FiredMosquito831/my-claude-code` (RELEASE_REPO).
 - Local proxy port `:8082`.
 - Proxy auth token `freecc`.
 - Model ids `claude-3-freecc-*`.

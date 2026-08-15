@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-FCC_REPO="FiredMosquito831/free-claude-code"
+FCC_REPO="FiredMosquito831/my-claude-code"
 FCC_LATEST_RELEASE_URL="https://api.github.com/repos/${FCC_REPO}/releases/latest"
 PYTHON_VERSION="3.14.0"
 MIN_UV_VERSION="0.11.0"
