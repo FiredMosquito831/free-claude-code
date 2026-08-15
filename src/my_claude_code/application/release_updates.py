@@ -52,7 +52,7 @@ from my_claude_code.core.version import (
 # The canonical distribution this release installs.
 PACKAGE_NAME = NATIVE_DISTRIBUTION
 # Kept in step with the URLs in scripts/install.sh and scripts/install.ps1.
-RELEASE_REPO = "FiredMosquito831/free-claude-code"
+RELEASE_REPO = "FiredMosquito831/my-claude-code"
 _LATEST_RELEASE_URL = f"https://api.github.com/repos/{RELEASE_REPO}/releases/latest"
 _CACHE_TTL_SECONDS = 6 * 3600.0
 _HTTP_TIMEOUT_SECONDS = 10.0

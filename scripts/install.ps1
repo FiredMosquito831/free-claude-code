@@ -14,7 +14,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
 
-$FccRepo = "FiredMosquito831/free-claude-code"
+$FccRepo = "FiredMosquito831/my-claude-code"
 $FccLatestReleaseUrl = "https://api.github.com/repos/$FccRepo/releases/latest"
 $PythonVersion = "3.14.0"
 $MinUvVersion = "0.11.0"

@@ -14,7 +14,7 @@
 | Server command | `mcc-server` (primary); `fcc-server` kept as alias |
 | Launchers | `mcc-claude`/`mcc-codex`/`mcc-pi`/`mcc-claude-old` (primary); `fcc-*` kept |
 | **GitHub repo slug** | **UNCHANGED** â€” `free-claude-code` (do not rename) |
-| **Release repo** | **UNCHANGED** â€” `FiredMosquito831/free-claude-code` (`RELEASE_REPO`) |
+| **Release repo** | **UNCHANGED** â€” `FiredMosquito831/my-claude-code` (`RELEASE_REPO`) |
 | **FCC_* env vars** | **UNCHANGED** (`FCC_ENV_FILE`, `FCC_OPEN_BROWSER`, `FCC_SMOKE_TARGETS`â€¦) |
 | **Proxy port / token** | **UNCHANGED** â€” `:8082`, token `freecc` |
 | **Model ids / provider ids** | **UNCHANGED** â€” `claude-3-freecc-*`, Codex id `fcc`, Pi scope `free-claude-code/**` |
@@ -28,7 +28,7 @@ The product rebrand does **not** rename the GitHub repository. The repo stays
 Two remotes stay in play:
 
 - `Alishahryar1/free-claude-code` â€” primary fork / development remote.
-- `FiredMosquito831/free-claude-code` â€” **release repo** (`RELEASE_REPO`); the
+- `FiredMosquito831/my-claude-code` â€” **release repo** (`RELEASE_REPO`); the
   release workflow publishes wheels and the "update available" banner here.
 
 Cutover steps (run at release time, NOT now):
@@ -42,7 +42,7 @@ Cutover steps (run at release time, NOT now):
    `git push origin main && git push <release-remote> main`.
 4. Tag the release (`git tag v5.0.0`) and push tags to both remotes.
 5. Build and publish the wheel to the release repo (see Â§3). The install
-   scripts already fetch from `FiredMosquito831/free-claude-code/main`, so the
+   scripts already fetch from `FiredMosquito831/my-claude-code/main`, so the
    published wheel there is what end users receive â€” repo URL needs no change.
 
 > Do **not** rename the repo or migrate issues/PRs. The `FCC_*` env vars,

@@ -10,7 +10,7 @@ import pytest
 FCC_VERSION = "9.9.9"
 FCC_WHEEL_NAME = f"my_claude_code-{FCC_VERSION}-py3-none-any.whl"
 FCC_WHEEL_URL = (
-    "https://github.com/FiredMosquito831/free-claude-code/releases/download/"
+    "https://github.com/FiredMosquito831/my-claude-code/releases/download/"
     f"v{FCC_VERSION}/{FCC_WHEEL_NAME}"
 )
 FCC_WHEEL_SHA256 = "91aaec9d83e2e931dbad653e74faa3c106acd6f8bd30a21a7985d77d870aef8b"
@@ -42,7 +42,7 @@ _POWERSHELL_HELPER_NAMES = frozenset(
 )
 
 FCC_LATEST_RELEASE_URL = (
-    "https://api.github.com/repos/FiredMosquito831/free-claude-code/releases/latest"
+    "https://api.github.com/repos/FiredMosquito831/my-claude-code/releases/latest"
 )
 
 # Mirrors the shape the installers parse: the first "tag_name" line and the
@@ -1236,7 +1236,7 @@ def test_installers_use_native_clients_and_single_python_selection() -> None:
         assert "git --version" not in text
         # The wheel URL is now assembled from the release the feed reports, so
         # the script must carry the repo and the feed, not a pinned version.
-        assert "FiredMosquito831/free-claude-code" in text
+        assert "FiredMosquito831/my-claude-code" in text
         assert "releases/latest" in text
         assert "releases/download/" in text
         assert FCC_VERSION not in text, "no product version may be pinned"

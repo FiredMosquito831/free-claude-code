@@ -1,4 +1,147 @@
-MIT License
+Required Notice: Copyright (c) 2026 FiredMosquito831
+                   https://github.com/FiredMosquito831/my-claude-code
+
+This software is free to use for personal and noncommercial purposes under the
+PolyForm Noncommercial License 1.0.0 (full text below). If you share a copy of
+this software — original or modified — or present, describe, or talk about the
+software, its repository, or the product, you must credit the creator and the
+official repository listed in the Required Notice above. You may not claim it
+as your own work, and you may not sell it, resell it, or use it as part of a
+commercial product or paid service without separate written permission.
+
+Base attribution: The model-routing infrastructure of this project is derived
+from the MIT-licensed Free Claude Code by Ali Khokhar (Alishahryar1), which is
+included below. This project has since diverged extensively from that original
+work.
+
+--------------------------------------------------------------------------------
+
+# PolyForm Noncommercial License 1.0.0
+
+<https://polyformproject.org/licenses/noncommercial/1.0.0>
+
+## Acceptance
+
+In order to get any license under these terms, you must agree to them as both
+strict obligations and conditions to all your licenses.
+
+## Copyright License
+
+The licensor grants you a copyright license for the software to do everything
+you might do with the software that would otherwise infringe the licensor's
+copyright in it for any permitted purpose. However, you may only distribute the
+software according to [Distribution License](#distribution-license) and make
+changes or new works based on the software according to [Changes and New Works
+License](#changes-and-new-works-license).
+
+## Distribution License
+
+The licensor grants you an additional copyright license to distribute copies of
+the software. Your license to distribute covers distributing the software with
+changes and new works permitted by [Changes and New Works
+License](#changes-and-new-works-license).
+
+## Notices
+
+You must ensure that anyone who gets a copy of any part of the software from you
+also gets a copy of these terms or the URL for them above, as well as copies of
+any plain-text lines beginning with `Required Notice:` that the licensor
+provided with the software. For example:
+
+> Required Notice: Copyright Yoyodyne, Inc. (http://example.com)
+
+## Changes and New Works License
+
+The licensor grants you an additional copyright license to make changes and new
+works based on the software for any permitted purpose.
+
+## Patent License
+
+The licensor grants you a patent license for the software that covers patent
+claims the licensor can license, or becomes able to license, that you would
+infringe by using the software.
+
+## Noncommercial Purposes
+
+Any noncommercial purpose is a permitted purpose.
+
+## Personal Uses
+
+Personal use for research, experiment, and testing for the benefit of public
+knowledge, personal study, private entertainment, hobby projects, amateur
+pursuits, or religious observance, without any anticipated commercial
+application, is use for a permitted purpose.
+
+## Noncommercial Organizations
+
+Use by any charitable organization, educational institution, public research
+organization, public safety or health organization, environmental protection
+organization, or government institution is use for a permitted purpose
+regardless of the source of funding or obligations resulting from the use.
+
+## Fair Use
+
+You may have "fair use" rights, a "fair dealing" right, or other similar
+limitations and exceptions to copyright or patent use in your jurisdiction.
+Because of those limitations and exceptions, you do not need to comply with
+this license, or may not need to comply with this license, in those
+jurisdictions. To the extent applicable, you may use the software in those
+jurisdictions without complying with this license.
+
+## Excluded Rights
+
+The licensor is not granting you any rights under trademark law, or any other
+rights except the rights described in the Copyright License. The licensor does
+not grant you the right to use the licensor's name, logo, or trademarks to
+market your products or services, or to suggest any endorsement.
+
+## Termination
+
+Any rights you receive under this license terminate on the first date that you
+violate the terms of this license. The licensor may also terminate your rights
+under this license if you initiate any patent claim against the licensor, or any
+affiliate of the licensor, alleging that any part of the software, excluding
+the software's software dependencies, directly or contributory infringes a
+patent.
+
+## Liability
+
+Neither the licensor nor the software is liable to you for any damages, however
+caused, except for any liability that cannot be waived or limited under
+applicable law.
+
+## Definitions
+
+The `licensor` is the individual or entity that offers these terms, and the
+`software` is the software the licensor makes available under these terms.
+
+You can `use` the software for commercial purposes only if you are a
+noncommercial organization, or if you are an individual and you are not selling
+the software, or licensing the software for a fee, or using the software in a
+manner primarily intended for or directed toward commercial advantage or
+private monetary compensation. You can `use` the software for commercial
+purposes only if you comply with the limitations and exceptions in this
+license, and only if you do not create or contribute to the creation of a
+competing product or service.
+
+The `noncommercial purposes` are the permitted purposes defined in the
+[Noncommercial Purposes](#noncommercial-purposes), [Personal
+Uses](#personal-uses), and [Noncommercial Organizations](#noncommercial-organizations)
+sections of this license.
+
+`Distribute` means providing copies of the software to a third party, whether
+in original or modified form, as part of a distribution, sublicense, or other
+transfer of the software.
+
+The `software dependencies` are the software's dependencies.
+
+--------------------------------------------------------------------------------
+
+# The MIT License (MIT)
+
+The following copyright notice and permission notice applies to the original
+Free Claude Code by Ali Khokhar, from which the model-routing infrastructure of
+this project derives:
 
 Copyright (c) 2026 Ali Khokhar
 

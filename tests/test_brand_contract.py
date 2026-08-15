@@ -6,7 +6,7 @@ still intact:
 
 Kept contracts (must not change):
   - FCC_* environment variables (e.g. FCC_OPEN_BROWSER)
-  - Release repository FiredMosquito831/free-claude-code (RELEASE_REPO)
+  - Release repository FiredMosquito831/my-claude-code (RELEASE_REPO)
   - Proxy token "freecc", config dir ".fcc"
   - Legacy fcc-* command family (preserved as aliases)
   - LEGACY_DISPLAY_NAME = "Free Claude Code"
@@ -69,11 +69,11 @@ def test_kept_proxy_token_and_config_dir():
 
 def test_kept_release_repo():
     # RELEASE_REPO inside the application code.
-    assert 'RELEASE_REPO = "FiredMosquito831/free-claude-code"' in _read(
+    assert 'RELEASE_REPO = "FiredMosquito831/my-claude-code"' in _read(
         "src/my_claude_code/application/release_updates.py"
     )
     # Badges / install URLs in public docs still point at the release repo.
-    assert "FiredMosquito831/free-claude-code" in _read("README.md")
+    assert "FiredMosquito831/my-claude-code" in _read("README.md")
 
 
 def test_kept_legacy_display_name():
