@@ -191,7 +191,10 @@ class TestWindowsStartAtLogin:
         desktop_config.apply_start_at_login()
 
         assert LAUNCH_AGENT_LABEL in fake_winreg.values
-        assert "my_claude_code.cli.desktop_entrypoint" in fake_winreg.values[LAUNCH_AGENT_LABEL]
+        assert (
+            "my_claude_code.cli.desktop_entrypoint"
+            in fake_winreg.values[LAUNCH_AGENT_LABEL]
+        )
 
     def test_remove_deletes_run_key(self, monkeypatch, tmp_path, fake_winreg):
         _set_home(monkeypatch, tmp_path)
