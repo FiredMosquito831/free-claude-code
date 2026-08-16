@@ -14,6 +14,7 @@ from my_claude_code.providers.nvidia_nim.voice import NvidiaNimTranscriber
 
 from .application import ApplicationRuntime, RestartCallback
 from .asgi import RuntimeASGIApp
+from .codex_catalog import CodexModelCatalogPublisher
 from .provider_manager import ProviderRuntimeManager
 
 
@@ -29,7 +30,10 @@ def build_asgi_app(
         level=settings.log_level,
         verbose_third_party=settings.log_raw_api_payloads,
     )
-    provider_manager = ProviderRuntimeManager(settings)
+    provider_manager = ProviderRuntimeManager(
+        settings,
+        model_catalog_publisher=CodexModelCatalogPublisher(),
+    )
     runtime = ApplicationRuntime(
         provider_manager,
         transcriber=_create_transcriber(settings),

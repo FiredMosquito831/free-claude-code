@@ -141,6 +141,46 @@ def test_codex_catalog_accepts_future_direct_provider_slugs() -> None:
     ]
 
 
+def test_catalog_writer_skips_identical_content_and_replaces_changes(
+    tmp_path: Path,
+) -> None:
+    catalog_path = tmp_path / "codex-model-catalog.json"
+    first = build_codex_model_catalog(_models_payload("anthropic/nvidia_nim/first"))
+    second = build_codex_model_catalog(_models_payload("anthropic/nvidia_nim/second"))
+
+    assert write_codex_model_catalog(catalog_path, first) is True
+    assert write_codex_model_catalog(catalog_path, first) is False
+    assert list(tmp_path.glob(".codex-model-catalog.json.*.tmp")) == []
+
+    assert write_codex_model_catalog(catalog_path, second) is True
+    assert json.loads(catalog_path.read_text(encoding="utf-8")) == second
+    assert list(tmp_path.glob(".codex-model-catalog.json.*.tmp")) == []
+
+
+def test_catalog_writer_cleans_temporary_file_after_replace_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    catalog_path = tmp_path / "codex-model-catalog.json"
+    catalog_path.write_text("previous\n", encoding="utf-8")
+
+    def fail_replace(_source: Path, _destination: Path) -> Path:
+        raise PermissionError("destination is locked")
+
+    monkeypatch.setattr(Path, "replace", fail_replace)
+
+    with pytest.raises(PermissionError, match="locked"):
+        write_codex_model_catalog(
+            catalog_path,
+            build_codex_model_catalog(
+                _models_payload("anthropic/nvidia_nim/replacement")
+            ),
+        )
+
+    assert catalog_path.read_text(encoding="utf-8") == "previous\n"
+    assert list(tmp_path.glob(".codex-model-catalog.json.*.tmp")) == []
+
+
 def test_generated_catalog_schema_is_accepted_by_installed_codex(
     tmp_path: Path,
 ) -> None:

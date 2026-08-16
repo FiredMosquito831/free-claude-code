@@ -499,11 +499,27 @@ translate reasoning. The catalog is not part of an individual provider
 generation, so a hot replacement does not erase the last useful model list.
 Discovery failures retain prior entries.
 
-Codex-specific model picker shaping stays out of this route. `fcc-codex` fetches
-the same `/v1/models` response at launch, converts FCC gateway IDs into
-provider-selectable Codex slugs, writes `~/.fcc/codex-model-catalog.json`, and
-passes it as `model_catalog_json`. Codex users open the native picker with
-`/model`; FCC does not implement a proxy-level `/models` alias.
+Codex-specific model picker shaping stays out of this route.
+[runtime/codex_catalog.py](src/my_claude_code/runtime/codex_catalog.py) is the
+composition bridge: it asks this route's pure builder for the exact application
+inventory, passes that response to the existing Codex adapter, and writes
+`~/.fcc/codex-model-catalog.json` without making a loopback HTTP request.
+`ProviderRuntimeManager` invokes the bridge after authoritative settings,
+discovery, provider-test, or connected-account changes. Startup writes a missing
+file once the background discovery pass completes, and preserves an existing
+last-known-good catalog until then. `ensure_exists` additionally supports a
+warm-start path that creates a minimal catalog before the full discovery pass
+for callers that warm routed providers first. Writes are atomic and identical
+bytes are not rewritten. Projection or filesystem failures emit only a concise
+warning and do not fail server startup, Admin operations, discovery, or
+inference. Shutdown never publishes the cleared in-memory cache.
+
+The Codex App reads `model_catalog_json` at startup, so it must restart to see a
+later catalog publication. `fcc-codex` remains an additional launch-time
+synchronizer: it fetches the same `/v1/models` response, uses the same adapter
+and writer, and passes the path as an ephemeral override. Codex users open the
+native picker with `/model`; FCC does not implement a proxy-level `/models`
+alias.
 
 ## Provider Architecture
 
@@ -952,10 +968,16 @@ helper parameterized by env builder:
   `model_catalog_json` file under `~/.fcc/`, and injects that path so Codex's
   native `/model` picker lists FCC provider slugs. Catalog generation is
   fail-open: launch continues with a warning if the catalog cannot be prepared.
+  The same content-aware writer is shared with
+  [runtime/codex_catalog.py](src/my_claude_code/runtime/codex_catalog.py), so the
+  server's published catalog and the launcher's ephemeral override are always
+  byte-consistent and identical bytes are never rewritten.
 - Catalog discovery and inference both authenticate with HTTP bearer authorization.
 - It stores the proxy auth token in `FCC_CODEX_API_KEY` for Codex's provider
   `env_key` to read. This process-local variable is a client credential carrier,
-  not a second FCC setting.
+  not a second FCC setting. Codex App and IDE processes that are not launched
+  through `fcc-codex` read the same `env_key` from the persistent `~/.codex`
+  config against the server-published catalog.
 
 [cli/launchers/pi.py](src/my_claude_code/cli/launchers/pi.py) owns the installed
 `mcc-pi` launcher and [cli/launchers/pi_extension.ts](src/my_claude_code/cli/launchers/pi_extension.ts)
