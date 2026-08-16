@@ -3,6 +3,7 @@
 import asyncio
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
+from typing import Protocol
 
 from loguru import logger
 
@@ -11,6 +12,7 @@ from my_claude_code.application.model_metadata import (
     ProviderModelInfo,
     ProviderModelRefreshResult,
 )
+from my_claude_code.application.ports import RequestRuntimePort
 from my_claude_code.config.settings import Settings
 from my_claude_code.core.trace import trace_event
 from my_claude_code.providers.base import BaseProvider
@@ -23,7 +25,16 @@ from my_claude_code.providers.runtime.model_cache import ProviderModelCache
 from my_claude_code.providers.runtime.validation import ConfiguredModelValidator
 
 ProviderRuntimeFactory = Callable[[Settings], ProviderRuntime]
+ConnectedProviderIds = Callable[[], tuple[str, ...]]
 CommitConfig = Callable[[], None]
+
+
+class ModelCatalogPublisher(Protocol):
+    """Synchronize an external view of the application model inventory."""
+
+    def ensure_exists(self, runtime: RequestRuntimePort) -> None: ...
+
+    def publish(self, runtime: RequestRuntimePort) -> None: ...
 
 
 @dataclass(slots=True, eq=False)
@@ -88,12 +99,16 @@ class ProviderRuntimeManager:
         settings: Settings,
         *,
         runtime_factory: ProviderRuntimeFactory = ProviderRuntime,
+        connected_provider_ids: ConnectedProviderIds = tuple,
+        model_catalog_publisher: ModelCatalogPublisher | None = None,
     ) -> None:
         self._runtime_factory = runtime_factory
+        self._connected_provider_ids = connected_provider_ids
+        self._model_catalog_publisher = model_catalog_publisher
         self._replace_lock = asyncio.Lock()
         self._close_lock = asyncio.Lock()
         self._model_cache = ProviderModelCache(
-            model_cache_provider_ids_for_settings(settings)
+            model_cache_provider_ids_for_settings(settings, connected_provider_ids())
         )
         self._refresh_task: asyncio.Task[None] | None = None
         self._next_generation_id = 2
@@ -145,6 +160,78 @@ class ProviderRuntimeManager:
         model_infos: Iterable[ProviderModelInfo],
     ) -> None:
         self._model_cache.cache_model_infos(provider_id, model_infos)
+        self._publish_model_catalog()
+
+    async def warm_referenced_model_cache(self) -> ProviderModelRefreshResult:
+        """Warm routed provider catalogs before clients perform model discovery."""
+        lease = await self.acquire()
+        try:
+            discovery = ProviderModelDiscovery(
+                lease.settings,
+                lease.resolve_provider,
+                self._model_cache,
+            )
+            result = await discovery.warm_referenced_model_cache()
+            self._ensure_model_catalog()
+            return result
+        finally:
+            await lease.release()
+
+    def _synchronize_model_cache_scope(self) -> None:
+        """Drop metadata whose settings or connected account is no longer usable."""
+
+        self._model_cache.set_available_providers(
+            model_cache_provider_ids_for_settings(
+                self._current.settings, self._connected_provider_ids()
+            )
+        )
+
+    async def connected_provider_changed(
+        self, provider_id: str, *, connected: bool
+    ) -> ProviderModelRefreshResult:
+        """Synchronize one connected account without replacing a generation."""
+
+        async with self._replace_lock:
+            if self._closing or self._closed:
+                raise ApplicationUnavailableError("Provider runtime is shutting down.")
+            if not connected:
+                self._model_cache.remove_provider(provider_id)
+                self._publish_model_catalog()
+                return ProviderModelRefreshResult()
+            self._model_cache.add_provider(provider_id)
+            discovery = ProviderModelDiscovery(
+                self._current.settings,
+                self._current.runtime.resolve_provider,
+                self._model_cache,
+                self._connected_provider_ids(),
+            )
+            result = await discovery.refresh_provider(provider_id)
+            self._publish_model_catalog()
+            return result
+
+    def _ensure_model_catalog(self) -> None:
+        publisher = self._model_catalog_publisher
+        if publisher is None:
+            return
+        self._run_model_catalog_publication(publisher.ensure_exists)
+
+    def _publish_model_catalog(self) -> None:
+        publisher = self._model_catalog_publisher
+        if publisher is None:
+            return
+        self._run_model_catalog_publication(publisher.publish)
+
+    def _run_model_catalog_publication(
+        self,
+        publication: Callable[[RequestRuntimePort], None],
+    ) -> None:
+        try:
+            publication(self)
+        except Exception as exc:
+            logger.warning(
+                "Model catalog publication failed: exc_type={}",
+                type(exc).__name__,
+            )
 
     async def validate_configured_models(self) -> None:
         lease = await self.acquire()
@@ -219,8 +306,11 @@ class ProviderRuntimeManager:
             )
             self._current = candidate
             self._model_cache.set_available_providers(
-                model_cache_provider_ids_for_settings(settings)
+                model_cache_provider_ids_for_settings(
+                    settings, self._connected_provider_ids()
+                )
             )
+            self._publish_model_catalog()
             previous.retired = True
             self._retired[previous.generation_id] = previous
             self._trace_published(candidate, previous=previous, reason=reason)
@@ -289,7 +379,9 @@ class ProviderRuntimeManager:
                 generation.runtime.resolve_provider,
                 self._model_cache,
             )
-            return await discovery.refresh_model_list_cache(only_missing=only_missing)
+            result = await discovery.refresh_model_list_cache(only_missing=only_missing)
+            self._publish_model_catalog()
+            return result
         finally:
             await self._release(generation)
 

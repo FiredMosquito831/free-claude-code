@@ -876,6 +876,45 @@ Match the port and authentication token to the Admin UI, then reload the extensi
 </details>
 
 <details>
+<summary><strong>Codex App</strong></summary>
+
+Start `mcc-server`, then edit your Codex configuration:
+
+- Windows: `%USERPROFILE%\.codex\config.toml`
+- macOS: `~/.codex/config.toml`
+
+Add the matching model-catalog path and replace `YOUR_USERNAME`.
+
+Windows:
+
+```toml
+model_catalog_json = "C:/Users/YOUR_USERNAME/.fcc/codex-model-catalog.json"
+```
+
+macOS:
+
+```toml
+model_catalog_json = "/Users/YOUR_USERNAME/.fcc/codex-model-catalog.json"
+```
+
+Then add the shared MCC settings:
+
+```toml
+model_provider = "fcc"
+model = "nvidia_nim/nvidia/nemotron-3-super-120b-a12b"
+
+[model_providers.fcc]
+name = "My Claude Code"
+base_url = "http://127.0.0.1:8082/v1"
+env_key = "FCC_CODEX_API_KEY"
+wire_api = "responses"
+```
+
+Match the model and port to the Admin UI. The `env_key` reads the same proxy auth token the `mcc-codex` launcher sets for each process. `mcc-server` publishes the catalog file under `~/.fcc/` on startup and whenever the model inventory changes, so restart the Codex App after setup or model changes, then select an MCC model from its model picker.
+
+</details>
+
+<details>
 <summary><strong>Codex in VS Code</strong></summary>
 
 Install the [Codex extension](https://marketplace.visualstudio.com/items?itemName=openai.chatgpt). Create or edit `~/.codex/config.toml` (`%USERPROFILE%\.codex\config.toml` on Windows):
