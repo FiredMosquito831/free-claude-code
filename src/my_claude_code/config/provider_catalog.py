@@ -78,6 +78,8 @@ QWENCLOUD_DEFAULT_BASE = (
 QWENCLOUD_CODING_DEFAULT_BASE = "https://coding-intl.dashscope.aliyuncs.com/v1"
 # Agnes AI OpenAI-compatible Chat Completions API.
 AGNES_DEFAULT_BASE = "https://apihub.agnes-ai.com/v1"
+# ZenMux OpenAI-compatible Chat Completions gateway.
+ZENMUX_DEFAULT_BASE = "https://zenmux.ai/api/v1"
 # W&B Serverless Inference OpenAI-compatible API.
 WANDB_INFERENCE_DEFAULT_BASE = "https://api.inference.wandb.ai/v1"
 # Amazon Bedrock Mantle OpenAI-compatible endpoint. The base URL remains
@@ -502,6 +504,16 @@ PROVIDER_CATALOG: dict[str, ProviderDescriptor] = {
         credential_attr="agnes_api_key",
         default_base_url=AGNES_DEFAULT_BASE,
         proxy_attr="agnes_proxy",
+        group="gateway",
+    ),
+    "zenmux": ProviderDescriptor(
+        provider_id="zenmux",
+        display_name="ZenMux",
+        credential_env="ZENMUX_API_KEY",
+        credential_url="https://zenmux.ai/platform/pay-as-you-go",
+        credential_attr="zenmux_api_key",
+        default_base_url=ZENMUX_DEFAULT_BASE,
+        proxy_attr="zenmux_proxy",
         group="gateway",
     ),
     "wandb": ProviderDescriptor(

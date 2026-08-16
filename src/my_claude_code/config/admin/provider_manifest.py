@@ -366,6 +366,13 @@ _PROVIDER_FIELD_OVERRIDES: dict[str, dict[str, Any]] = {
             "Create one in [W&B User Settings](https://wandb.ai/settings)."
         ),
     },
+    "ZENMUX_API_KEY": {
+        "label": "ZenMux API Key",
+        "description": (
+            "ZenMux OpenAI-compatible gateway API key for zenmux.ai/api/v1. "
+            "Create one at zenmux.ai/platform/pay-as-you-go."
+        ),
+    },
 }
 
 
