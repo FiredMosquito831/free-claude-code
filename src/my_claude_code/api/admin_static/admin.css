@@ -1633,6 +1633,25 @@ textarea:focus-visible,
   gap: 10px;
 }
 
+.rtk-status-line {
+  margin-top: 10px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--muted);
+}
+
+.rtk-status-line.ok {
+  color: var(--ok);
+}
+
+.rtk-status-line.warn {
+  color: var(--warn);
+}
+
+.rtk-status-line.error {
+  color: var(--error);
+}
+
 .last-updated {
   color: var(--muted);
   font-size: 11px;

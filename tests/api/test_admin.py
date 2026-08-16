@@ -336,6 +336,42 @@ def test_admin_page_no_longer_renders_generated_env_panel(monkeypatch, tmp_path)
     assert "envPreview" not in response.text
 
 
+def test_admin_static_renders_and_binds_rtk_token_optimizer_card():
+    html = Path("src/my_claude_code/api/admin_static/index.html").read_text(
+        encoding="utf-8"
+    )
+    script = Path("src/my_claude_code/api/admin_static/admin.js").read_text(
+        encoding="utf-8"
+    )
+    styles = Path("src/my_claude_code/api/admin_static/admin.css").read_text(
+        encoding="utf-8"
+    )
+
+    # The three toggle checkboxes live in a "Token optimizer" card.
+    for control_id in ("rtkClaude", "rtkCodex", "rtkPi", "rtkStatusLine"):
+        assert f'id="{control_id}"' in html
+
+    # Each toggle binds to the shared POST endpoint and the shared reconciler
+    # path (the server applies the persisted state; the UI only sends the flag).
+    assert 'api("/admin/api/rtk", {' in script
+    assert 'api("/admin/api/rtk")' in script
+    assert "loadRtkState" in script
+    assert "renderRtkState" in script
+    assert "updateRtk" in script
+    assert (
+        'updateRtk("claude", event.currentTarget.checked, event.currentTarget)'
+        in script
+    )
+    assert (
+        'updateRtk("codex", event.currentTarget.checked, event.currentTarget)' in script
+    )
+    assert 'updateRtk("pi", event.currentTarget.checked, event.currentTarget)' in script
+    assert ".rtk-status-line" in styles
+    assert ".rtk-status-line.ok" in styles
+    assert ".rtk-status-line.warn" in styles
+    assert ".rtk-status-line.error" in styles
+
+
 def test_admin_page_no_longer_renders_global_status_header(monkeypatch, tmp_path):
     _set_home(monkeypatch, tmp_path)
     app = create_test_app()
