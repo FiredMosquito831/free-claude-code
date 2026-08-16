@@ -36,6 +36,7 @@ LEGACY_COMMANDS = (
     "fcc-pi",
     "fcc-chatgpt-oauth-login",
     "fcc-compact-log",
+    "fcc-rtk",
     "fcc-help",
 )
 
@@ -49,6 +50,7 @@ NATIVE_COMMANDS = (
     "mcc-pi",
     "mcc-chatgpt-oauth-login",
     "mcc-compact-log",
+    "mcc-rtk",
     "mcc-help",
 )
 

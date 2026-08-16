@@ -39,11 +39,12 @@ Manage and inspect:
   mcc-init                Create or repair ~/.fcc/.env with the config template
   mcc-chatgpt-oauth-login Log in to ChatGPT/Codex via OAuth device flow
   mcc-compact-log         Compact the request log (deduplicate + compress)
+  mcc-rtk                 Manage the RTK token optimizer
   mcc-help                Show this command reference
 
 The legacy fcc-* commands (fcc-server, fcc-claude, fcc-codex, fcc-pi,
-fcc-init, fcc-chatgpt-oauth-login, fcc-compact-log, free-claude-code) are kept
-as aliases and behave identically.
+fcc-init, fcc-chatgpt-oauth-login, fcc-compact-log, fcc-rtk, free-claude-code)
+are kept as aliases and behave identically.
 
 Updates: install while the server is running. On Windows the update is staged
 and completes after you stop and restart the app; on Linux/WSL it applies
@@ -101,3 +102,10 @@ def compact_log(argv: Sequence[str] | None = None) -> None:
     from my_claude_code.cli.commands import compact_log as run_compaction
 
     run_compaction()
+
+
+def rtk(argv: Sequence[str] | None = None) -> None:
+    """Manage the RTK token optimizer."""
+    from my_claude_code.cli.rtk_commands import rtk_command
+
+    rtk_command(argv)

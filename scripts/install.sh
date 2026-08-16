@@ -19,6 +19,7 @@ voice_nim=0
 voice_local=0
 voice_all=0
 torch_backend=""
+enable_rtk=0
 temporary_script=""
 temporary_directory=""
 release_wheel_path=""
@@ -38,6 +39,7 @@ Options:
   --voice-local            Install local Whisper voice transcription support.
   --voice-all              Install all voice transcription backends.
   --torch-backend VALUE    Use a uv PyTorch backend, such as cu130. Requires local voice.
+  --rtk                    Enable RTK token optimization for Claude Code, Codex, and Pi.
   --dry-run                Print commands without running them.
   --help                   Show this help text.
 USAGE
@@ -311,6 +313,9 @@ parse_args() {
                 torch_backend=${1#*=}
                 [ -n "$torch_backend" ] || fail "--torch-backend requires a non-empty value."
                 ;;
+            --rtk)
+                enable_rtk=1
+                ;;
             --version)
                 shift
                 [ "$#" -gt 0 ] || fail "--version requires a value."
@@ -457,6 +462,22 @@ install_my_claude_code() {
     fi
 }
 
+enable_rtk_for_agents() {
+    [ "$enable_rtk" -eq 1 ] || return 0
+
+    step "Enabling RTK token optimization"
+    if [ "$dry_run" -eq 1 ]; then
+        print_command mcc-rtk enable claude,codex,pi
+        return 0
+    fi
+
+    if command -v mcc-rtk >/dev/null 2>&1; then
+        run mcc-rtk enable claude,codex,pi
+    else
+        run "$tool_bin/mcc-rtk" enable claude,codex,pi
+    fi
+}
+
 configure_and_verify_my_claude_code() {
     run uv tool update-shell
 
@@ -518,6 +539,8 @@ install_my_claude_code
 
 step "Configuring PATH and verifying My Claude Code"
 configure_and_verify_my_claude_code
+
+enable_rtk_for_agents
 
 if [ "$dry_run" -eq 1 ]; then
     printf '\nDry run complete. No changes were made.\n'

@@ -1397,6 +1397,48 @@ def test_installers_define_every_helper_they_call() -> None:
     )
 
 
+def test_install_sh_rtk_flag_in_usage_and_parse_args() -> None:
+    shell = (_repo_root() / "scripts" / "install.sh").read_text(encoding="utf-8")
+
+    assert "Enable RTK token optimization" in shell
+    assert "mcc-rtk enable claude,codex,pi" in shell
+    # A parse_args case entry sets the flag.
+    assert "\n            --rtk)\n                enable_rtk=1\n" in shell
+
+
+def test_install_sh_rtk_dry_run_prints_enable_command() -> None:
+    shell = (_repo_root() / "scripts" / "install.sh").read_text(encoding="utf-8")
+
+    # The dry-run branch of enable_rtk_for_agents must print, not execute.
+    assert "print_command mcc-rtk enable claude,codex,pi" in shell
+    # The real path runs the shim from the uv tool bin dir.
+    assert '"$tool_bin/mcc-rtk" enable claude,codex,pi' in shell
+
+
+def test_install_sh_rtk_enable_step_runs_after_configure() -> None:
+    shell = (_repo_root() / "scripts" / "install.sh").read_text(encoding="utf-8")
+
+    # The RTK step is invoked in the main flow after PATH verification.
+    configure_call = shell.index("configure_and_verify_my_claude_code\n")
+    enable_call = shell.index("enable_rtk_for_agents\n")
+    assert configure_call < enable_call
+
+
+def test_install_ps1_rtk_flag_in_usage_and_param() -> None:
+    powershell = (_repo_root() / "scripts" / "install.ps1").read_text(encoding="utf-8")
+
+    assert "[switch] $Rtk," in powershell
+    assert "-Rtk                   Enable RTK token optimization" in powershell
+    assert "$script:EnableRtk = $Rtk.IsPresent" in powershell
+    assert "mcc-rtk enable claude,codex,pi" in powershell
+
+
+def test_install_ps1_rtk_dry_run_prints_enable_command() -> None:
+    powershell = (_repo_root() / "scripts" / "install.ps1").read_text(encoding="utf-8")
+
+    assert 'Write-Host "+ mcc-rtk enable claude,codex,pi"' in powershell
+
+
 def test_install_ps1_does_not_rely_on_script_scope_for_release_state() -> None:
     """The published command runs this file as a scriptblock, not a file.
 
