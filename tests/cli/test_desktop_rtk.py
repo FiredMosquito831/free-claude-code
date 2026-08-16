@@ -41,6 +41,7 @@ def _patched_tray(monkeypatch, tmp_path):
             {
                 "tray_enabled": True,
                 "start_at_login": False,
+                "server_mode": "spawn",
             },
         )(),
     )
@@ -105,6 +106,7 @@ def test_toggling_does_not_disturb_other_agents(monkeypatch, tmp_path):
             {
                 "tray_enabled": True,
                 "start_at_login": False,
+                "server_mode": "spawn",
             },
         )(),
     )

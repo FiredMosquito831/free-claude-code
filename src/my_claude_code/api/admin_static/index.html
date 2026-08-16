@@ -80,22 +80,32 @@
               <div id="versionDetails" class="version-details"></div>
               <pre id="versionUpgradeLog" class="requests-detail-body version-upgrade-log" hidden></pre>
             </section>
-            <section class="settings-section" aria-label="Desktop app">
+            <section class="settings-section" aria-label="Deployment">
               <div class="section-heading">
                 <div>
-                  <h3>Desktop</h3>
+                  <h3>Deployment</h3>
                   <p>
-                    Preferences for the optional tray app (<code>mcc-desktop</code>).
-                    These write <code>~/.fcc/desktop.json</code>; the next tray launch
-                    applies Start at Login to your OS.
+                    How the optional tray app (<code>mcc-desktop</code>) and the
+                    headless server (<code>mcc-server</code>) run on this machine.
+                    These write <code>~/.fcc/desktop.json</code>; the next tray
+                    launch applies Start at Login to your OS.
                   </p>
                 </div>
               </div>
-              <div class="desktop-toggles">
-                <label class="toggle-control">
-                  <input id="desktopStartAtLogin" type="checkbox" />
-                  Start at Login
+              <div class="field">
+                <label for="desktopServerMode">
+                  <span>Server mode</span>
                 </label>
+                <select id="desktopServerMode">
+                  <option value="spawn">Spawn server (tray owns it)</option>
+                  <option value="attach">Attach to an existing server</option>
+                  <option value="off">Off (tray only)</option>
+                </select>
+                <p class="field-description" id="desktopServerModeHint"></p>
+              </div>
+              <div class="deployment-origin" id="desktopOrigin" aria-live="polite"></div>
+              <div class="desktop-toggles" id="desktopAutostartOptions"></div>
+              <div class="desktop-toggles">
                 <label class="toggle-control">
                   <input id="desktopTrayEnabled" type="checkbox" />
                   Tray Enabled

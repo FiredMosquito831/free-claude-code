@@ -47,14 +47,26 @@ class DesktopController:
         error = preflight_proxy(local_proxy_root_url(get_settings()))
         return "running" if error is None else "stopped"
 
-    # -- process management ------------------------------------------------
-
-    def ensure_server(self) -> None:
-        """Spawn ``mcc-server`` when the health check finds it down."""
+    def server_mode(self) -> str:
+        """Return the persisted server-ownership mode (``spawn|attach|off``)."""
 
         from my_claude_code.config.desktop import load_desktop_state
 
-        if not load_desktop_state().server_auto_start:
+        return load_desktop_state().server_mode
+
+    # -- process management ------------------------------------------------
+
+    def ensure_server(self) -> None:
+        """Spawn ``mcc-server`` only when the tray owns it (``spawn``).
+
+        In ``attach`` and ``off`` the desktop app never starts the server:
+        ``attach`` health-checks and reports an existing server, ``off`` does
+        not touch the server at all.
+        """
+
+        from my_claude_code.config.desktop import load_desktop_state
+
+        if load_desktop_state().server_mode != "spawn":
             return
         settings = get_settings()
         if preflight_proxy(local_proxy_root_url(settings)) is None:
@@ -172,11 +184,19 @@ class DesktopController:
     def restart_server(self) -> None:
         """Restart the running server; if it is down, spawn it fresh.
 
-        Prefer the loopback ``POST /admin/api/config/apply`` no-op so the
-        server's own graceful-drain machinery performs the reload. Fall back to
-        a hard kill + respawn when the API is unreachable but the health probe
-        said the server was up (a race), or when the caller holds a child.
+        In ``attach``/``off`` mode the tray never owns a server, so a restart
+        raises :class:`DesktopError` instead of silently spawning one. Prefer
+        the loopback ``POST /admin/api/config/apply`` no-op so the server's own
+        graceful-drain machinery performs the reload. Fall back to a hard kill
+        + respawn when the API is unreachable but the health probe said the
+        server was up (a race), or when the caller holds a child.
         """
+
+        if self.server_mode() != "spawn":
+            raise DesktopError(
+                "Server is managed by the deployment mode; restart is only "
+                "available when Server mode is set to 'spawn'."
+            )
 
         settings = get_settings()
         root_url = local_proxy_root_url(settings)

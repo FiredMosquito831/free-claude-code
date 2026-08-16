@@ -39,6 +39,7 @@ from my_claude_code.config.constants import (
 )
 from my_claude_code.config.credentials import parse_credential_keys
 from my_claude_code.config.desktop import (
+    SERVER_MODES,
     DesktopState,
     load_desktop_state,
     save_desktop_state,
@@ -141,14 +142,15 @@ class OnboardingUpdatePayload(BaseModel):
 class DesktopUpdatePayload(BaseModel):
     """Partial desktop preference update submitted by the admin UI.
 
-    Only these four boolean flags are accepted; anything else is ignored so a
-    stray body cannot corrupt the desktop state file.
+    Only these fields are accepted; anything else is ignored so a stray body
+    cannot corrupt the desktop state file. ``server_mode`` is constrained to
+    the ``spawn|attach|off`` enum.
     """
 
     tray_enabled: bool | None = None
     start_at_login: bool | None = None
     minimize_to_tray: bool | None = None
-    server_auto_start: bool | None = None
+    server_mode: str | None = None
 
 
 class RtkUpdatePayload(BaseModel):
@@ -717,7 +719,7 @@ def _desktop_state_response(state: DesktopState) -> dict[str, Any]:
         "tray_enabled": state.tray_enabled,
         "start_at_login": state.start_at_login,
         "minimize_to_tray": state.minimize_to_tray,
-        "server_auto_start": state.server_auto_start,
+        "server_mode": state.server_mode,
     }
 
 
@@ -729,9 +731,29 @@ async def get_desktop(request: Request):
     return _desktop_state_response(state)
 
 
+@router.get("/admin/api/desktop/autostart-options")
+async def desktop_autostart_options(request: Request):
+    """Return the platform-applicable autostart targets for the settings page.
+
+    The running server detects its own world with the same ``native_origin()``
+    the Claude Code discovery page uses; the dashboard renders only the options
+    that make sense for that platform.
+    """
+    require_loopback_admin(request)
+    from my_claude_code.config.claude_discovery import native_origin
+
+    origin = native_origin()
+    default_target = "tray" if origin in {"windows", "macos"} else "server"
+    return {
+        "origin": origin,
+        "default_target": default_target,
+        "targets": [default_target],
+    }
+
+
 @router.post("/admin/api/desktop")
 async def update_desktop(payload: DesktopUpdatePayload, request: Request):
-    """Update the boolean desktop preferences.
+    """Update the desktop deployment preferences.
 
     Only the JSON file is persisted here -- the server never applies the OS
     autostart entry (it may be running headless, with no tray or desktop
@@ -741,12 +763,15 @@ async def update_desktop(payload: DesktopUpdatePayload, request: Request):
     require_loopback_admin(request)
     current = await asyncio.to_thread(load_desktop_state)
 
-    updates: dict[str, bool] = {}
+    if payload.server_mode is not None and payload.server_mode not in SERVER_MODES:
+        raise HTTPException(status_code=422, detail="Invalid server mode")
+
+    updates: dict[str, Any] = {}
     for name in (
         "tray_enabled",
         "start_at_login",
         "minimize_to_tray",
-        "server_auto_start",
+        "server_mode",
     ):
         submitted = getattr(payload, name)
         if submitted is not None:
@@ -758,7 +783,7 @@ async def update_desktop(payload: DesktopUpdatePayload, request: Request):
         tray_enabled=updates.get("tray_enabled", current.tray_enabled),
         start_at_login=updates.get("start_at_login", current.start_at_login),
         minimize_to_tray=updates.get("minimize_to_tray", current.minimize_to_tray),
-        server_auto_start=updates.get("server_auto_start", current.server_auto_start),
+        server_mode=updates.get("server_mode", current.server_mode),
     )
     await asyncio.to_thread(save_desktop_state, updated)
     return _desktop_state_response(updated)

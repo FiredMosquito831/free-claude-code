@@ -58,6 +58,7 @@ Run your coding agents with free, paid, or local models. Choose and validate pro
 | **Editor integrations** | Claude Code and Codex in VS Code, or Claude Code through JetBrains ACP. |
 | **Messaging** | Optionally run Claude Code sessions through Discord or Telegram with voice-note transcription. |
 | **Version & updates** | The dashboard shows the running version, announces new releases, and installs them for you with checksum verification. |
+| **Desktop & server deployment** | Run `mcc-server` headless, or launch the `mcc-desktop` tray in one of three server modes — `spawn`, `attach`, or `off` — with per-platform start-at-login (HKCU Run key on Windows, LaunchAgent on macOS, `systemd --user` or `.desktop` autostart for `mcc-server` on WSL/Linux). See [docs/USAGE.md](docs/USAGE.md#running-the-server-with-the-desktop-tray). |
 | **Security** | Optional token authentication for the local proxy. |
 
 Everything is configured through the same `.env` file (see [.env.example](.env.example)) and the Admin UI.
