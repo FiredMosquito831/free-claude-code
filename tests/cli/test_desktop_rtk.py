@@ -10,6 +10,10 @@ which is the contract the tray shares with the CLI and the admin dashboard.
 from pathlib import Path
 from typing import cast
 
+import pytest
+
+pytest.importorskip("pystray")
+
 from my_claude_code.cli.desktop import DesktopController
 from my_claude_code.cli.desktop_tray import PystrayDesktopTray
 from my_claude_code.config import rtk as rtk_config
