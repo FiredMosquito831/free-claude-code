@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "my-claude-code"
-version = "5.18.0"
+version = "5.19.0"
 description = "Local proxy connecting coding agents to OpenAI-compatible AI providers"
 readme = "README.md"
 requires-python = ">=3.14.0"
@@ -28,6 +28,7 @@ dependencies = [
     "ddgs>=9.14.4",
     "openpyxl>=3.1.5",
     "pillow>=11.4.0",
+    "pystray>=0.19.5; sys_platform == 'win32' or sys_platform == 'darwin'",
 ]
 
 [project.scripts]
@@ -55,6 +56,10 @@ fcc-pi = "my_claude_code.cli.launchers.pi:launch"
 fcc-chatgpt-oauth-login = "my_claude_code.cli.entrypoints:chatgpt_oauth_login"
 fcc-compact-log = "my_claude_code.cli.entrypoints:compact_log"
 fcc-help = "my_claude_code.cli.entrypoints:help_command"
+
+[project.gui-scripts]
+mcc-desktop = "my_claude_code.cli.desktop_entrypoint:launch"
+fcc-desktop = "my_claude_code.cli.desktop_entrypoint:launch"
 
 [project.optional-dependencies]
 voice = [
@@ -151,4 +156,4 @@ python-version = "3.14"
 [tool.ty.analysis]
 # Optional voice_local extra: torch, transformers, librosa for local whisper transcription
 # Optional voice extra: nvidia-riva-client for nvidia_nim transcription provider
-allowed-unresolved-imports = ["torch", "transformers", "librosa", "riva.client"]
+allowed-unresolved-imports = ["torch", "transformers", "librosa", "riva.client", "pystray"]

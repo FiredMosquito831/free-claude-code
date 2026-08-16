@@ -80,6 +80,28 @@
               <div id="versionDetails" class="version-details"></div>
               <pre id="versionUpgradeLog" class="requests-detail-body version-upgrade-log" hidden></pre>
             </section>
+            <section class="settings-section" aria-label="Desktop app">
+              <div class="section-heading">
+                <div>
+                  <h3>Desktop</h3>
+                  <p>
+                    Preferences for the optional tray app (<code>mcc-desktop</code>).
+                    These write <code>~/.fcc/desktop.json</code>; the next tray launch
+                    applies Start at Login to your OS.
+                  </p>
+                </div>
+              </div>
+              <div class="desktop-toggles">
+                <label class="toggle-control">
+                  <input id="desktopStartAtLogin" type="checkbox" />
+                  Start at Login
+                </label>
+                <label class="toggle-control">
+                  <input id="desktopTrayEnabled" type="checkbox" />
+                  Tray Enabled
+                </label>
+              </div>
+            </section>
             <section class="provider-strip" aria-label="Custom providers">
               <div class="strip-header">
                 <h3>Custom providers</h3>
