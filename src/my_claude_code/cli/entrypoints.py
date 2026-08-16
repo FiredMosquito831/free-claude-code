@@ -34,6 +34,7 @@ Use a coding agent through the proxy:
   mcc-claude-old          Legacy launcher: full proxy environment, auto-compact
   mcc-codex               Launch Codex through the proxy
   mcc-pi                  Launch Pi through the proxy
+  mcc-desktop             Open the system tray app (desktop)
 
 Manage and inspect:
   mcc-init                Create or repair ~/.fcc/.env with the config template

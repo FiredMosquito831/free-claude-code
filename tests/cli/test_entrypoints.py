@@ -189,6 +189,11 @@ def test_cli_scripts_are_registered() -> None:
     assert scripts["fcc-pi"] == "my_claude_code.cli.launchers.pi:launch"
     assert scripts["mcc-help"] == "my_claude_code.cli.entrypoints:help_command"
     assert scripts["fcc-help"] == "my_claude_code.cli.entrypoints:help_command"
+    assert scripts["mcc-rtk"] == "my_claude_code.cli.entrypoints:rtk"
+
+    gui_scripts = pyproject["project"]["gui-scripts"]
+    assert gui_scripts["mcc-desktop"] == "my_claude_code.cli.desktop_entrypoint:launch"
+    assert gui_scripts["fcc-desktop"] == "my_claude_code.cli.desktop_entrypoint:launch"
 
 
 def test_help_command_documents_every_mcc_command(
@@ -210,6 +215,8 @@ def test_help_command_documents_every_mcc_command(
         "mcc-init",
         "mcc-chatgpt-oauth-login",
         "mcc-compact-log",
+        "mcc-rtk",
+        "mcc-desktop",
         "mcc-help",
     ):
         assert command in out
