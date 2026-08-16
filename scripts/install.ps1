@@ -755,6 +755,26 @@ function Configure-AndConfirmFreeClaudeCode {
         [IO.Path]::DirectorySeparatorChar,
         [IO.Path]::AltDirectorySeparatorChar
     )
+    if ($script:NeedDeferredFinish) {
+        # A deferred finish is pending: a running launcher's own shim could not
+        # be overwritten (os error 32), so uv aborted partway through the shim
+        # writes and the not-yet-finished commands (mcc-rtk, mcc-desktop, ...)
+        # were never created. Do NOT require the full command list. Verify only
+        # the canonical mcc-server command if it landed; otherwise report the
+        # install as staged and move on rather than throwing "did not create".
+        $mccServer = Get-ApplicationCommand "mcc-server"
+        if (-not $mccServer) {
+            Write-Host "My Claude Code $ExpectedVersion is staged; verification completes after the running app is restarted."
+            return
+        }
+        $installedVersion = Invoke-NativeCapture -FilePath $mccServer.Source -Arguments @("--version")
+        if ($installedVersion -ne "my-claude-code $ExpectedVersion") {
+            Write-Host "My Claude Code $ExpectedVersion is staged; verification completes after the running app is restarted."
+            return
+        }
+        return
+    }
+
     # Verify the native my-claude-code command family (mcc-*) plus the package
     # name shim, exactly as the post-install reference on WSL/Linux leads with.
     # The legacy fcc-* aliases resolve through the same distribution, so they
