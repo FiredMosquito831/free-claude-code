@@ -47,6 +47,8 @@ const state = {
   editingCustomProviderId: null,
   versionInfo: null,
   versionUpgrading: false,
+  desktop: null,
+  desktopBusy: false,
   claudeSettings: null,
   claudeSettingsBusy: false,
   claudeConfig: {
@@ -277,6 +279,7 @@ async function loadDashboardState() {
   updateDirtyState();
   showMessage("");
   await loadVersionInfo();
+  await loadDesktopState();
   await loadClaudeSettings();
   initClaudeConnectCopyButtons();
   // A restored "on" auto-refresh must actually start polling.
@@ -4629,6 +4632,60 @@ byId("versionCheckButton").addEventListener("click", (event) =>
 byId("versionUpdateButton").addEventListener("click", (event) =>
   runVersionUpgrade(event.currentTarget),
 );
+
+/* --------------------------------------------------------------------- */
+/* Desktop tray preferences                                                */
+/* --------------------------------------------------------------------- */
+
+async function loadDesktopState() {
+  try {
+    state.desktop = await api("/admin/api/desktop");
+  } catch (error) {
+    state.desktop = { error: error.message };
+  }
+  renderDesktopState();
+}
+
+function renderDesktopState() {
+  const startAtLogin = byId("desktopStartAtLogin");
+  const trayEnabled = byId("desktopTrayEnabled");
+  if (!startAtLogin || !trayEnabled) return;
+  startAtLogin.checked = Boolean(state.desktop?.start_at_login);
+  trayEnabled.checked = Boolean(state.desktop?.tray_enabled);
+  startAtLogin.disabled = state.desktopBusy;
+  trayEnabled.disabled = state.desktopBusy;
+}
+
+async function updateDesktop(field, value, toggle) {
+  if (state.desktopBusy) return;
+  state.desktopBusy = true;
+  renderDesktopState();
+  try {
+    state.desktop = await api("/admin/api/desktop", {
+      method: "POST",
+      body: JSON.stringify({ [field]: value }),
+    });
+    showMessage(
+      field === "start_at_login"
+        ? `Start at Login ${value ? "enabled" : "disabled"} for the next tray launch`
+        : `Tray ${value ? "enabled" : "disabled"} for the next tray launch`,
+      "ok",
+    );
+  } catch (error) {
+    toggle.checked = !value;
+    showMessage(`Could not save desktop preference: ${error.message}`, "error");
+  } finally {
+    state.desktopBusy = false;
+    renderDesktopState();
+  }
+}
+
+byId("desktopStartAtLogin").addEventListener("change", (event) => {
+  updateDesktop("start_at_login", event.currentTarget.checked, event.currentTarget);
+});
+byId("desktopTrayEnabled").addEventListener("change", (event) => {
+  updateDesktop("tray_enabled", event.currentTarget.checked, event.currentTarget);
+});
 
 /* --------------------------------------------------------------------- */
 /* Claude Code settings file                                               */

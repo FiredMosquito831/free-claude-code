@@ -38,6 +38,11 @@ from my_claude_code.config.constants import (
     CHATGPT_OAUTH_MANAGED_CREDENTIAL_REFERENCE,
 )
 from my_claude_code.config.credentials import parse_credential_keys
+from my_claude_code.config.desktop import (
+    DesktopState,
+    load_desktop_state,
+    save_desktop_state,
+)
 from my_claude_code.config.model_refs import configured_chat_model_refs
 from my_claude_code.config.onboarding import (
     OnboardingState,
@@ -123,6 +128,19 @@ class OnboardingUpdatePayload(BaseModel):
 
     dismissed: bool | None = None
     visited: list[str] | None = None
+
+
+class DesktopUpdatePayload(BaseModel):
+    """Partial desktop preference update submitted by the admin UI.
+
+    Only these four boolean flags are accepted; anything else is ignored so a
+    stray body cannot corrupt the desktop state file.
+    """
+
+    tray_enabled: bool | None = None
+    start_at_login: bool | None = None
+    minimize_to_tray: bool | None = None
+    server_auto_start: bool | None = None
 
 
 def _is_loopback_host(host: str | None) -> bool:
@@ -669,6 +687,61 @@ async def models(
 ):
     require_loopback_admin(request)
     return _model_options(services)
+
+
+# --------------------------------------------------------------------- desktop tray
+
+
+def _desktop_state_response(state: DesktopState) -> dict[str, Any]:
+    return {
+        "tray_enabled": state.tray_enabled,
+        "start_at_login": state.start_at_login,
+        "minimize_to_tray": state.minimize_to_tray,
+        "server_auto_start": state.server_auto_start,
+    }
+
+
+@router.get("/admin/api/desktop")
+async def get_desktop(request: Request):
+    """Return the persisted desktop.json state."""
+    require_loopback_admin(request)
+    state = await asyncio.to_thread(load_desktop_state)
+    return _desktop_state_response(state)
+
+
+@router.post("/admin/api/desktop")
+async def update_desktop(payload: DesktopUpdatePayload, request: Request):
+    """Update the boolean desktop preferences.
+
+    Only the JSON file is persisted here -- the server never applies the OS
+    autostart entry (it may be running headless, with no tray or desktop
+    session). The next ``mcc-desktop``/tray launch reconciles the file with
+    the OS via ``apply_start_at_login`` / ``remove_start_at_login``.
+    """
+    require_loopback_admin(request)
+    current = await asyncio.to_thread(load_desktop_state)
+
+    updates: dict[str, bool] = {}
+    for name in (
+        "tray_enabled",
+        "start_at_login",
+        "minimize_to_tray",
+        "server_auto_start",
+    ):
+        submitted = getattr(payload, name)
+        if submitted is not None:
+            updates[name] = submitted
+    if not updates:
+        return _desktop_state_response(current)
+
+    updated = DesktopState(
+        tray_enabled=updates.get("tray_enabled", current.tray_enabled),
+        start_at_login=updates.get("start_at_login", current.start_at_login),
+        minimize_to_tray=updates.get("minimize_to_tray", current.minimize_to_tray),
+        server_auto_start=updates.get("server_auto_start", current.server_auto_start),
+    )
+    await asyncio.to_thread(save_desktop_state, updated)
+    return _desktop_state_response(updated)
 
 
 @router.get("/admin/api/websearch/credentials/{env_key}/keys")

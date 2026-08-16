@@ -1627,6 +1627,12 @@ textarea:focus-visible,
   accent-color: var(--accent);
 }
 
+.desktop-toggles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
 .last-updated {
   color: var(--muted);
   font-size: 11px;
