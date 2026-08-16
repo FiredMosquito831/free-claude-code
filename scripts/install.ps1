@@ -762,7 +762,7 @@ function Configure-AndConfirmFreeClaudeCode {
     $mccCommands = @(
         "mcc-server", "mcc-claude", "mcc-claude-old", "mcc-codex", "mcc-pi",
         "mcc-init", "mcc-chatgpt-oauth-login", "mcc-compact-log", "mcc-help",
-        "my-claude-code"
+        "mcc-rtk", "mcc-desktop", "my-claude-code"
     )
     $installedCommands = @{}
     foreach ($commandName in $mccCommands) {
@@ -798,9 +798,11 @@ function Write-MccCommandReference {
     Write-Host "  mcc-claude --discover-models   Enable the model picker from the catalog"
     Write-Host "  mcc-codex               Launch Codex through the proxy"
     Write-Host "  mcc-pi                  Launch Pi through the proxy"
+    Write-Host "  mcc-desktop             Open the system tray app (desktop)"
     Write-Host ""
     Write-Host "Manage and inspect:"
     Write-Host "  mcc-init                Create or repair ~/.fcc/.env"
+    Write-Host "  mcc-rtk                 Manage the RTK token optimizer"
     Write-Host "  mcc-help                Show what each command does"
     Write-Host ""
     Write-Host "The legacy fcc-* commands (fcc-server, fcc-claude, ...) remain as aliases."

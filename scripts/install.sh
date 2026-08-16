@@ -506,7 +506,8 @@ configure_and_verify_my_claude_code() {
     # fcc-* aliases resolve through the same distribution, so they exist as soon
     # as these do.
     for command_name in mcc-server mcc-claude mcc-claude-old mcc-codex mcc-pi \
-        mcc-init mcc-chatgpt-oauth-login mcc-compact-log mcc-help my-claude-code; do
+        mcc-init mcc-chatgpt-oauth-login mcc-compact-log mcc-help mcc-rtk \
+        mcc-desktop my-claude-code; do
         [ -x "$tool_bin/$command_name" ] || fail "My Claude Code installation did not create $tool_bin/$command_name."
     done
 
@@ -553,8 +554,10 @@ else
     printf '  mcc-claude --discover-models   Enable the model picker from the catalog\n'
     printf '  mcc-codex               Launch Codex through the proxy\n'
     printf '  mcc-pi                  Launch Pi through the proxy\n'
+    printf '  mcc-desktop             Open the system tray app (desktop)\n'
     printf '\nManage and inspect:\n'
     printf '  mcc-init                Create or repair ~/.fcc/.env\n'
+    printf '  mcc-rtk                 Manage the RTK token optimizer\n'
     printf '  mcc-help                Show what each command does\n'
     printf '\nThe legacy fcc-* commands (fcc-server, fcc-claude, ...) remain as aliases.\n'
     printf '\nTo use an update installed while the server is running, restart the proxy\n'

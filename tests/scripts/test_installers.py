@@ -137,8 +137,8 @@ if [ "${{1:-}}" = "tool" ] && [ "${{2:-}}" = "install" ]; then
     fi
     mkdir -p "$FAKE_TOOL_BIN"
     for name in mcc-server mcc-claude mcc-claude-old mcc-codex mcc-pi \
-        mcc-init mcc-chatgpt-oauth-login mcc-compact-log mcc-help \
-        my-claude-code fcc-server fcc-claude fcc-claude-old fcc-pi \
+        mcc-init mcc-chatgpt-oauth-login mcc-compact-log mcc-help mcc-rtk \
+        mcc-desktop my-claude-code fcc-server fcc-claude fcc-claude-old fcc-pi \
         fcc-init fcc-chatgpt-oauth-login fcc-compact-log free-claude-code \
         fcc-codex; do
         cp "$FAKE_FIXTURES/fcc-command.sh" "$FAKE_TOOL_BIN/$name"
@@ -494,7 +494,7 @@ exit /b 0
 :install
 if "%FAIL_STEP%"=="fcc-install" exit /b 53
 if not exist "%FAKE_TOOL_BIN%" mkdir "%FAKE_TOOL_BIN%"
-for %%N in (mcc-server mcc-claude mcc-claude-old mcc-codex mcc-pi mcc-init mcc-chatgpt-oauth-login mcc-compact-log mcc-help my-claude-code fcc-server fcc-claude fcc-claude-old fcc-codex fcc-pi fcc-init fcc-chatgpt-oauth-login fcc-compact-log free-claude-code) do copy /y "%FAKE_FIXTURES%\fcc-command.cmd" "%FAKE_TOOL_BIN%\%%N.cmd" >nul
+for %%N in (mcc-server mcc-claude mcc-claude-old mcc-codex mcc-pi mcc-init mcc-chatgpt-oauth-login mcc-compact-log mcc-help mcc-rtk mcc-desktop my-claude-code fcc-server fcc-claude fcc-claude-old fcc-codex fcc-pi fcc-init fcc-chatgpt-oauth-login fcc-compact-log free-claude-code) do copy /y "%FAKE_FIXTURES%\fcc-command.cmd" "%FAKE_TOOL_BIN%\%%N.cmd" >nul
 if "%FAIL_STEP%"=="fcc-missing" del /q "%FAKE_TOOL_BIN%\mcc-server.cmd" >nul
 exit /b 0
 :update_shell
