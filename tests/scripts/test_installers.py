@@ -1224,6 +1224,99 @@ Write-Host "LOCKED_SHIM_OK"
     assert "LOCKED_SHIM_OK" in result.stdout, result.stdout + result.stderr
 
 
+def test_install_ps1_configure_confirm_tolerates_deferred_finish(
+    powershell_harness: PowerShellHarness,
+    tmp_path: Path,
+) -> None:
+    # A deferred finish means uv aborted partway through the shim writes because
+    # a running launcher's own shim could not be overwritten (os error 32), so
+    # mcc-rtk / mcc-desktop were never created. Configure-AndConfirmFreeClaudeCode
+    # must NOT throw "did not create 'mcc-rtk'" in that state: it verifies only
+    # mcc-server when it landed, and reports "staged" when even mcc-server is
+    # missing instead of failing the whole install.
+    installer_text = (_repo_root() / "scripts" / "install.ps1").read_text(
+        encoding="utf-8"
+    )
+    func_file = tmp_path / "ConfigureAndConfirm.ps1"
+    func_file.write_text(
+        _extract_function_definition(
+            installer_text, "Configure-AndConfirmFreeClaudeCode"
+        ),
+        encoding="utf-8",
+    )
+
+    runner = tmp_path / "run-configure-confirm.ps1"
+    runner.write_text(
+        f"""Set-StrictMode -Version Latest
+$ErrorActionPreference = "Stop"
+function Get-ApplicationCommand {{
+    param([string] $Name)
+    if ($Name -eq "uv") {{ return [pscustomobject]@{{ Source = "C:\\fake\\uv.exe" }} }}
+    if ($Name -eq "mcc-server" -and $env:FAKE_MCC_SERVER -eq "present") {{
+        return [pscustomobject]@{{ Source = "C:\\fake\\tool-bin\\mcc-server.cmd" }}
+    }}
+    return $null
+}}
+function Invoke-NativeCommand {{
+    param([string] $FilePath, [string[]] $Arguments = @())
+}}
+function Invoke-NativeCapture {{
+    param([string] $FilePath, [string[]] $Arguments = @())
+    if ($FilePath -eq "C:\\fake\\uv.exe") {{ return "C:\\fake\\tool-bin" }}
+    if ($Arguments -contains "--version") {{ return "my-claude-code 5.3.3" }}
+    return ""
+}}
+function Add-PathEntry {{ param([string] $PathEntry) }}
+$script:NeedDeferredFinish = $true
+$DryRun = $false
+. "{(func_file.as_posix())}"
+Configure-AndConfirmFreeClaudeCode -ExpectedVersion "5.3.3"
+Write-Host "CONFIGURE_CONFIRM_OK"
+""",
+        encoding="utf-8",
+    )
+
+    # mcc-server landed: verify succeeds via mcc-server --version, no throw for
+    # the missing mcc-rtk / mcc-desktop shims.
+    result = subprocess.run(
+        [
+            powershell_harness.powershell,
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(runner),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=powershell_harness.env | {"FAKE_MCC_SERVER": "present"},
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "CONFIGURE_CONFIRM_OK" in result.stdout
+    assert "did not create" not in result.stdout
+
+    # mcc-server itself missing (deeper failure): report staged, still no throw.
+    result = subprocess.run(
+        [
+            powershell_harness.powershell,
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(runner),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=powershell_harness.env | {"FAKE_MCC_SERVER": "missing"},
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "CONFIGURE_CONFIRM_OK" in result.stdout
+    assert "staged" in result.stdout
+    assert "did not create" not in result.stdout
+
+
 def test_installers_use_native_clients_and_single_python_selection() -> None:
     shell = (_repo_root() / "scripts" / "install.sh").read_text(encoding="utf-8")
     powershell = (_repo_root() / "scripts" / "install.ps1").read_text(encoding="utf-8")
