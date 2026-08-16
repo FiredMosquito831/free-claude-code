@@ -67,6 +67,8 @@ PROVIDER_SMOKE_DEFAULT_MODELS: dict[str, str] = {
     "alibaba": "alibaba/qwen3-coder-plus",
     "alibaba_cn": "alibaba_cn/qwen3-coder-plus",
     "gemini": "gemini/models/gemini-3.1-flash-lite",
+    "vertex": "vertex/google/gemini-3.1-flash",
+    "openai": "openai/gpt-5.5",
     "groq": "groq/llama-3.3-70b-versatile",
     "sambanova": "sambanova/Meta-Llama-3.3-70B-Instruct",
     "novita": "novita/deepseek/deepseek-v3.2",
@@ -77,6 +79,12 @@ PROVIDER_SMOKE_DEFAULT_MODELS: dict[str, str] = {
     "cerebras": "cerebras/llama3.1-8b",
     "cloudflare": "cloudflare/@cf/moonshotai/kimi-k2.6",
 }
+# Provider namespaces that gateways legitimately host as upstream model ids.
+# ``openai`` is both an FCC provider id and a real model namespace on
+# OpenRouter (e.g. ``openai/gpt-oss-120b:free``), so the strict "wrong provider
+# prefix" smoke guard must not fire for it.
+_GATEWAY_HOSTED_NAMESPACES = frozenset({"openai"})
+
 MISTRAL_REASONING_SMOKE_DEFAULT_MODEL = "mistral/mistral-medium-3-5"
 
 NVIDIA_NIM_CLI_DEFAULT_MODELS: tuple[str, ...] = (
@@ -310,6 +318,12 @@ class SmokeConfig:
             return bool(getattr(self.settings, f"{provider}_api_key", "").strip())
         if provider == "gemini":
             return bool(self.settings.gemini_api_key.strip())
+        if provider == "vertex":
+            return bool(getattr(self.settings, "vertex_project_id", "").strip())
+        if provider == "openai":
+            return bool(
+                getattr(self.settings, "chatgpt_oauth_access_token", "").strip()
+            )
         if provider == "groq":
             return bool(self.settings.groq_api_key.strip())
         if provider == "sambanova":
@@ -377,7 +391,7 @@ def _normalize_provider_model(provider: str, raw_model: str) -> str:
     prefix = parse_provider_type(model)
     if prefix == provider:
         return model
-    if prefix in SUPPORTED_PROVIDER_IDS:
+    if prefix in SUPPORTED_PROVIDER_IDS and prefix not in _GATEWAY_HOSTED_NAMESPACES:
         msg = (
             f"FCC_SMOKE_MODEL_{provider.upper()} must use provider prefix "
             f"{provider!r}, got {model!r}"

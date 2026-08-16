@@ -180,6 +180,14 @@ _PROVIDER_FIELD_OVERRIDES: dict[str, dict[str, Any]] = {
             "Experimental/unsanctioned: optional HTTP proxy for ChatGPT/Codex requests."
         ),
     },
+    "OPENAI_PROXY": {
+        "label": "OpenAI / ChatGPT Proxy",
+        "description": (
+            "Optional proxy used for OpenAI sign-in and ChatGPT Codex requests. "
+            "Changing it restarts FCC."
+        ),
+        "restart_required": True,
+    },
     "MINIMAX_API_KEY": {
         "label": "MiniMax API Key",
         "description": (
@@ -385,8 +393,36 @@ def provider_field_specs() -> tuple[dict[str, Any], ...]:
         *_chatgpt_oauth_login_field_specs(),
         *_chatgpt_oauth_account_field_specs(),
         *_cloudflare_account_field_specs(),
+        *_vertex_field_specs(),
         *_base_url_field_specs(),
         *_proxy_field_specs(),
+    )
+
+
+def _vertex_field_specs() -> tuple[dict[str, Any], ...]:
+    return (
+        {
+            "key": "VERTEX_PROJECT_ID",
+            "label": "Google Cloud Project ID",
+            "section_id": "providers",
+            "provider": "vertex",
+            "settings_attr": "vertex_project_id",
+            "description": (
+                "Google Cloud project used for Vertex AI. Authentication uses "
+                "Application Default Credentials (ADC)."
+            ),
+        },
+        {
+            "key": "VERTEX_LOCATION",
+            "label": "Vertex AI Location",
+            "section_id": "providers",
+            "provider": "vertex",
+            "settings_attr": "vertex_location",
+            "description": (
+                "Use global for the global Vertex AI endpoint or a region such as "
+                "us-central1."
+            ),
+        },
     )
 
 

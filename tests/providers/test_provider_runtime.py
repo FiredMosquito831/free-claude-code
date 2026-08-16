@@ -43,6 +43,7 @@ from my_claude_code.providers.runtime import (
     build_provider_config,
     create_provider,
 )
+from my_claude_code.providers.vertex import VertexProvider
 
 
 def _make_settings(**overrides):
@@ -139,6 +140,10 @@ def _make_settings(**overrides):
     mock.cloudflare_proxy = ""
     mock.gemini_api_key = ""
     mock.gemini_proxy = ""
+    mock.vertex_project_id = "test-vertex-project"
+    mock.vertex_location = "global"
+    mock.vertex_proxy = ""
+    mock.openai_proxy = ""
     mock.groq_api_key = ""
     mock.groq_proxy = ""
     mock.cerebras_api_key = ""
@@ -453,6 +458,7 @@ def test_create_provider_instantiates_each_builtin():
     )
     cases = {
         "nvidia_nim": NvidiaNimProvider,
+        "openai": ChatGPTOAuthProvider,
         "open_router": OpenRouterProvider,
         "mistral": MistralProvider,
         "mistral_codestral": OpenAIChatProvider,
@@ -480,6 +486,7 @@ def test_create_provider_instantiates_each_builtin():
         "alibaba_coding": OpenAIChatProvider,
         "alibaba_coding_cn": OpenAIChatProvider,
         "gemini": GeminiProvider,
+        "vertex": VertexProvider,
         "azure_openai": OpenAIChatProvider,
         "groq": OpenAIChatProvider,
         "sambanova": OpenAIChatProvider,

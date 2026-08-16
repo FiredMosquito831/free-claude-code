@@ -15,6 +15,9 @@ KIMI_CODING_DEFAULT_BASE = "https://api.kimi.com/coding/v1"
 # ChatGPT OAuth (Codex) backend root. The provider posts to
 # /codex/responses using an OAuth access token.
 CHATGPT_OAUTH_DEFAULT_BASE = "https://chatgpt.com/backend-api"
+# OpenAI / ChatGPT connected account (Codex backend root). This aliases the
+# chatgpt_oauth provider; the codex /responses surface is appended at runtime.
+OPENAI_DEFAULT_BASE = "https://chatgpt.com/backend-api/codex"
 WAFER_DEFAULT_BASE = "https://pass.wafer.ai/v1"
 MINIMAX_DEFAULT_BASE = "https://api.minimax.io/v1"
 # DeepSeek Chat Completions API; cache usage is reported on this endpoint.
@@ -40,6 +43,8 @@ GITHUB_MODELS_DEFAULT_BASE = "https://models.github.ai/inference"
 ZAI_DEFAULT_BASE = "https://api.z.ai/api/coding/paas/v4"
 # Google AI Studio Gemini API OpenAI-compat layer (not Vertex AI).
 GEMINI_DEFAULT_BASE = "https://generativelanguage.googleapis.com/v1beta/openai/"
+# Vertex AI API root. The provider owns project/location endpoint composition.
+VERTEX_DEFAULT_BASE = "https://aiplatform.googleapis.com"
 GROQ_DEFAULT_BASE = "https://api.groq.com/openai/v1"
 # Novita AI OpenAI-compatible Chat Completions API.
 NOVITA_DEFAULT_BASE = "https://api.novita.ai/openai"
@@ -175,10 +180,23 @@ class ProviderDescriptor:
     base_url_attr: str | None = None
     proxy_attr: str | None = None
     dynamic: bool = False
+    # Settings attributes beyond a credential that must be non-empty to configure
+    # the provider (e.g. VERTEX_PROJECT_ID for Application Default Credentials).
+    required_settings_attrs: tuple[str, ...] = ()
     # Deliberately defaults to empty rather than to a plausible group: a new
     # provider that forgets this fails ``test_every_provider_declares_a_group``
     # instead of silently filing itself somewhere wrong.
     group: str = ""
+
+    def configuration_attrs(self) -> tuple[str, ...]:
+        """Return settings fields whose non-empty values configure this provider."""
+        if self.required_settings_attrs:
+            return self.required_settings_attrs
+        if self.credential_attr is not None:
+            return (self.credential_attr,)
+        if self.base_url_attr is not None:
+            return (self.base_url_attr,)
+        return ()
 
 
 PROVIDER_CATALOG: dict[str, ProviderDescriptor] = {
@@ -191,6 +209,16 @@ PROVIDER_CATALOG: dict[str, ProviderDescriptor] = {
         default_base_url=NVIDIA_NIM_DEFAULT_BASE,
         proxy_attr="nvidia_nim_proxy",
         group="inference",
+    ),
+    "openai": ProviderDescriptor(
+        provider_id="openai",
+        display_name="OpenAI / ChatGPT",
+        credential_env="CHATGPT_OAUTH_ACCESS_TOKEN",
+        credential_url="https://github.com/openai/codex",
+        credential_attr="chatgpt_oauth_access_token",
+        default_base_url=OPENAI_DEFAULT_BASE,
+        proxy_attr="openai_proxy",
+        group="subscription",
     ),
     "open_router": ProviderDescriptor(
         provider_id="open_router",
@@ -210,6 +238,22 @@ PROVIDER_CATALOG: dict[str, ProviderDescriptor] = {
         credential_attr="gemini_api_key",
         default_base_url=GEMINI_DEFAULT_BASE,
         proxy_attr="gemini_proxy",
+        group="direct",
+    ),
+    # Google Vertex AI uses Application Default Credentials (ADC); there is no
+    # API key, so ``credential_env``/``credential_attr`` are deliberately unset.
+    # The project and location are required and supplied through the Admin UI.
+    "vertex": ProviderDescriptor(
+        provider_id="vertex",
+        display_name="Google Vertex AI",
+        credential_url=(
+            "https://cloud.google.com/docs/authentication/"
+            "set-up-adc-local-dev-environment"
+        ),
+        default_base_url=VERTEX_DEFAULT_BASE,
+        base_url_attr="vertex_base_url",
+        proxy_attr="vertex_proxy",
+        required_settings_attrs=("vertex_project_id",),
         group="direct",
     ),
     # Azure OpenAI, v1 API surface. ``default_base_url`` is deliberately unset:
