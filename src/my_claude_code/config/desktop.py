@@ -23,9 +23,6 @@ from contextlib import suppress
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
-if sys.platform == "win32":
-    import winreg
-
 from .paths import config_dir_path
 
 DESKTOP_STATE_FILENAME = "desktop.json"
@@ -231,6 +228,8 @@ def remove_start_at_login() -> None:
 
 
 def _apply_windows_start_at_login() -> None:
+    import winreg
+
     with winreg.OpenKey(
         winreg.HKEY_CURRENT_USER, _windows_run_key(), 0, winreg.KEY_SET_VALUE
     ) as key:
@@ -240,6 +239,8 @@ def _apply_windows_start_at_login() -> None:
 
 
 def _remove_windows_start_at_login() -> None:
+    import winreg
+
     try:
         key = winreg.OpenKey(
             winreg.HKEY_CURRENT_USER, _windows_run_key(), 0, winreg.KEY_SET_VALUE

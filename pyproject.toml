@@ -152,6 +152,7 @@ markers = [
 
 [tool.ty.environment]
 python-version = "3.14"
+python-platform = "all"
 
 [tool.ty.analysis]
 # Optional voice_local extra: torch, transformers, librosa for local whisper transcription
