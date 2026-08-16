@@ -102,6 +102,32 @@
                 </label>
               </div>
             </section>
+            <section class="settings-section" aria-label="Token optimizer">
+              <div class="section-heading">
+                <div>
+                  <h3>Token optimizer</h3>
+                  <p>
+                    Patch each coding agent with the RTK token optimizer. These write
+                    <code>~/.fcc/rtk.json</code> and apply immediately.
+                  </p>
+                </div>
+              </div>
+              <div class="desktop-toggles">
+                <label class="toggle-control">
+                  <input id="rtkClaude" type="checkbox" />
+                  Claude Code
+                </label>
+                <label class="toggle-control">
+                  <input id="rtkCodex" type="checkbox" />
+                  Codex
+                </label>
+                <label class="toggle-control">
+                  <input id="rtkPi" type="checkbox" />
+                  Pi
+                </label>
+              </div>
+              <div id="rtkStatusLine" class="rtk-status-line" aria-live="polite"></div>
+            </section>
             <section class="provider-strip" aria-label="Custom providers">
               <div class="strip-header">
                 <h3>Custom providers</h3>

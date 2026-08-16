@@ -62,6 +62,14 @@ from my_claude_code.config.paths import (
 )
 from my_claude_code.config.provider_catalog import PROVIDER_CATALOG
 from my_claude_code.config.proxy_auth import proxy_auth_token
+from my_claude_code.config.rtk import (
+    RtkError,
+    RtkState,
+    apply_rtk_state,
+    load_rtk_state,
+    rtk_status,
+    save_rtk_state,
+)
 from my_claude_code.config.server_urls import local_proxy_root_url
 from my_claude_code.config.settings import Settings
 from my_claude_code.config.websearch_catalog import (
@@ -141,6 +149,18 @@ class DesktopUpdatePayload(BaseModel):
     start_at_login: bool | None = None
     minimize_to_tray: bool | None = None
     server_auto_start: bool | None = None
+
+
+class RtkUpdatePayload(BaseModel):
+    """Partial RTK integration update submitted by the admin UI.
+
+    Only these three boolean flags are accepted; anything else is ignored so a
+    stray body cannot corrupt the RTK state file.
+    """
+
+    claude: bool | None = None
+    codex: bool | None = None
+    pi: bool | None = None
 
 
 def _is_loopback_host(host: str | None) -> bool:
@@ -742,6 +762,58 @@ async def update_desktop(payload: DesktopUpdatePayload, request: Request):
     )
     await asyncio.to_thread(save_desktop_state, updated)
     return _desktop_state_response(updated)
+
+
+# --------------------------------------------------------------------- rtk token optimizer
+
+
+def _rtk_state_response(state: RtkState) -> dict[str, Any]:
+    return {
+        "claude": state.claude,
+        "codex": state.codex,
+        "pi": state.pi,
+    }
+
+
+@router.get("/admin/api/rtk")
+async def get_rtk(request: Request):
+    """Return the persisted RTK desired state plus verified binary status."""
+    require_loopback_admin(request)
+    status = await asyncio.to_thread(rtk_status)
+    state = await asyncio.to_thread(load_rtk_state)
+    return {**status, **_rtk_state_response(state)}
+
+
+@router.post("/admin/api/rtk")
+async def update_rtk(payload: RtkUpdatePayload, request: Request):
+    """Update the desired RTK integration and reconcile the machine.
+
+    Unlike the desktop endpoint, this one *does* reconcile: RTK installs hooks
+    into each coding agent's global config, so persisting the flag alone would
+    leave the machine out of step with the dashboard.
+    """
+    require_loopback_admin(request)
+    current = await asyncio.to_thread(load_rtk_state)
+
+    updates: dict[str, bool] = {}
+    for name in ("claude", "codex", "pi"):
+        submitted = getattr(payload, name)
+        if submitted is not None:
+            updates[name] = submitted
+    if not updates:
+        return await asyncio.to_thread(rtk_status)
+
+    updated = RtkState(
+        claude=updates.get("claude", current.claude),
+        codex=updates.get("codex", current.codex),
+        pi=updates.get("pi", current.pi),
+    )
+    try:
+        await asyncio.to_thread(save_rtk_state, updated)
+        await asyncio.to_thread(apply_rtk_state, updated)
+    except RtkError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return await asyncio.to_thread(rtk_status)
 
 
 @router.get("/admin/api/websearch/credentials/{env_key}/keys")

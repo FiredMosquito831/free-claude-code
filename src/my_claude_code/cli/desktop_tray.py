@@ -12,6 +12,12 @@ from my_claude_code.config.desktop import (
     set_start_at_login,
     set_tray_enabled,
 )
+from my_claude_code.config.rtk import (
+    RtkState,
+    apply_rtk_state,
+    load_rtk_state,
+    save_rtk_state,
+)
 
 _APP_NAME = "My Claude Code"
 
@@ -24,6 +30,12 @@ class PystrayDesktopTray:
         state = load_desktop_state()
         self._start_at_login = state.start_at_login
         self._tray_enabled = state.tray_enabled
+        rtk = load_rtk_state()
+        self._rtk_state = {
+            "claude": rtk.claude,
+            "codex": rtk.codex,
+            "pi": rtk.pi,
+        }
         self._icon = Icon(
             "my-claude-code",
             _create_icon(),
@@ -46,6 +58,27 @@ class PystrayDesktopTray:
                 "Tray Enabled",
                 self._toggle_tray_enabled,
                 checked=lambda item: self._tray_enabled,
+            ),
+            Menu.SEPARATOR,
+            MenuItem(
+                "Token optimizer",
+                Menu(
+                    MenuItem(
+                        "Claude Code",
+                        self._toggle_rtk_claude,
+                        checked=lambda item: self._rtk_checked(item, "claude"),
+                    ),
+                    MenuItem(
+                        "Codex",
+                        self._toggle_rtk_codex,
+                        checked=lambda item: self._rtk_checked(item, "codex"),
+                    ),
+                    MenuItem(
+                        "Pi",
+                        self._toggle_rtk_pi,
+                        checked=lambda item: self._rtk_checked(item, "pi"),
+                    ),
+                ),
             ),
             Menu.SEPARATOR,
             MenuItem("Quit", self._quit),
@@ -80,6 +113,28 @@ class PystrayDesktopTray:
     def _toggle_tray_enabled(self, _icon: Icon, _item: MenuItem) -> None:
         self._tray_enabled = not self._tray_enabled
         set_tray_enabled(self._tray_enabled)
+
+    def _rtk_checked(self, _item: MenuItem, agent: str) -> bool:
+        return self._rtk_state[agent]
+
+    def _toggle_rtk_claude(self, _icon: Icon, _item: MenuItem) -> None:
+        self._toggle_rtk_agent("claude")
+
+    def _toggle_rtk_codex(self, _icon: Icon, _item: MenuItem) -> None:
+        self._toggle_rtk_agent("codex")
+
+    def _toggle_rtk_pi(self, _icon: Icon, _item: MenuItem) -> None:
+        self._toggle_rtk_agent("pi")
+
+    def _toggle_rtk_agent(self, agent: str) -> None:
+        self._rtk_state[agent] = not self._rtk_state[agent]
+        state = RtkState(
+            claude=self._rtk_state["claude"],
+            codex=self._rtk_state["codex"],
+            pi=self._rtk_state["pi"],
+        )
+        save_rtk_state(state)
+        apply_rtk_state(state)
 
     def _quit(self, _icon: Icon, _item: MenuItem) -> None:
         self._controller.quit()

@@ -49,6 +49,8 @@ const state = {
   versionUpgrading: false,
   desktop: null,
   desktopBusy: false,
+  rtk: null,
+  rtkBusy: false,
   claudeSettings: null,
   claudeSettingsBusy: false,
   claudeConfig: {
@@ -280,6 +282,7 @@ async function loadDashboardState() {
   showMessage("");
   await loadVersionInfo();
   await loadDesktopState();
+  await loadRtkState();
   await loadClaudeSettings();
   initClaudeConnectCopyButtons();
   // A restored "on" auto-refresh must actually start polling.
@@ -4685,6 +4688,78 @@ byId("desktopStartAtLogin").addEventListener("change", (event) => {
 });
 byId("desktopTrayEnabled").addEventListener("change", (event) => {
   updateDesktop("tray_enabled", event.currentTarget.checked, event.currentTarget);
+});
+
+/* --------------------------------------------------------------------- */
+/* Token optimizer (RTK)                                                   */
+/* --------------------------------------------------------------------- */
+
+async function loadRtkState() {
+  try {
+    state.rtk = await api("/admin/api/rtk");
+  } catch (error) {
+    state.rtk = { error: error.message };
+  }
+  renderRtkState();
+}
+
+function renderRtkState() {
+  const claude = byId("rtkClaude");
+  const codex = byId("rtkCodex");
+  const pi = byId("rtkPi");
+  const statusLine = byId("rtkStatusLine");
+  if (!claude || !codex || !pi || !statusLine) return;
+  claude.checked = Boolean(state.rtk?.claude);
+  codex.checked = Boolean(state.rtk?.codex);
+  pi.checked = Boolean(state.rtk?.pi);
+  claude.disabled = state.rtkBusy;
+  codex.disabled = state.rtkBusy;
+  pi.disabled = state.rtkBusy;
+
+  if (state.rtk?.error) {
+    statusLine.textContent = `Could not load RTK status: ${state.rtk.error}`;
+    statusLine.className = "rtk-status-line error";
+    return;
+  }
+  if (state.rtk?.installed) {
+    const version = state.rtk.version ? ` ${state.rtk.version}` : "";
+    statusLine.textContent = `RTK installed${version}`;
+    statusLine.className = "rtk-status-line ok";
+  } else {
+    statusLine.textContent =
+      "RTK binary not installed. It is downloaded automatically the first time an agent is enabled.";
+    statusLine.className = "rtk-status-line warn";
+  }
+}
+
+async function updateRtk(field, value, toggle) {
+  if (state.rtkBusy) return;
+  state.rtkBusy = true;
+  renderRtkState();
+  try {
+    state.rtk = await api("/admin/api/rtk", {
+      method: "POST",
+      body: JSON.stringify({ [field]: value }),
+    });
+    const label = field === "claude" ? "Claude Code" : field === "codex" ? "Codex" : "Pi";
+    showMessage(`RTK ${value ? "enabled" : "disabled"} for ${label}`, "ok");
+  } catch (error) {
+    toggle.checked = !value;
+    showMessage(`Could not update RTK: ${error.message}`, "error");
+  } finally {
+    state.rtkBusy = false;
+    renderRtkState();
+  }
+}
+
+byId("rtkClaude").addEventListener("change", (event) => {
+  updateRtk("claude", event.currentTarget.checked, event.currentTarget);
+});
+byId("rtkCodex").addEventListener("change", (event) => {
+  updateRtk("codex", event.currentTarget.checked, event.currentTarget);
+});
+byId("rtkPi").addEventListener("change", (event) => {
+  updateRtk("pi", event.currentTarget.checked, event.currentTarget);
 });
 
 /* --------------------------------------------------------------------- */
