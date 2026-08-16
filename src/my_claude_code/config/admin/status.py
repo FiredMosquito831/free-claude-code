@@ -47,18 +47,26 @@ def provider_config_status(
             continue
 
         # ``credential_env`` is optional on the descriptor because local
-        # runtimes have none; everything reaching here is remote, and a remote
-        # provider with no credential variable could not be configured at all.
-        credential_env = descriptor.credential_env
-        assert credential_env is not None, (
-            f"{provider_id}: a remote provider must name a credential variable"
+        # runtimes have none and Application Default Credential providers
+        # (e.g. Vertex AI) have no key either. A remote provider with no
+        # configuration attributes could not be configured at all.
+        configuration_attrs = descriptor.configuration_attrs()
+        missing_attrs = tuple(
+            attr
+            for attr in configuration_attrs
+            if not str(_value_for_settings_attr(state, attr)).strip()
         )
-        value = str(state.get(credential_env, {}).get("value", ""))
-        configured = bool(value.strip())
+        configured = not missing_attrs
+        credential_env = descriptor.credential_env
+        value = (
+            str(state.get(credential_env, {}).get("value", ""))
+            if credential_env is not None
+            else ""
+        )
         # Only one provider owns the editable field for a shared credential, so
         # every other provider on that key has to be told where it lives --
         # otherwise its card offers no way to add a key and looks broken.
-        owner_id = credential_env_owner(credential_env)
+        owner_id = credential_env_owner(credential_env) if credential_env else None
         owner = PROVIDER_CATALOG.get(owner_id) if owner_id else None
         statuses.append(
             {
@@ -71,8 +79,10 @@ def provider_config_status(
                 "credential_env": credential_env,
                 "credential_owner_id": owner_id,
                 "credential_owner_name": owner.display_name if owner else None,
-                "credential_shared_with": _credential_sharers(
-                    credential_env, provider_id
+                "credential_shared_with": (
+                    _credential_sharers(credential_env, provider_id)
+                    if credential_env
+                    else []
                 ),
                 # How many keys are in the pool. Secret values are masked to a
                 # constant before they reach the client, so the Admin UI cannot

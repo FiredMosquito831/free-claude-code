@@ -169,6 +169,13 @@ class Settings(BaseSettings):
     # ==================== Google Gemini (Google AI Studio) ====================
     gemini_api_key: str = Field(default="", validation_alias="GEMINI_API_KEY")
 
+    # ==================== Google Vertex AI ====================
+    # Authentication uses Application Default Credentials (ADC); there is no
+    # API key. ``vertex_project_id`` and ``vertex_location`` select the endpoint.
+    vertex_project_id: str = Field(default="", validation_alias="VERTEX_PROJECT_ID")
+    vertex_location: str = Field(default="global", validation_alias="VERTEX_LOCATION")
+    vertex_base_url: str = Field(default="", validation_alias="VERTEX_BASE_URL")
+
     # ==================== Groq (OpenAI-compatible) ====================
     groq_api_key: str = Field(default="", validation_alias="GROQ_API_KEY")
 
@@ -451,6 +458,8 @@ class Settings(BaseSettings):
     deepseek_proxy: str = Field(default="", validation_alias="DEEPSEEK_PROXY")
     azure_openai_proxy: str = Field(default="", validation_alias="AZURE_OPENAI_PROXY")
     gemini_proxy: str = Field(default="", validation_alias="GEMINI_PROXY")
+    vertex_proxy: str = Field(default="", validation_alias="VERTEX_PROXY")
+    openai_proxy: str = Field(default="", validation_alias="OPENAI_PROXY")
     groq_proxy: str = Field(default="", validation_alias="GROQ_PROXY")
     cerebras_proxy: str = Field(default="", validation_alias="CEREBRAS_PROXY")
     ollama_cloud_proxy: str = Field(default="", validation_alias="OLLAMA_CLOUD_PROXY")

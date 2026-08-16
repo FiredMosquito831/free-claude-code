@@ -174,6 +174,22 @@ def test_every_remote_provider_can_be_given_a_key_from_its_own_card() -> None:
             continue
         owner = entry["credential_owner_id"]
         if owner is None:
+            descriptor = PROVIDER_CATALOG[entry["provider_id"]]
+            if descriptor.required_settings_attrs:
+                # ADC-based providers (e.g. Vertex AI) have no secret key; they
+                # are configured through their own settings fields, which must
+                # all be editable in the Admin UI.
+                missing = [
+                    attr
+                    for attr in descriptor.required_settings_attrs
+                    if attr not in Settings.model_fields
+                ]
+                if missing:
+                    stranded.append(
+                        f"{entry['provider_id']}: required settings {missing} "
+                        "are not editable"
+                    )
+                continue
             stranded.append(f"{entry['provider_id']}: no provider owns its credential")
             continue
         if owner == entry["provider_id"]:

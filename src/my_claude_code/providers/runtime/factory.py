@@ -136,6 +136,21 @@ def _create_gemini(
     return GeminiProvider(config, rate_limiter=rate_limiter)
 
 
+def _create_vertex(
+    config: ProviderConfig,
+    settings: Settings,
+    rate_limiter: ProviderRateLimiter,
+) -> BaseProvider:
+    from my_claude_code.providers.vertex import VertexProvider
+
+    return VertexProvider(
+        config,
+        project_id=_required_setting(settings, "vertex_project_id"),
+        location=settings.vertex_location,
+        rate_limiter=rate_limiter,
+    )
+
+
 def _create_github_models(
     config: ProviderConfig,
     _settings: Settings,
@@ -152,6 +167,16 @@ def _create_chatgpt_oauth(
     rate_limiter: ProviderRateLimiter,
 ) -> BaseProvider:
     from my_claude_code.providers.chatgpt_oauth import ChatGPTOAuthProvider
+
+    # The ``openai`` connected-account alias ships the Codex backend root
+    # (``https://chatgpt.com/backend-api/codex``) as its base URL, matching
+    # upstream. ``ChatGPTOAuthProvider`` appends ``/codex/responses`` itself,
+    # so the trailing ``/codex`` must not be doubled.
+    base_url = config.base_url.rstrip("/")
+    if base_url.endswith("/codex"):
+        base_url = base_url[: -len("/codex")]
+    if base_url != config.base_url:
+        config = dataclasses.replace(config, base_url=base_url)
 
     return ChatGPTOAuthProvider(
         config,
@@ -171,9 +196,21 @@ _SPECIAL_PROVIDER_FACTORIES: dict[str, ProviderFactory] = {
     "lmstudio": _create_lmstudio,
     "cloudflare": _create_cloudflare,
     "gemini": _create_gemini,
+    "vertex": _create_vertex,
     "github_models": _create_github_models,
     "chatgpt_oauth": _create_chatgpt_oauth,
+    # ``openai`` is a connected-account alias of the ChatGPT/Codex OAuth backend;
+    # it routes through the same provider construction.
+    "openai": _create_chatgpt_oauth,
 }
+
+
+def _required_setting(settings: Settings, attr_name: str) -> str:
+    value = getattr(settings, attr_name, None)
+    if not isinstance(value, str) or not value:
+        raise AssertionError(f"Provider config did not validate {attr_name!r}")
+    return value
+
 
 _profiled_ids = set(OPENAI_CHAT_PROFILES)
 _special_ids = set(_SPECIAL_PROVIDER_FACTORIES)

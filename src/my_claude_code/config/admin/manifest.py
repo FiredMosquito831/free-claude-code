@@ -596,6 +596,12 @@ _NON_PROVIDER_FIELDS: tuple[ConfigFieldSpec, ...] = (
         advanced=True,
     ),
     ConfigFieldSpec(
+        "FCC_SMOKE_MODEL_OPENAI",
+        "Smoke OpenAI / ChatGPT Model",
+        "smoke",
+        advanced=True,
+    ),
+    ConfigFieldSpec(
         "FCC_SMOKE_MODEL_OPEN_ROUTER",
         "Smoke OpenRouter Model",
         "smoke",
@@ -766,6 +772,12 @@ _NON_PROVIDER_FIELDS: tuple[ConfigFieldSpec, ...] = (
     ConfigFieldSpec(
         "FCC_SMOKE_MODEL_GEMINI",
         "Smoke Gemini Model",
+        "smoke",
+        advanced=True,
+    ),
+    ConfigFieldSpec(
+        "FCC_SMOKE_MODEL_VERTEX",
+        "Smoke Google Vertex AI Model",
         "smoke",
         advanced=True,
     ),

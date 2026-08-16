@@ -4,9 +4,12 @@ from my_claude_code.providers.base import ProviderConfig
 from my_claude_code.providers.rate_limit import ProviderRateLimiter
 
 from .base_url import openai_v1_base_url
-from .extra_body import validate_extra_body_does_not_override_canonical_fields
+from .extra_body import (
+    validate_extra_body_does_not_override_canonical_fields,
+    validate_extra_body_does_not_override_reasoning_fields,
+)
 from .profiles import GENERIC_OPENAI_PROFILE, OPENAI_CHAT_PROFILES, OpenAIChatProfile
-from .provider import OpenAIChatProvider
+from .provider import OpenAIAsyncCredentialProvider, OpenAIChatProvider
 from .reasoning import (
     NO_REASONING,
     ChatTemplateReasoning,
@@ -40,6 +43,7 @@ __all__ = [
     "OPENAI_CHAT_PROFILES",
     "ChatTemplateReasoning",
     "NamedEffortReasoning",
+    "OpenAIAsyncCredentialProvider",
     "OpenAIChatProfile",
     "OpenAIChatProvider",
     "OpenAIChatRequestPolicy",
@@ -49,4 +53,5 @@ __all__ = [
     "openai_v1_base_url",
     "usage_int",
     "validate_extra_body_does_not_override_canonical_fields",
+    "validate_extra_body_does_not_override_reasoning_fields",
 ]
