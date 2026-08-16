@@ -223,6 +223,9 @@ class Settings(BaseSettings):
     # ==================== Agnes AI (OpenAI-compatible) ====================
     agnes_api_key: str = Field(default="", validation_alias="AGNES_API_KEY")
 
+    # ==================== ZenMux (OpenAI-compatible) ====================
+    zenmux_api_key: str = Field(default="", validation_alias="ZENMUX_API_KEY")
+
     # ==================== W&B Inference (OpenAI-compatible) ====================
     wandb_api_key: str = Field(default="", validation_alias="WANDB_API_KEY")
 
@@ -456,6 +459,7 @@ class Settings(BaseSettings):
         default="", validation_alias="QWENCLOUD_CODING_PROXY"
     )
     agnes_proxy: str = Field(default="", validation_alias="AGNES_PROXY")
+    zenmux_proxy: str = Field(default="", validation_alias="ZENMUX_PROXY")
     wandb_proxy: str = Field(default="", validation_alias="WANDB_PROXY")
     bedrock_proxy: str = Field(default="", validation_alias="BEDROCK_PROXY")
     tokenrouter_proxy: str = Field(default="", validation_alias="TOKENROUTER_PROXY")

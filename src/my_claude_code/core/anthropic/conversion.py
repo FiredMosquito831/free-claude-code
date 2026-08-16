@@ -463,7 +463,9 @@ class AnthropicToOpenAIConverter:
                 else:
                     ledger.add_tool_turn(segment)
 
-        return _coalesce_openai_user_messages(ledger.finish())
+        ordered_messages = ledger.finish()
+        closed_messages = _close_openai_tool_result_turns(ordered_messages)
+        return _coalesce_openai_user_messages(closed_messages)
 
     @staticmethod
     def _convert_message_to_segments(

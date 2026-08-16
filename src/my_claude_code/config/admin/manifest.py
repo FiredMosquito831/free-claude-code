@@ -812,6 +812,12 @@ _NON_PROVIDER_FIELDS: tuple[ConfigFieldSpec, ...] = (
         advanced=True,
     ),
     ConfigFieldSpec(
+        "FCC_SMOKE_MODEL_ZENMUX",
+        "Smoke ZenMux Model",
+        "smoke",
+        advanced=True,
+    ),
+    ConfigFieldSpec(
         "FCC_SMOKE_MODEL_BEDROCK",
         "Smoke Amazon Bedrock Model",
         "smoke",

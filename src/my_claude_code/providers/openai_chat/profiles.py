@@ -27,6 +27,7 @@ from .reasoning import (
     ReasoningObject,
     ThinkingObjectReasoning,
 )
+from .reasoning_details import apply_reasoning_details_replay
 from .request_policy import OpenAIChatPostprocessor, OpenAIChatRequestPolicy
 
 _ALL_EFFORTS = tuple((effort, effort.value) for effort in ReasoningEffort)
@@ -100,6 +101,10 @@ class OpenAIChatProfile:
     reasoning_delta_field: Literal["reasoning_content", "reasoning"] = (
         "reasoning_content"
     )
+    reasoning_delta_fallback_field: Literal["reasoning_content", "reasoning"] | None = (
+        None
+    )
+    structured_reasoning_details: bool = False
 
     @property
     def provider_name(self) -> str:
@@ -110,6 +115,14 @@ class OpenAIChatProfile:
 
     def reasoning_delta(self, delta: Any) -> str | None:
         value = getattr(delta, self.reasoning_delta_field, None)
+        if isinstance(value, str) and value:
+            return value
+        fallback = self.reasoning_delta_fallback_field
+        if fallback is None:
+            return value if isinstance(value, str) else None
+        fallback_value = getattr(delta, fallback, None)
+        if isinstance(fallback_value, str):
+            return fallback_value
         return value if isinstance(value, str) else None
 
     def apply_reasoning(
@@ -345,12 +358,15 @@ OPENAI_CHAT_PROFILES: dict[str, OpenAIChatProfile] = {
         NO_REASONING,
     ),
     "cline": OpenAIChatProfile(
-        _policy(
-            "CLINE",
-            ReasoningReplayMode.THINK_TAGS,
-            default_max_tokens=ANTHROPIC_DEFAULT_MAX_OUTPUT_TOKENS,
-        ),
+        _policy("CLINE", ReasoningReplayMode.DISABLED),
         NO_REASONING,
+        postprocessors=(apply_reasoning_details_replay,),
+        model_listing=OpenAIModelListing(
+            path="/ai/cline/recommended-models",
+            collection_field="clinePass",
+        ),
+        reasoning_delta_field="reasoning",
+        structured_reasoning_details=True,
     ),
     "zai": OpenAIChatProfile(
         _policy(
@@ -527,6 +543,28 @@ OPENAI_CHAT_PROFILES: dict[str, OpenAIChatProfile] = {
         ),
         ChatTemplateReasoning(field="enable_thinking"),
         reasoning_delta_field="reasoning",
+    ),
+    "zenmux": OpenAIChatProfile(
+        _policy(
+            "ZENMUX",
+            ReasoningReplayMode.REASONING,
+            include_extra_body=True,
+            extra_body_validator=validate_extra_body_does_not_override_canonical_fields,
+            default_max_tokens=ANTHROPIC_DEFAULT_MAX_OUTPUT_TOKENS,
+            max_tokens_field="max_completion_tokens",
+        ),
+        ReasoningObject(_MINIMAL_TO_XHIGH),
+        postprocessors=(apply_reasoning_details_replay,),
+        model_listing=OpenAIModelListing(
+            required_sequence_items=(
+                ("input_modalities", "text"),
+                ("output_modalities", "text"),
+            ),
+            thinking_boolean_path=("capabilities", "reasoning"),
+        ),
+        reasoning_delta_field="reasoning",
+        reasoning_delta_fallback_field="reasoning_content",
+        structured_reasoning_details=True,
     ),
     "bedrock": OpenAIChatProfile(
         _policy("BEDROCK", ReasoningReplayMode.THINK_TAGS),

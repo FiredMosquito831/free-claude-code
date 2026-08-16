@@ -7,6 +7,7 @@ from my_claude_code.core.anthropic import (
     OpenAIConversionError,
     ReasoningReplayMode,
     build_base_request_body,
+    is_synthetic_openai_tool_turn_boundary,
 )
 from my_claude_code.core.anthropic.models import MessagesRequest
 
@@ -244,8 +245,10 @@ def test_inline_system_message_follows_completed_tool_result() -> None:
         "user",
         "assistant",
         "tool",
+        "assistant",
         "user",
     ]
+    assert body["messages"][3] == {"role": "assistant", "content": " "}
     assert body["messages"][-1]["content"] == "New instructions"
 
 
@@ -1158,10 +1161,54 @@ def test_unrelated_user_text_before_tool_result_is_buffered_until_after_tool_res
 
     result = AnthropicToOpenAIConverter.convert_messages(messages)
 
-    assert [message["role"] for message in result] == ["assistant", "tool", "user"]
+    assert [message["role"] for message in result] == [
+        "assistant",
+        "tool",
+        "assistant",
+        "user",
+    ]
     assert result[0]["tool_calls"][0]["id"] == "call_z"
     assert result[1]["tool_call_id"] == "call_z"
-    assert result[2]["content"] == "Please also summarize it."
+    assert result[2] == {"role": "assistant", "content": " "}
+    assert result[3]["content"] == "Please also summarize it."
+
+
+def test_user_after_completed_tool_result_gets_neutral_assistant_boundary():
+    messages = [
+        MockMessage("user", "Read the file."),
+        MockMessage(
+            "assistant",
+            [MockBlock(type="tool_use", id="call_z", name="Read", input={})],
+        ),
+        MockMessage(
+            "user",
+            [
+                MockBlock(
+                    type="tool_result",
+                    tool_use_id="call_z",
+                    content="file contents",
+                )
+            ],
+        ),
+        MockMessage("user", "Please summarize it."),
+    ]
+
+    result = AnthropicToOpenAIConverter.convert_messages(messages)
+
+    assert [message["role"] for message in result] == [
+        "user",
+        "assistant",
+        "tool",
+        "assistant",
+        "user",
+    ]
+    assert result[3] == {"role": "assistant", "content": " "}
+    assert is_synthetic_openai_tool_turn_boundary(result[3])
+    assert json.loads(json.dumps(result[3])) == {
+        "role": "assistant",
+        "content": " ",
+    }
+    assert result[4]["content"] == "Please summarize it."
 
 
 def test_unrelated_assistant_text_before_tool_result_is_buffered_until_after_tool_result():

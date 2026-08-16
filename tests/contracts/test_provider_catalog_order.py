@@ -38,6 +38,7 @@ _EXPECTED_PROVIDER_ORDER: tuple[str, ...] = (
     "qwencloud",
     "qwencloud_coding",
     "agnes",
+    "zenmux",
     "wandb",
     "bedrock",
     "tokenrouter",
