@@ -986,6 +986,7 @@
                 <a href="#guide-other">Codex &amp; Pi</a>
                 <a href="#guide-websearch">Search the web</a>
                 <a href="#guide-analytics">See what happened</a>
+                <a href="#guide-deploy">Desktop &amp; token optimizer</a>
                 <a href="#guide-limits">Set the limits</a>
                 <a href="#guide-rotation">Rotate keys safely</a>
                 <a href="#guide-updates">Update the server</a>
@@ -1378,6 +1379,34 @@ TAVILY_CHUNKS_PER_SOURCE=3</code></pre>
                   <em>and</em> the query text, keeping only lengths and hashes. API keys are
                   never written to either store &mdash; only masked labels.
                 </p>
+
+                <h3 id="guide-deploy">Desktop &amp; token optimizer</h3>
+                <p>
+                  The optional <code>mcc-desktop</code> tray app changes how the
+                  server is owned, and its <strong>Server mode</strong> is set
+                  here on the Deployment card (or from the tray menu): <code>spawn</code>
+                  owns <code>mcc-server</code> as a child, <code>attach</code> connects
+                  to an existing server and never spawns one, and <code>off</code> leaves
+                  the server untouched. <strong>Start at Login</strong> registers a
+                  different target per platform — the tray on Windows (HKCU Run key) and
+                  macOS (LaunchAgent), and headless <code>mcc-server</code> under
+                  <code>systemd --user</code> or an autostart <code>.desktop</code> entry
+                  on WSL/Linux. The tray menu also covers Open Admin, Check Server
+                  Status, Restart Server, Tray Enabled, and Quit; preferences live in
+                  <code>~/.fcc/desktop.json</code>.
+                </p>
+                <p>
+                  The <strong>Token optimizer</strong> card manages the RTK binary, which
+                  filters noisy terminal output before it reaches the model. Toggle it per
+                  agent (Claude Code, Codex, Pi); the state lives in <code>~/.fcc/rtk.json</code>
+                  and applies immediately. The same controls are available from the tray's
+                  Token optimizer submenu or the CLI:
+                </p>
+                <pre><code>mcc-rtk status              # installed binary + enabled agents
+mcc-rtk enable claude,pi    # install the hook for these agents
+mcc-rtk disable codex       # remove the hook for one agent
+mcc-rtk uninstall           # disable every agent and remove the binary
+mcc-rtk apply               # re-apply the stored state</code></pre>
 
                 <h3 id="guide-limits">Set the limits</h3>
                 <p>

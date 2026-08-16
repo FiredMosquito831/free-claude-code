@@ -20,6 +20,7 @@ The [README](../README.md) is the overview. This is the long-form manual.
 - [9. Web search](#9-web-search)
 - [10. Analytics](#10-analytics)
 - [11. Multi-key rotation](#11-multi-key-rotation)
+  - [The RTK token optimizer](#the-rtk-token-optimizer)
 - [12. Updating](#12-updating)
 - [13. Security and networking](#13-security-and-networking)
 - [14. Troubleshooting](#14-troubleshooting)
@@ -28,7 +29,7 @@ The [README](../README.md) is the overview. This is the long-form manual.
 
 ## 1. How it works
 
-My Claude Code is a **local server that speaks Anthropic's API**. Your coding agent believes it is talking to Anthropic. The proxy receives that request, forwards it to whichever provider you configured — NVIDIA NIM, OpenRouter, a local Ollama, 27 of them — and translates the response back into Anthropic's wire format.
+My Claude Code is a **local server that speaks Anthropic's API**. Your coding agent believes it is talking to Anthropic. The proxy receives that request, forwards it to whichever provider you configured — NVIDIA NIM, OpenRouter, a local Ollama, 54 of them — and translates the response back into Anthropic's wire format.
 
 <div align="center">
   <img src="../assets/how-it-works.svg" alt="Request flow from agent through the proxy to a provider" width="760">
@@ -350,7 +351,7 @@ Codex reads a model catalog that MCC generates, so its own picker works normally
 
 ## 7. Providers and API keys
 
-Open the **Providers** tab. Every provider is one card in a single searchable grid — there are 35 of them, so start by typing in **Search providers**. It matches the provider's name, its id and its environment variable, so `groq`, `GROQ_API_KEY` and `alibaba` all find what you would expect. **Only configured** hides everything you have not set up yet.
+Open the **Providers** tab. Every provider is one card in a single searchable grid — there are 54 of them, so start by typing in **Search providers**. It matches the provider's name, its id and its environment variable, so `groq`, `GROQ_API_KEY` and `alibaba` all find what you would expect. **Only configured** hides everything you have not set up yet.
 
 <div align="center">
   <img src="../assets/admin-requests.png" alt="Provider configuration in the Admin UI" width="860">
@@ -449,6 +450,26 @@ A chain rescues the failures that happen before the first word, not the ones tha
 If every model on a route is benched, MCC tries them in order anyway — skipping a bad model is an optimisation, refusing to try anything is an outage.
 
 Requests that name a provider and model directly (`open_router/…`) are never redirected. An explicit choice is honoured as given.
+
+### The Codex App catalog
+
+The Codex App has no launcher — it reads a persistent `~/.codex/config.toml` rather than an environment built per command. So the server itself owns the model catalog file: `mcc-server` writes `~/.fcc/codex-model-catalog.json` on startup and whenever the model inventory changes, and the Codex App points at that stable path from its config:
+
+```toml
+model_catalog_json = "/Users/YOUR_USERNAME/.fcc/codex-model-catalog.json"   # macOS
+# model_catalog_json = "C:/Users/YOUR_USERNAME/.fcc/codex-model-catalog.json"  # Windows
+
+model_provider = "fcc"
+model = "nvidia_nim/nvidia/nemotron-3-super-120b-a12b"
+
+[model_providers.fcc]
+name = "My Claude Code"
+base_url = "http://127.0.0.1:8082/v1"
+env_key = "FCC_CODEX_API_KEY"
+wire_api = "responses"
+```
+
+`env_key` reads the same proxy auth token the `mcc-codex` launcher sets per process. Because the server owns this copy of the catalog, the Codex App always sees the current model list — restart it after setup or a model change, then pick an MCC model from its picker.
 
 ### Images and the vision adapter
 
@@ -739,6 +760,22 @@ Each key carries its own state. Repeated failures cool a key down on a rising la
 A **rate-limited key is benched for exactly as long as the provider says** — parsed from `Retry-After`, `retry-after-ms` or `x-ratelimit-reset-*` — rather than an invented fixed delay. A key that resets in one second isn't idled for a minute, and one that needs an hour isn't hammered.
 
 Per-key state, usage and health are visible in the Admin UI, including which key served which request.
+
+### The RTK token optimizer
+
+RTK (the Rust Token Killer, v0.44.2) is an optional third-party binary that filters noisy terminal output before it reaches the model — trimming the token cost of long, chatty agent sessions without changing what the agent does. MCC manages the binary and its per-agent hooks through one command, `mcc-rtk` (legacy alias `fcc-rtk`):
+
+```bash
+mcc-rtk status              # installed binary + enabled agents
+mcc-rtk enable claude,pi    # install the hook for these agents
+mcc-rtk disable codex       # remove the hook for one agent
+mcc-rtk uninstall           # disable every agent and remove the binary
+mcc-rtk apply               # re-apply the stored state to the machine
+```
+
+Enablement is per agent — `claude`, `codex`, and `pi` are each toggled independently. On first enable MCC downloads the pinned RTK release, verifies its SHA-256, installs it under `~/.local/bin`, and patches the agent's own config with telemetry disabled. Desired state lives in `~/.fcc/rtk.json`; `mcc-rtk apply` reconciles the machine against that stored state after any drift.
+
+The same controls live in the dashboard under the **Token optimizer** card and in the `mcc-desktop` tray's **Token optimizer** submenu, so the three surfaces stay in sync.
 
 ---
 

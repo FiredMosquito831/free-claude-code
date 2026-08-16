@@ -183,8 +183,8 @@ def build_state(
                 "Pick a provider with a free tier — Cerebras, Groq, and "
                 "NVIDIA NIM all have one.",
                 "Type its name into 'Search providers' to jump straight to its card.",
-                "Paste the API key into that card's key field.",
-                "Click Apply at the bottom of the page to save it.",
+                "Press Configure, then paste the API key into 'Add key' and press it.",
+                "Press Refresh models to confirm the key works.",
             ),
             target="#providersSections",
         ),
@@ -211,7 +211,7 @@ def build_state(
             label="Point Claude Code at MCC",
             description=(
                 "Apply MCC's proxy settings to your Claude Code settings.json "
-                "so the CLI sends requests through FCC."
+                "so the CLI sends requests through MCC."
             ),
             view="claude",
             optional=False,
