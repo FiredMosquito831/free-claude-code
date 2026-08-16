@@ -4,6 +4,7 @@ param(
     [switch] $VoiceLocal,
     [switch] $VoiceAll,
     [string] $TorchBackend = "",
+    [switch] $Rtk,
     [switch] $DryRun,
     [switch] $Help,
     [Parameter(ValueFromRemainingArguments = $true)]
@@ -28,6 +29,7 @@ $script:RenamedWhileRunning = $false
 # Set by Invoke-RenameThenReinstall when a running launcher's own shim could
 # not be overwritten (os error 32); a detached helper finishes it after exit.
 $script:NeedDeferredFinish = $false
+$script:EnableRtk = $Rtk.IsPresent
 
 function Show-Usage {
     @"
@@ -44,6 +46,7 @@ Options:
   -VoiceLocal            Install local Whisper voice transcription support.
   -VoiceAll              Install all voice transcription backends.
   -TorchBackend VALUE    Use a uv PyTorch backend, such as cu130. Requires local voice.
+  -Rtk                   Enable RTK token optimization for Claude Code, Codex, and Pi.
   -DryRun                Print commands without running them.
   -Help                  Show this help text.
 "@
@@ -704,6 +707,28 @@ function Invoke-RenameThenReinstall {
     return $true
 }
 
+function Enable-RtkForAgents {
+    if (-not $script:EnableRtk) {
+        return
+    }
+
+    Write-Step "Enabling RTK token optimization"
+    if ($DryRun) {
+        Write-Host "+ mcc-rtk enable claude,codex,pi"
+        return
+    }
+
+    $rtkCommand = Get-ApplicationCommand "mcc-rtk"
+    if ($rtkCommand) {
+        Invoke-NativeCommand -FilePath $rtkCommand.Source -Arguments @("enable", "claude,codex,pi")
+        return
+    }
+
+    $toolBin = Invoke-NativeCapture -FilePath (Get-ApplicationCommand "uv").Source -Arguments @("tool", "dir", "--bin")
+    $rtkShim = Join-Path $toolBin "mcc-rtk.exe"
+    Invoke-NativeCommand -FilePath $rtkShim -Arguments @("enable", "claude,codex,pi")
+}
+
 function Configure-AndConfirmFreeClaudeCode {
     param([Parameter(Mandatory = $true)] [string] $ExpectedVersion)
 
@@ -953,6 +978,8 @@ if ($script:RenamedWhileRunning) {
     Write-Step "Configuring PATH and verifying My Claude Code"
     Configure-AndConfirmFreeClaudeCode -ExpectedVersion $InstalledVersion
 
+    Enable-RtkForAgents
+
     Write-Host ""
     Write-Host "My Claude Code $InstalledVersion is installed and verified."
     Write-Host "New sessions and restarted servers use the new version."
@@ -967,12 +994,16 @@ elseif ($script:Deferred) {
     Write-Host "Update staged for after restart."
 }
 elseif ($DryRun) {
+    Enable-RtkForAgents
+
     Write-Host ""
     Write-Host "Dry run complete. No changes were made."
 }
 else {
     Write-Step "Configuring PATH and verifying My Claude Code"
     Configure-AndConfirmFreeClaudeCode -ExpectedVersion $InstalledVersion
+
+    Enable-RtkForAgents
 
     Write-Host ""
     Write-Host "My Claude Code $InstalledVersion is installed and verified."

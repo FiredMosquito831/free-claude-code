@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "my-claude-code"
-version = "5.19.0"
+version = "5.20.0"
 description = "Local proxy connecting coding agents to OpenAI-compatible AI providers"
 readme = "README.md"
 requires-python = ">=3.14.0"
@@ -42,6 +42,7 @@ mcc-codex = "my_claude_code.cli.launchers.codex:launch"
 mcc-pi = "my_claude_code.cli.launchers.pi:launch"
 mcc-chatgpt-oauth-login = "my_claude_code.cli.entrypoints:chatgpt_oauth_login"
 mcc-compact-log = "my_claude_code.cli.entrypoints:compact_log"
+mcc-rtk = "my_claude_code.cli.entrypoints:rtk"
 mcc-help = "my_claude_code.cli.entrypoints:help_command"
 # Legacy command family (free-claude-code owner) — preserved as aliases that
 # resolve through the canonical my_claude_code implementation (or the
@@ -55,6 +56,7 @@ fcc-codex = "my_claude_code.cli.launchers.codex:launch"
 fcc-pi = "my_claude_code.cli.launchers.pi:launch"
 fcc-chatgpt-oauth-login = "my_claude_code.cli.entrypoints:chatgpt_oauth_login"
 fcc-compact-log = "my_claude_code.cli.entrypoints:compact_log"
+fcc-rtk = "my_claude_code.cli.entrypoints:rtk"
 fcc-help = "my_claude_code.cli.entrypoints:help_command"
 
 [project.gui-scripts]
