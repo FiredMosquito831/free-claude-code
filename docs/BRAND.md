@@ -75,7 +75,7 @@ block render on a font download.
 
 ## 7. UI palette
 
-Three themes, selected via a `[data-theme]` attribute on the dashboard root.
+Four themes, selected via a `[data-theme]` attribute on the dashboard root.
 All colors are **semantic tokens** built on primitive tokens (see
 `src/my_claude_code/api/admin_static/admin.css`).
 
@@ -84,6 +84,7 @@ All colors are **semantic tokens** built on primitive tokens (see
 | **Midnight** | Dark operations console (default) | Deep navy/black surfaces, high-contrast text |
 | **Paper** | True light | White/near-white surfaces, dark text |
 | **High Contrast** | WCAG AAA | Maximum contrast pairings for both modes |
+| **Velvet** | Warm dark accent theme | Deep navy surfaces with a crimson accent |
 
 Token tiers: **primitives → semantic → component**. Components reference
 semantic tokens only; never hardcode raw hex in component styles. Charts read

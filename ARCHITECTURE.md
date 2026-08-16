@@ -215,6 +215,12 @@ Console scripts are registered in [pyproject.toml](pyproject.toml):
 - `fcc-claude-old` calls `my_claude_code.cli.launchers.claude:launch_legacy`.
 - `fcc-codex` calls `my_claude_code.cli.launchers.codex:launch`.
 - `fcc-pi` calls `my_claude_code.cli.launchers.pi:launch`.
+- `mcc-desktop` (legacy alias `fcc-desktop`) calls `my_claude_code.cli.desktop_entrypoint:main`;
+  [cli/desktop.py](src/my_claude_code/cli/desktop.py) is the controller that owns the `mcc-server`
+  child process — spawn, health check, restart, stop — while
+  [cli/desktop_tray.py](src/my_claude_code/cli/desktop_tray.py) owns the pystray menu.
+- `mcc-rtk` (legacy alias `fcc-rtk`) calls `my_claude_code.cli.entrypoints:rtk`,
+  which dispatches to [cli/rtk_commands.py](src/my_claude_code/cli/rtk_commands.py).
 
 [scripts/install.sh](scripts/install.sh) and [scripts/install.ps1](scripts/install.ps1)
 install or update the uv tool plus optional voice extras. [scripts/uninstall.sh](scripts/uninstall.sh)
@@ -285,6 +291,16 @@ single best-effort discovery task. The catalog survives provider replacement.
 This keeps the server model inventory stable without extra synchronization;
 Claude clients may independently retain the list they fetched at startup.
 
+[runtime/codex_catalog.py](src/my_claude_code/runtime/codex_catalog.py) publishes that model inventory to the
+stable Codex catalog file `~/.fcc/codex-model-catalog.json` so the Codex App —
+which reads persistent `~/.codex` config rather than a launcher-built
+environment — always sees the current catalog. It builds from the same
+`build_models_list_response()` output and the same content-aware writer the
+`mcc-codex` launcher uses, so the server-published copy and the launcher's
+ephemeral override are byte-consistent and identical bytes are never rewritten.
+Startup publishes only when no prior catalog exists; model-inventory changes
+republish it.
+
 ## Configuration Model
 
 [config/settings.py](src/my_claude_code/config/settings.py) owns the flat Pydantic Settings schema:
@@ -323,6 +339,24 @@ Model routing configuration is tiered:
 configuration vocabulary. FCC-owned dotenv files receive a one-time rename and
 value migration from the retired boolean settings; explicit `FCC_ENV_FILE`
 files are never rewritten and instead receive an actionable startup warning.
+
+[config/desktop.py](src/my_claude_code/config/desktop.py) owns the persisted desktop deployment state
+(`~/.fcc/desktop.json`) and its per-platform start-at-login registration. It
+defines the three `server_mode` values (`spawn` / `attach` / `off`, with a
+one-time migration from the retired `server_auto_start` boolean), the tray
+preferences (`tray_enabled`, `start_at_login`, `minimize_to_tray`), and the
+platform-specific autostart targets: the Windows HKCU Run key, a macOS
+LaunchAgent, and a `systemd --user` unit falling back to an XDG autostart
+`.desktop` entry for the headless server on WSL/Linux. The dashboard Deployment
+card and the tray menu both read and write this state.
+
+[config/rtk.py](src/my_claude_code/config/rtk.py) owns the persisted RTK token-optimizer state
+(`~/.fcc/rtk.json`) and machine reconciliation. It pins a RTK release
+(v0.44.2) with per-platform SHA-256 digests, downloads and verifies the binary
+into `~/.local/bin`, and runs the per-agent `init` commands (`claude`, `codex`,
+`pi`) that patch each agent's own config — always with telemetry disabled.
+`rtk_status()` reports installed binary metadata plus the desired per-agent
+state; `apply_rtk_state()` reconciles the machine against the stored state.
 
 [config/model_refs.py](src/my_claude_code/config/model_refs.py) owns provider-prefixed model ref
 parsing and configured `MODEL*` inventory. API routing and provider validation
@@ -683,6 +717,17 @@ streamed usage handling: it requests
 `completion_tokens` when present, and falls back to local estimates when
 providers omit or reject optional usage metadata. Provider modules only own true
 usage quirks such as DeepSeek prompt-cache counters.
+
+[providers/google_openai/](src/my_claude_code/providers/google_openai/) is the shared Google base for
+OpenAI-compatible Gemini endpoints: `GoogleOpenAIProvider` extends the
+OpenAI-chat family with Google thought-signature and request behavior, and
+exposes the `VertexReasoningEncoder`. [providers/vertex/](src/my_claude_code/providers/vertex/) builds the
+Google Vertex AI adapter on that base, owning ADC authentication, the
+OpenAI-compatible Vertex endpoint URL, and Vertex model-page parsing; it has no
+API key, so the catalog leaves `credential_env` unset and requires the project
+id instead. The connected-account `openai` catalog entry is an alias of the
+`chatgpt_oauth` Responses-API provider in
+[providers/chatgpt_oauth/](src/my_claude_code/providers/chatgpt_oauth/) — the same adapter constructs both IDs.
 
 ### Adding A Provider
 

@@ -2,7 +2,7 @@
 
 # 🤖 My Claude Code
 
-An Anthropic-compatible local proxy for Claude Code, Codex, Pi, and their IDE extensions — backed by 27 model providers, with multi-key rotation everywhere, built-in web search providers, and full request analytics.
+An Anthropic-compatible local proxy for Claude Code, Codex, Pi, and their IDE extensions — backed by 54 model providers, with multi-key rotation everywhere, built-in web search providers, and full request analytics.
 
 [![License: PolyForm Noncommercial](https://img.shields.io/badge/License-PolyForm%20Noncommercial-blue.svg?style=for-the-badge)](https://polyformproject.org/licenses/noncommercial/1.0.0)
 [![Python 3.14](https://img.shields.io/badge/python-3.14-3776ab.svg?style=for-the-badge&logo=python&logoColor=white)](https://www.python.org/downloads/)
@@ -47,7 +47,7 @@ Run your coding agents with free, paid, or local models. Choose and validate pro
 | Area | What you get |
 | --- | --- |
 | **Coding agents** | Launch Claude Code with `mcc-claude`, Codex with `mcc-codex`, or Pi with `mcc-pi`; Codex and Pi's native model pickers always list the MCC catalog, Claude Code's needs `mcc-claude --discover-models` (or `mcc-claude-old`). Legacy `fcc-claude`, `fcc-codex`, and `fcc-pi` aliases still work. |
-| **Model providers** | 27 cloud and local providers, including Kimi For Coding and an experimental ChatGPT OAuth provider. Switch and validate providers from the Admin UI. |
+| **Model providers** | 54 cloud and local providers, including Kimi For Coding and an experimental ChatGPT OAuth provider. Switch and validate providers from the Admin UI. |
 | **Model-tier routing** | Route Fable, Opus, Sonnet, Haiku, and fallback traffic to different models, each with an ordered fallback chain. |
 | **Vision adapter** | Image requests are diverted to a model that can see when the tier's own model cannot, with its own fallback chain. |
 | **Protocol fidelity** | Streaming, tool use, reasoning, and image input preserved across compatible models, with configurable reasoning control. |
@@ -59,6 +59,7 @@ Run your coding agents with free, paid, or local models. Choose and validate pro
 | **Messaging** | Optionally run Claude Code sessions through Discord or Telegram with voice-note transcription. |
 | **Version & updates** | The dashboard shows the running version, announces new releases, and installs them for you with checksum verification. |
 | **Desktop & server deployment** | Run `mcc-server` headless, or launch the `mcc-desktop` tray in one of three server modes — `spawn`, `attach`, or `off` — with per-platform start-at-login (HKCU Run key on Windows, LaunchAgent on macOS, `systemd --user` or `.desktop` autostart for `mcc-server` on WSL/Linux). See [docs/USAGE.md](docs/USAGE.md#running-the-server-with-the-desktop-tray). |
+| **Token optimizer (RTK)** | `mcc-rtk` installs and manages a Rust Token Killer binary (v0.44.2) that filters noisy terminal output before it reaches the model, per agent (Claude Code, Codex, Pi). Managed from the CLI, the dashboard "Token optimizer" card, and the desktop tray. See [docs/USAGE.md](docs/USAGE.md#the-rtk-token-optimizer). |
 | **Security** | Optional token authentication for the local proxy. |
 
 Everything is configured through the same `.env` file (see [.env.example](.env.example)) and the Admin UI.
@@ -1073,6 +1074,10 @@ Windows PowerShell:
 Restart `mcc-server`. In **Admin UI → Messaging → Voice**, enable voice notes, select `cpu`, `cuda`, or `nvidia_nim`, and choose the Whisper model. Local gated models need `HUGGINGFACE_API_KEY`; NVIDIA NIM transcription needs `NVIDIA_NIM_API_KEY`.
 
 </details>
+
+### Desktop & token optimizer
+
+The `mcc-desktop` tray menu covers **Open Admin**, **Check Server Status**, **Restart Server**, **Server mode** (`spawn` / `attach` / `off`), **Start at Login**, **Tray Enabled**, a **Token optimizer** submenu, and **Quit**; preferences persist to `~/.fcc/desktop.json`. The **Token optimizer** card in the Admin UI controls the same RTK integration per agent as `mcc-rtk status|enable|disable|uninstall|apply`, persisted to `~/.fcc/rtk.json`. Full details, including per-platform start-at-login, are in the [Usage Guide](docs/USAGE.md).
 
 ## Manage Your Installation
 
