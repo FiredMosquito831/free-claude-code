@@ -49,6 +49,7 @@ const state = {
   versionUpgrading: false,
   desktop: null,
   desktopBusy: false,
+  autostartOptions: null,
   rtk: null,
   rtkBusy: false,
   claudeSettings: null,
@@ -4646,20 +4647,81 @@ async function loadDesktopState() {
   } catch (error) {
     state.desktop = { error: error.message };
   }
+  try {
+    state.autostartOptions = await api("/admin/api/desktop/autostart-options");
+  } catch (error) {
+    state.autostartOptions = { error: error.message };
+  }
   renderDesktopState();
 }
 
+const SERVER_MODE_HINTS = {
+  spawn: "The tray starts mcc-server as a child when nothing is listening on the port.",
+  attach: "The tray connects to a server you start yourself and never spawns one.",
+  off: "The tray never touches the server.",
+};
+
 function renderDesktopState() {
-  const startAtLogin = byId("desktopStartAtLogin");
   const trayEnabled = byId("desktopTrayEnabled");
-  if (!startAtLogin || !trayEnabled) return;
-  startAtLogin.checked = Boolean(state.desktop?.start_at_login);
-  trayEnabled.checked = Boolean(state.desktop?.tray_enabled);
-  startAtLogin.disabled = state.desktopBusy;
-  trayEnabled.disabled = state.desktopBusy;
+  const serverMode = byId("desktopServerMode");
+  const hint = byId("desktopServerModeHint");
+  if (trayEnabled) {
+    trayEnabled.checked = Boolean(state.desktop?.tray_enabled);
+    trayEnabled.disabled = state.desktopBusy;
+  }
+  if (serverMode && hint) {
+    serverMode.value = state.desktop?.server_mode || "spawn";
+    serverMode.disabled = state.desktopBusy;
+    hint.textContent = SERVER_MODE_HINTS[serverMode.value] || "";
+  }
+  renderDesktopAutostartOptions();
 }
 
-async function updateDesktop(field, value, toggle) {
+function autostartTargetLabel(target) {
+  return target === "tray" ? "Tray (mcc-desktop)" : "Server (mcc-server, headless)";
+}
+
+function renderDesktopAutostartOptions() {
+  const container = byId("desktopAutostartOptions");
+  const originEl = byId("desktopOrigin");
+  if (!container || !originEl) return;
+
+  const options = state.autostartOptions;
+  originEl.innerHTML = "";
+  container.replaceChildren();
+
+  if (options?.error || !options?.targets?.length) {
+    originEl.textContent = "Autostart options unavailable.";
+    return;
+  }
+
+  const origin = document.createElement("span");
+  origin.className = "claude-origin";
+  origin.textContent = options.origin || "this machine";
+  originEl.append(origin);
+
+  const current = Boolean(state.desktop?.start_at_login);
+  options.targets.forEach((target) => {
+    const inputId = `desktopAutostart-${target}`;
+    const input = document.createElement("input");
+    input.type = "checkbox";
+    input.id = inputId;
+    input.checked = current;
+    input.disabled = state.desktopBusy;
+
+    const label = document.createElement("label");
+    label.className = "toggle-control";
+    label.htmlFor = inputId;
+    label.append(input, ` Start at Login (${autostartTargetLabel(target)})`);
+
+    input.addEventListener("change", () => {
+      updateDesktop("start_at_login", input.checked, input);
+    });
+    container.append(label);
+  });
+}
+
+async function updateDesktop(field, value, control) {
   if (state.desktopBusy) return;
   state.desktopBusy = true;
   renderDesktopState();
@@ -4668,14 +4730,18 @@ async function updateDesktop(field, value, toggle) {
       method: "POST",
       body: JSON.stringify({ [field]: value }),
     });
-    showMessage(
-      field === "start_at_login"
-        ? `Start at Login ${value ? "enabled" : "disabled"} for the next tray launch`
-        : `Tray ${value ? "enabled" : "disabled"} for the next tray launch`,
-      "ok",
-    );
+    if (field === "start_at_login") {
+      showMessage(
+        `Start at Login ${value ? "enabled" : "disabled"} for the next launch`,
+        "ok",
+      );
+    } else if (field === "server_mode") {
+      showMessage(`Server mode set to ${value}.`, "ok");
+    } else {
+      showMessage(`Tray ${value ? "enabled" : "disabled"} for the next tray launch`, "ok");
+    }
   } catch (error) {
-    toggle.checked = !value;
+    if (control && control.type === "checkbox") control.checked = !value;
     showMessage(`Could not save desktop preference: ${error.message}`, "error");
   } finally {
     state.desktopBusy = false;
@@ -4683,8 +4749,8 @@ async function updateDesktop(field, value, toggle) {
   }
 }
 
-byId("desktopStartAtLogin").addEventListener("change", (event) => {
-  updateDesktop("start_at_login", event.currentTarget.checked, event.currentTarget);
+byId("desktopServerMode").addEventListener("change", (event) => {
+  updateDesktop("server_mode", event.currentTarget.value, event.currentTarget);
 });
 byId("desktopTrayEnabled").addEventListener("change", (event) => {
   updateDesktop("tray_enabled", event.currentTarget.checked, event.currentTarget);

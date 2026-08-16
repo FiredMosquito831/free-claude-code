@@ -12,6 +12,8 @@ from my_claude_code.config import desktop as desktop_config
 from my_claude_code.config.desktop import (
     LAUNCH_AGENT_LABEL,
     LINUX_AUTOSTART_ID,
+    LINUX_SYSTEMD_UNIT,
+    WINDOWS_RUN_VALUE,
     DesktopState,
     DesktopStateError,
     load_desktop_state,
@@ -40,7 +42,7 @@ class TestLoadDesktopState:
         assert state.tray_enabled is True
         assert state.start_at_login is False
         assert state.minimize_to_tray is False
-        assert state.server_auto_start is True
+        assert state.server_mode == "spawn"
 
     def test_corrupt_file_returns_defaults(self, monkeypatch, tmp_path):
         _set_home(monkeypatch, tmp_path)
@@ -52,6 +54,7 @@ class TestLoadDesktopState:
 
         assert state.tray_enabled is True
         assert state.start_at_login is False
+        assert state.server_mode == "spawn"
 
     def test_non_dict_json_returns_defaults(self, monkeypatch, tmp_path):
         _set_home(monkeypatch, tmp_path)
@@ -61,7 +64,7 @@ class TestLoadDesktopState:
 
         state = load_desktop_state()
 
-        assert state.server_auto_start is True
+        assert state.server_mode == "spawn"
 
     def test_unknown_keys_are_ignored(self, monkeypatch, tmp_path):
         _set_home(monkeypatch, tmp_path)
@@ -91,6 +94,49 @@ class TestLoadDesktopState:
         assert state.tray_enabled is True
         assert state.start_at_login is False
 
+    def test_server_mode_round_trips(self, monkeypatch, tmp_path):
+        _set_home(monkeypatch, tmp_path)
+        path = desktop_config.desktop_state_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({"server_mode": "attach"}), encoding="utf-8")
+
+        assert load_desktop_state().server_mode == "attach"
+
+    def test_invalid_server_mode_falls_back_to_default(self, monkeypatch, tmp_path):
+        _set_home(monkeypatch, tmp_path)
+        path = desktop_config.desktop_state_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({"server_mode": "nope"}), encoding="utf-8")
+
+        assert load_desktop_state().server_mode == "spawn"
+
+    def test_legacy_auto_start_true_migrates_to_spawn(self, monkeypatch, tmp_path):
+        _set_home(monkeypatch, tmp_path)
+        path = desktop_config.desktop_state_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({"server_auto_start": True}), encoding="utf-8")
+
+        assert load_desktop_state().server_mode == "spawn"
+
+    def test_legacy_auto_start_false_migrates_to_attach(self, monkeypatch, tmp_path):
+        _set_home(monkeypatch, tmp_path)
+        path = desktop_config.desktop_state_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({"server_auto_start": False}), encoding="utf-8")
+
+        assert load_desktop_state().server_mode == "attach"
+
+    def test_server_mode_wins_over_legacy_boolean(self, monkeypatch, tmp_path):
+        _set_home(monkeypatch, tmp_path)
+        path = desktop_config.desktop_state_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            json.dumps({"server_mode": "off", "server_auto_start": True}),
+            encoding="utf-8",
+        )
+
+        assert load_desktop_state().server_mode == "off"
+
 
 class TestSaveDesktopState:
     def test_round_trip(self, monkeypatch, tmp_path):
@@ -101,7 +147,7 @@ class TestSaveDesktopState:
                 tray_enabled=False,
                 start_at_login=True,
                 minimize_to_tray=True,
-                server_auto_start=False,
+                server_mode="attach",
             )
         )
         state = load_desktop_state()
@@ -109,7 +155,16 @@ class TestSaveDesktopState:
         assert state.tray_enabled is False
         assert state.start_at_login is True
         assert state.minimize_to_tray is True
-        assert state.server_auto_start is False
+        assert state.server_mode == "attach"
+
+    def test_save_writes_server_mode_not_legacy_key(self, monkeypatch, tmp_path):
+        _set_home(monkeypatch, tmp_path)
+
+        save_desktop_state(load_desktop_state())
+
+        persisted = json.loads(desktop_config.desktop_state_path().read_text())
+        assert persisted["server_mode"] == "spawn"
+        assert "server_auto_start" not in persisted
 
     def test_creates_parent_dirs(self, monkeypatch, tmp_path):
         _set_home(monkeypatch, tmp_path)
@@ -157,12 +212,12 @@ class _FakeWinreg:
 
     def SetValueEx(self, key, name, reserved, kind, value):
         assert key is self
-        assert name == LAUNCH_AGENT_LABEL
+        assert name == WINDOWS_RUN_VALUE
         self.values[name] = value
 
     def DeleteValue(self, key, name):
         assert key is self
-        assert name == LAUNCH_AGENT_LABEL
+        assert name == WINDOWS_RUN_VALUE
         self.values.pop(name, None)
 
     def CloseKey(self, key):
@@ -181,6 +236,7 @@ def fake_winreg(monkeypatch):
     fake = _FakeWinreg()
     monkeypatch.setitem(sys.modules, "winreg", fake)
     monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setattr(desktop_config, "native_origin", lambda: "windows")
     return fake
 
 
@@ -188,40 +244,53 @@ class TestWindowsStartAtLogin:
     def test_apply_writes_run_key(self, monkeypatch, tmp_path, fake_winreg):
         _set_home(monkeypatch, tmp_path)
 
-        desktop_config.apply_start_at_login()
+        desktop_config.apply_start_at_login("tray")
 
-        assert LAUNCH_AGENT_LABEL in fake_winreg.values
+        assert WINDOWS_RUN_VALUE in fake_winreg.values
         assert (
             "my_claude_code.cli.desktop_entrypoint"
-            in fake_winreg.values[LAUNCH_AGENT_LABEL]
+            in fake_winreg.values[WINDOWS_RUN_VALUE]
+        )
+
+    def test_apply_uses_tray_target_by_default(
+        self, monkeypatch, tmp_path, fake_winreg
+    ):
+        _set_home(monkeypatch, tmp_path)
+
+        desktop_config.apply_start_at_login()
+
+        assert (
+            "my_claude_code.cli.desktop_entrypoint"
+            in fake_winreg.values[WINDOWS_RUN_VALUE]
         )
 
     def test_remove_deletes_run_key(self, monkeypatch, tmp_path, fake_winreg):
         _set_home(monkeypatch, tmp_path)
-        fake_winreg.values[LAUNCH_AGENT_LABEL] = "whatever"
+        fake_winreg.values[WINDOWS_RUN_VALUE] = "whatever"
 
-        desktop_config.remove_start_at_login()
+        desktop_config.remove_start_at_login("tray")
 
-        assert LAUNCH_AGENT_LABEL not in fake_winreg.values
+        assert WINDOWS_RUN_VALUE not in fake_winreg.values
         assert fake_winreg.closed is True
 
     def test_remove_missing_run_key_is_quiet(self, monkeypatch, tmp_path, fake_winreg):
         _set_home(monkeypatch, tmp_path)
 
-        desktop_config.remove_start_at_login()
+        desktop_config.remove_start_at_login("tray")
 
-        assert LAUNCH_AGENT_LABEL not in fake_winreg.values
+        assert WINDOWS_RUN_VALUE not in fake_winreg.values
 
 
 class TestMacOSStartAtLogin:
     @pytest.fixture(autouse=True)
     def _platform(self, monkeypatch):
         monkeypatch.setattr(sys, "platform", "darwin")
+        monkeypatch.setattr(desktop_config, "native_origin", lambda: "macos")
 
     def test_apply_writes_launch_agent_plist(self, monkeypatch, tmp_path):
         _set_home(monkeypatch, tmp_path)
 
-        desktop_config.apply_start_at_login()
+        desktop_config.apply_start_at_login("tray")
 
         path = Path.home() / "Library" / "LaunchAgents" / f"{LAUNCH_AGENT_LABEL}.plist"
         content = path.read_text(encoding="utf-8")
@@ -237,7 +306,7 @@ class TestMacOSStartAtLogin:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text("present", encoding="utf-8")
 
-        desktop_config.remove_start_at_login()
+        desktop_config.remove_start_at_login("tray")
 
         assert not path.exists()
 
@@ -246,28 +315,105 @@ class TestLinuxStartAtLogin:
     @pytest.fixture(autouse=True)
     def _platform(self, monkeypatch):
         monkeypatch.setattr(sys, "platform", "linux")
+        monkeypatch.setattr(desktop_config, "native_origin", lambda: "linux")
 
-    def test_apply_writes_autostart_desktop_file(self, monkeypatch, tmp_path):
+    def test_apply_writes_autostart_desktop_file_without_systemd(
+        self, monkeypatch, tmp_path
+    ):
         _set_home(monkeypatch, tmp_path)
+        monkeypatch.setattr(desktop_config, "_systemd_user_available", lambda: False)
 
-        desktop_config.apply_start_at_login()
+        desktop_config.apply_start_at_login("server")
 
         path = Path.home() / ".config" / "autostart" / f"{LINUX_AUTOSTART_ID}.desktop"
         content = path.read_text(encoding="utf-8")
         assert path.is_file()
         assert "[Desktop Entry]" in content
         assert "X-GNOME-Autostart-enabled=true" in content
-        assert "my_claude_code.cli.desktop_entrypoint" in content
+        assert "my_claude_code.cli.entrypoints" in content
 
-    def test_remove_deletes_autostart_desktop_file(self, monkeypatch, tmp_path):
+    def test_apply_writes_systemd_unit_when_available(self, monkeypatch, tmp_path):
         _set_home(monkeypatch, tmp_path)
-        path = Path.home() / ".config" / "autostart" / f"{LINUX_AUTOSTART_ID}.desktop"
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text("present", encoding="utf-8")
+        monkeypatch.setattr(desktop_config, "_systemd_user_available", lambda: True)
+        calls: list[list[str]] = []
+        monkeypatch.setattr(
+            desktop_config.subprocess,
+            "run",
+            lambda *args, **kwargs: calls.append(list(args[0])),
+        )
+        monkeypatch.setattr(
+            desktop_config.shutil, "which", lambda name: "/usr/bin/systemctl"
+        )
 
-        desktop_config.remove_start_at_login()
+        desktop_config.apply_start_at_login("server")
 
-        assert not path.exists()
+        unit = Path.home() / ".config" / "systemd" / "user" / LINUX_SYSTEMD_UNIT
+        content = unit.read_text(encoding="utf-8")
+        assert unit.is_file()
+        assert "ExecStart=" in content
+        assert "my_claude_code.cli.entrypoints" in content
+        assert not (
+            Path.home() / ".config" / "autostart" / f"{LINUX_AUTOSTART_ID}.desktop"
+        ).exists()
+        assert any("enable" in call for call in calls)
+        assert any("daemon-reload" in call for call in calls)
+
+    def test_tray_target_rejected_on_linux(self, monkeypatch, tmp_path):
+        _set_home(monkeypatch, tmp_path)
+        monkeypatch.setattr(desktop_config, "_systemd_user_available", lambda: False)
+
+        with pytest.raises(DesktopStateError):
+            desktop_config.apply_start_at_login("tray")
+
+    def test_remove_clears_both_linux_artifacts(self, monkeypatch, tmp_path):
+        _set_home(monkeypatch, tmp_path)
+        monkeypatch.setattr(desktop_config.shutil, "which", lambda name: None)
+        unit = Path.home() / ".config" / "systemd" / "user" / LINUX_SYSTEMD_UNIT
+        unit.parent.mkdir(parents=True, exist_ok=True)
+        unit.write_text("present", encoding="utf-8")
+        autostart = (
+            Path.home() / ".config" / "autostart" / f"{LINUX_AUTOSTART_ID}.desktop"
+        )
+        autostart.parent.mkdir(parents=True, exist_ok=True)
+        autostart.write_text("present", encoding="utf-8")
+
+        desktop_config.remove_start_at_login("server")
+
+        assert not unit.exists()
+        assert not autostart.exists()
+
+
+class TestAutostartTargets:
+    def test_default_target_is_tray_on_windows(self, monkeypatch):
+        monkeypatch.setattr(desktop_config, "native_origin", lambda: "windows")
+        assert desktop_config.default_autostart_target() == "tray"
+
+    def test_default_target_is_tray_on_macos(self, monkeypatch):
+        monkeypatch.setattr(desktop_config, "native_origin", lambda: "macos")
+        assert desktop_config.default_autostart_target() == "tray"
+
+    def test_default_target_is_server_on_linux(self, monkeypatch):
+        monkeypatch.setattr(desktop_config, "native_origin", lambda: "linux")
+        assert desktop_config.default_autostart_target() == "server"
+
+    def test_default_target_is_server_on_wsl(self, monkeypatch):
+        monkeypatch.setattr(desktop_config, "native_origin", lambda: "wsl")
+        assert desktop_config.default_autostart_target() == "server"
+
+
+class TestServerModeHelpers:
+    def test_set_server_mode_persists(self, monkeypatch, tmp_path):
+        _set_home(monkeypatch, tmp_path)
+
+        desktop_config.set_server_mode("off")
+
+        assert load_desktop_state().server_mode == "off"
+
+    def test_set_server_mode_rejects_unknown(self, monkeypatch, tmp_path):
+        _set_home(monkeypatch, tmp_path)
+
+        with pytest.raises(ValueError):
+            desktop_config.set_server_mode("bogus")
 
 
 class TestAdminDesktopEndpoints:
@@ -285,7 +431,8 @@ class TestAdminDesktopEndpoints:
         assert body["tray_enabled"] is True
         assert body["start_at_login"] is False
         assert body["minimize_to_tray"] is False
-        assert body["server_auto_start"] is True
+        assert body["server_mode"] == "spawn"
+        assert "server_auto_start" not in body
 
     def test_post_updates_only_submitted_flags(self, monkeypatch, tmp_path):
         with self._client(monkeypatch, tmp_path) as client:
@@ -297,8 +444,30 @@ class TestAdminDesktopEndpoints:
         assert response.status_code == 200
         body = response.json()
         assert body["start_at_login"] is True
-        # Unsubmitted flags keep their persisted/default values.
         assert body["tray_enabled"] is True
+
+    def test_post_accepts_and_persists_server_mode(self, monkeypatch, tmp_path):
+        with self._client(monkeypatch, tmp_path) as client:
+            response = client.post(
+                "/admin/api/desktop",
+                json={"server_mode": "attach"},
+            )
+
+        assert response.status_code == 200
+        assert response.json()["server_mode"] == "attach"
+
+        path = desktop_config.desktop_state_path()
+        persisted = json.loads(path.read_text(encoding="utf-8"))
+        assert persisted["server_mode"] == "attach"
+
+    def test_post_rejects_invalid_server_mode(self, monkeypatch, tmp_path):
+        with self._client(monkeypatch, tmp_path) as client:
+            response = client.post(
+                "/admin/api/desktop",
+                json={"server_mode": "bogus"},
+            )
+
+        assert response.status_code == 422
 
     def test_post_persists_to_disk(self, monkeypatch, tmp_path):
         with self._client(monkeypatch, tmp_path) as client:
@@ -311,15 +480,15 @@ class TestAdminDesktopEndpoints:
         persisted = json.loads(path.read_text(encoding="utf-8"))
         assert persisted["tray_enabled"] is False
         assert persisted["minimize_to_tray"] is True
-        # A partial update leaves the unsubmitted flag at its default.
-        assert persisted["server_auto_start"] is True
+        assert persisted["server_mode"] == "spawn"
+        assert "server_auto_start" not in persisted
 
     def test_post_round_trips(self, monkeypatch, tmp_path):
         with self._client(monkeypatch, tmp_path) as client:
-            client.post("/admin/api/desktop", json={"start_at_login": True})
+            client.post("/admin/api/desktop", json={"server_mode": "off"})
             response = client.get("/admin/api/desktop")
 
-        assert response.json()["start_at_login"] is True
+        assert response.json()["server_mode"] == "off"
 
     def test_post_empty_body_returns_current_state(self, monkeypatch, tmp_path):
         with self._client(monkeypatch, tmp_path) as client:
@@ -346,6 +515,38 @@ class TestAdminDesktopEndpoints:
 
         assert response.status_code == 403
 
+    def test_autostart_options_windows(self, monkeypatch, tmp_path):
+        _set_home(monkeypatch, tmp_path)
+        monkeypatch.setattr(
+            "my_claude_code.config.claude_discovery.native_origin",
+            lambda: "windows",
+        )
+        app = create_test_app()
+        with _local_client(app) as client:
+            response = client.get("/admin/api/desktop/autostart-options")
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["origin"] == "windows"
+        assert body["targets"] == ["tray"]
+        assert body["default_target"] == "tray"
+
+    def test_autostart_options_linux(self, monkeypatch, tmp_path):
+        _set_home(monkeypatch, tmp_path)
+        monkeypatch.setattr(
+            "my_claude_code.config.claude_discovery.native_origin",
+            lambda: "linux",
+        )
+        app = create_test_app()
+        with _local_client(app) as client:
+            response = client.get("/admin/api/desktop/autostart-options")
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["origin"] == "linux"
+        assert body["targets"] == ["server"]
+        assert body["default_target"] == "server"
+
 
 def test_desktop_gui_scripts_are_registered() -> None:
     root = Path(__file__).resolve().parents[2]
@@ -370,6 +571,7 @@ def test_apply_tray_registration_persists_only_the_flag(monkeypatch, tmp_path):
     state = load_desktop_state()
     assert state.tray_enabled is False
     assert state.start_at_login is False
+    assert state.server_mode == "spawn"
 
 
 def test_set_start_at_login_persists_flag_and_reconciles_os(
@@ -380,9 +582,9 @@ def test_set_start_at_login_persists_flag_and_reconciles_os(
     desktop_config.set_start_at_login(True)
 
     assert load_desktop_state().start_at_login is True
-    assert LAUNCH_AGENT_LABEL in fake_winreg.values
+    assert WINDOWS_RUN_VALUE in fake_winreg.values
 
     desktop_config.set_start_at_login(False)
 
     assert load_desktop_state().start_at_login is False
-    assert LAUNCH_AGENT_LABEL not in fake_winreg.values
+    assert WINDOWS_RUN_VALUE not in fake_winreg.values

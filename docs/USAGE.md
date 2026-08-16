@@ -11,6 +11,7 @@ The [README](../README.md) is the overview. This is the long-form manual.
 - [1. How it works](#1-how-it-works)
 - [2. Install](#2-install)
 - [3. First run](#3-first-run)
+  - [Running the server with the desktop tray](#running-the-server-with-the-desktop-tray)
 - [4. Tutorial: connect Claude Code (CLI)](#4-tutorial-connect-claude-code-cli)
 - [5. Tutorial: connect Claude Desktop](#5-tutorial-connect-claude-desktop)
 - [6. Tutorial: connect Codex and Pi](#6-tutorial-connect-codex-and-pi)
@@ -132,6 +133,43 @@ On first run, the dashboard opens straight to a **Get Started** checklist instea
 | **Admin UI** | `http://127.0.0.1:8082/admin` | you, in a browser |
 
 Same port. The Admin UI is additionally restricted to loopback callers — see [Security and networking](#13-security-and-networking).
+
+### Running the server with the desktop tray
+
+Two optional commands change how the server is *owned*, and both write to the same `~/.fcc/desktop.json` state file:
+
+| Command | What it does |
+| --- | --- |
+| `mcc-server` | The headless server. Blocks forever, binds `:8082`. This is the canonical path on WSL / headless Linux / macOS server. |
+| `mcc-desktop` | A system-tray app. What it does on launch depends on its **Server mode** (below). |
+
+The dashboard **Deployment** card (and the tray's **Server mode** menu) selects one of three modes:
+
+| Mode | Meaning |
+| --- | --- |
+| `spawn` | The tray owns `mcc-server` as a child process. On launch, if nothing is listening on `:8082`, it starts the server itself. Best for Windows/macOS desktop users. |
+| `attach` | The tray connects to an existing server on `:8082` and **never spawns one**. For people who run `mcc-server` themselves (WSL / headless / ssh). If nothing is listening, the tray reports "server not running" and offers to open the dashboard. |
+| `off` | Tray only; the desktop app does not touch the server at all. |
+
+The older boolean `server_auto_start` is migrated on first read: `true` becomes `spawn`, `false` becomes `attach`.
+
+#### Start at login, per platform
+
+**Start at Login** registers a different target depending on where the machine lives, and the dashboard shows only the option that applies to the detected platform:
+
+| Platform | What is registered |
+| --- | --- |
+| Windows | HKCU `...\CurrentVersion\Run` entry for `mcc-desktop` (the tray). |
+| macOS | A LaunchAgent for `mcc-desktop` (the tray). |
+| WSL / Linux | A `systemd --user` unit (`~/.config/systemd/user/mcc-server.service`) for headless `mcc-server`, falling back to `~/.config/autostart/mcc-server.desktop` when systemd isn't available. |
+
+You can also drive these from the command line:
+
+```bash
+mcc-desktop --server-mode spawn|attach|off
+mcc-desktop --autostart on|off
+mcc-desktop --status
+```
 
 ---
 

@@ -1633,6 +1633,15 @@ textarea:focus-visible,
   gap: 10px;
 }
 
+.deployment-origin {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 20px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
 .rtk-status-line {
   margin-top: 10px;
   font-size: 12px;

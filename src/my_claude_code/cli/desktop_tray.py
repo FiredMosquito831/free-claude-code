@@ -9,6 +9,7 @@ from my_claude_code.cli.desktop import DesktopController
 from my_claude_code.cli.desktop_assets import app_icon_bytes
 from my_claude_code.config.desktop import (
     load_desktop_state,
+    set_server_mode,
     set_start_at_login,
     set_tray_enabled,
 )
@@ -21,6 +22,12 @@ from my_claude_code.config.rtk import (
 
 _APP_NAME = "My Claude Code"
 
+_SERVER_MODE_LABELS = {
+    "spawn": "Spawn server",
+    "attach": "Attach to server",
+    "off": "Off (tray only)",
+}
+
 
 class PystrayDesktopTray:
     """Render desktop lifecycle actions through the native status area."""
@@ -30,6 +37,7 @@ class PystrayDesktopTray:
         state = load_desktop_state()
         self._start_at_login = state.start_at_login
         self._tray_enabled = state.tray_enabled
+        self._server_mode = state.server_mode
         rtk = load_rtk_state()
         self._rtk_state = {
             "claude": rtk.claude,
@@ -48,6 +56,26 @@ class PystrayDesktopTray:
             MenuItem("Open Admin", self._open_admin, default=True),
             MenuItem("Check Server Status", self._check_status),
             MenuItem("Restart Server", self._restart_server),
+            MenuItem(
+                "Server mode",
+                Menu(
+                    MenuItem(
+                        _SERVER_MODE_LABELS["spawn"],
+                        self._set_server_mode_spawn,
+                        checked=lambda item: self._server_mode == "spawn",
+                    ),
+                    MenuItem(
+                        _SERVER_MODE_LABELS["attach"],
+                        self._set_server_mode_attach,
+                        checked=lambda item: self._server_mode == "attach",
+                    ),
+                    MenuItem(
+                        _SERVER_MODE_LABELS["off"],
+                        self._set_server_mode_off,
+                        checked=lambda item: self._server_mode == "off",
+                    ),
+                ),
+            ),
             Menu.SEPARATOR,
             MenuItem(
                 "Start at Login",
@@ -94,10 +122,20 @@ class PystrayDesktopTray:
         self._controller.open_admin()
 
     def _check_status(self, _icon: Icon, _item: MenuItem) -> None:
-        self._icon.notify(
-            f"Server is {self._controller.status}.",
-            _APP_NAME,
-        )
+        status = self._controller.status
+        if status == "running":
+            self._icon.notify(f"Server is {status}.", _APP_NAME)
+            return
+        mode = self._server_mode
+        if mode == "spawn":
+            self._icon.notify("Server is not running.", _APP_NAME)
+        elif mode == "attach":
+            self._icon.notify(
+                "Server not running. Start mcc-server manually to attach.",
+                _APP_NAME,
+            )
+        else:
+            self._icon.notify("Server is off (tray only).", _APP_NAME)
 
     def _restart_server(self, _icon: Icon, _item: MenuItem) -> None:
         try:
@@ -105,6 +143,22 @@ class PystrayDesktopTray:
             self._icon.notify("Server restarted.", _APP_NAME)
         except Exception as exc:
             self._icon.notify(f"Restart failed: {exc}", _APP_NAME)
+
+    def _set_server_mode(self, mode: str) -> None:
+        self._server_mode = mode
+        try:
+            set_server_mode(mode)
+        except Exception as exc:
+            self._icon.notify(f"Could not save server mode: {exc}", _APP_NAME)
+
+    def _set_server_mode_spawn(self, _icon: Icon, _item: MenuItem) -> None:
+        self._set_server_mode("spawn")
+
+    def _set_server_mode_attach(self, _icon: Icon, _item: MenuItem) -> None:
+        self._set_server_mode("attach")
+
+    def _set_server_mode_off(self, _icon: Icon, _item: MenuItem) -> None:
+        self._set_server_mode("off")
 
     def _toggle_start_at_login(self, _icon: Icon, _item: MenuItem) -> None:
         self._start_at_login = not self._start_at_login
