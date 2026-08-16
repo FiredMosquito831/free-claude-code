@@ -191,7 +191,7 @@ class TestWindowsStartAtLogin:
         desktop_config.apply_start_at_login()
 
         assert LAUNCH_AGENT_LABEL in fake_winreg.values
-        assert "mcc-desktop" in fake_winreg.values[LAUNCH_AGENT_LABEL]
+        assert "my_claude_code.cli.desktop_entrypoint" in fake_winreg.values[LAUNCH_AGENT_LABEL]
 
     def test_remove_deletes_run_key(self, monkeypatch, tmp_path, fake_winreg):
         _set_home(monkeypatch, tmp_path)
@@ -226,7 +226,7 @@ class TestMacOSStartAtLogin:
         assert "<key>RunAtLoad</key>" in content
         assert "<true/>" in content
         assert LAUNCH_AGENT_LABEL in content
-        assert "mcc-desktop" in content
+        assert "my_claude_code.cli.desktop_entrypoint" in content
 
     def test_remove_deletes_launch_agent_plist(self, monkeypatch, tmp_path):
         _set_home(monkeypatch, tmp_path)
@@ -254,7 +254,7 @@ class TestLinuxStartAtLogin:
         assert path.is_file()
         assert "[Desktop Entry]" in content
         assert "X-GNOME-Autostart-enabled=true" in content
-        assert "mcc-desktop" in content
+        assert "my_claude_code.cli.desktop_entrypoint" in content
 
     def test_remove_deletes_autostart_desktop_file(self, monkeypatch, tmp_path):
         _set_home(monkeypatch, tmp_path)
