@@ -118,12 +118,58 @@ class FixedProviderModelRouter(ModelRouter):
 
 
 def test_web_server_tool_not_detected_when_tool_only_listed():
-    """Listing web_search without forcing it must not skip the upstream provider."""
+    """Listing web_search without a tool choice must not skip the upstream provider."""
     request = MessagesRequest(
         model="claude-haiku-4-5-20251001",
         max_tokens=100,
         messages=[Message(role="user", content="search")],
         tools=[Tool(name="web_search", type="web_search_20250305")],
+    )
+
+    assert not is_web_server_tool_request(request)
+
+
+@pytest.mark.parametrize(
+    ("name", "tool_type"),
+    [
+        ("web_search", "web_search_20250305"),
+        ("web_fetch", "web_fetch_20250910"),
+    ],
+)
+def test_web_server_tool_detected_for_single_auto_server_tool(
+    name: str, tool_type: str
+):
+    request = MessagesRequest(
+        model="claude-haiku-4-5-20251001",
+        max_tokens=100,
+        messages=[Message(role="user", content="use the web")],
+        tools=[Tool(name=name, type=tool_type)],
+        tool_choice={"type": "auto"},
+    )
+
+    assert is_web_server_tool_request(request)
+
+
+@pytest.mark.parametrize(
+    "tools",
+    [
+        [
+            Tool(name="web_search", type="web_search_20250305"),
+            Tool(name="read_file", input_schema={"type": "object"}),
+        ],
+        [
+            Tool(name="web_search", type="web_search_20250305"),
+            Tool(name="web_fetch", type="web_fetch_20250910"),
+        ],
+    ],
+)
+def test_web_server_tool_not_detected_for_ambiguous_auto_tools(tools: list[Tool]):
+    request = MessagesRequest(
+        model="claude-haiku-4-5-20251001",
+        max_tokens=100,
+        messages=[Message(role="user", content="search")],
+        tools=tools,
+        tool_choice={"type": "auto"},
     )
 
     assert not is_web_server_tool_request(request)
@@ -155,10 +201,17 @@ def test_web_server_tool_not_detected_when_forced_name_missing_from_tools():
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("provider_id", _PROVIDER_IDS)
-async def test_service_rejects_forced_server_tool_when_local_handler_is_disabled(
-    provider_id: str,
+@pytest.mark.parametrize(
+    "tool_choice",
+    [
+        {"type": "tool", "name": "web_search"},
+        {"type": "auto"},
+    ],
+)
+async def test_service_rejects_selected_server_tool_when_local_handler_is_disabled(
+    provider_id: str, tool_choice: dict[str, str]
 ):
-    """Every provider needs FCC's local handler for forced server tools."""
+    """Every provider needs MCC's local handler for selected server tools."""
     settings = Settings.model_validate({"ENABLE_WEB_SERVER_TOOLS": False})
     assert settings.enable_web_server_tools is False
     service = MessagesHandler(
@@ -176,7 +229,7 @@ async def test_service_rejects_forced_server_tool_when_local_handler_is_disabled
             )
         ],
         tools=[Tool(name="web_search", type="web_search_20250305")],
-        tool_choice={"type": "tool", "name": "web_search"},
+        tool_choice=tool_choice,
     )
     with pytest.raises(InvalidRequestError, match="ENABLE_WEB_SERVER_TOOLS"):
         await service.create(request)
@@ -503,7 +556,16 @@ async def test_disabled_web_search_streams_clear_error_without_outbound(monkeypa
 
 
 @pytest.mark.asyncio
-async def test_service_streams_forced_web_search_by_default(monkeypatch):
+@pytest.mark.parametrize(
+    "tool_choice",
+    [
+        {"type": "tool", "name": "web_search"},
+        {"type": "auto"},
+    ],
+)
+async def test_service_streams_selected_web_search_locally(
+    monkeypatch, tool_choice: dict[str, str]
+):
     async def fake_search(
         _query: str, _settings: Settings, **_kwargs: object
     ) -> list[dict[str, str]]:
@@ -512,7 +574,13 @@ async def test_service_streams_forced_web_search_by_default(monkeypatch):
     monkeypatch.setattr(
         "my_claude_code.api.web_tools.outbound._run_web_search", fake_search
     )
-    settings = Settings.model_validate({"ENABLE_WEB_SERVER_TOOLS": True})
+    settings = Settings.model_validate(
+        {
+            "ENABLE_WEB_SERVER_TOOLS": True,
+            "WEB_SEARCH_PROVIDER": "auto",
+            "WEB_SEARCH_FALLBACK_POLICY": "auto",
+        }
+    )
     provider_resolver = MagicMock()
     service = MessagesHandler(
         settings,
@@ -525,7 +593,7 @@ async def test_service_streams_forced_web_search_by_default(monkeypatch):
         stream=True,
         messages=[Message(role="user", content="Search for DeepSeek V4")],
         tools=[Tool(name="web_search", type="web_search_20250305")],
-        tool_choice={"type": "tool", "name": "web_search"},
+        tool_choice=tool_choice,
     )
 
     response = await service.create(request)
@@ -1449,7 +1517,7 @@ async def test_service_rejects_listed_server_tools_for_every_provider(
         messages=[Message(role="user", content="q")],
         tools=[Tool(name="web_search", type="web_search_20250305")],
     )
-    with pytest.raises(InvalidRequestError, match="cannot pass listed Anthropic"):
+    with pytest.raises(InvalidRequestError, match="cannot pass ambiguous Anthropic"):
         await service.create(request)
 
 
