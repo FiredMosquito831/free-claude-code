@@ -26,9 +26,9 @@ from .constants import _MAX_FETCH_CHARS
 from .egress import WebFetchEgressPolicy
 from .parsers import extract_query, extract_url
 from .request import (
-    forced_server_tool_name,
     forced_tool_turn_text,
     has_tool_named,
+    selected_server_tool_name,
     web_search_tool_options,
 )
 
@@ -139,12 +139,12 @@ async def stream_web_server_tool_response(
     web_fetch_egress: WebFetchEgressPolicy,
     verbose_client_errors: bool = False,
 ) -> AsyncIterator[str]:
-    """Stream a minimal Anthropic-shaped turn for forced `web_search` / `web_fetch` (local fallback).
+    """Stream a minimal Anthropic-shaped turn for a selected local server tool.
 
     When `ENABLE_WEB_SERVER_TOOLS` is on, this is a proxy-side execution path — not a full
     hosted Anthropic citation or encrypted-content pipeline.
     """
-    tool_name = forced_server_tool_name(request)
+    tool_name = selected_server_tool_name(request)
     if tool_name is None or not has_tool_named(request, tool_name):
         return
 

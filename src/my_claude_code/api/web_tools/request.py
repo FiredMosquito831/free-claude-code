@@ -62,17 +62,26 @@ def forced_tool_turn_text(request: MessagesRequest) -> str:
     return ""
 
 
-def forced_server_tool_name(request: MessagesRequest) -> str | None:
-    """Return web_search or web_fetch only when tool_choice forces that server tool."""
-    tc = request.tool_choice
-    if not isinstance(tc, dict):
+def selected_server_tool_name(request: MessagesRequest) -> str | None:
+    """Return the one local server tool selected without ambiguity.
+
+    Claude Code's WebSearch and WebFetch helpers send a dedicated request with
+    one server-tool definition and ``tool_choice=auto``. Explicit tool choices
+    remain supported. An auto request with multiple tools belongs to the
+    upstream model and must not be intercepted here.
+    """
+
+    tool_choice = request.tool_choice
+    if not isinstance(tool_choice, dict):
         return None
-    if tc.get("type") != "tool":
+    if tool_choice.get("type") == "tool":
+        name = tool_choice.get("name")
+        return str(name) if name in {"web_search", "web_fetch"} else None
+    tools = request.tools or []
+    if tool_choice.get("type") != "auto" or len(tools) != 1:
         return None
-    name = tc.get("name")
-    if name in {"web_search", "web_fetch"}:
-        return str(name)
-    return None
+    name = tools[0].name
+    return name if name in {"web_search", "web_fetch"} else None
 
 
 def has_tool_named(request: MessagesRequest, name: str) -> bool:
@@ -80,11 +89,12 @@ def has_tool_named(request: MessagesRequest, name: str) -> bool:
 
 
 def is_web_server_tool_request(request: MessagesRequest) -> bool:
-    """True when the client forces a web server tool via tool_choice (not merely listed)."""
-    forced = forced_server_tool_name(request)
-    if forced is None:
+    """True when one local server tool is selected without ambiguity."""
+
+    selected = selected_server_tool_name(request)
+    if selected is None:
         return False
-    return has_tool_named(request, forced)
+    return has_tool_named(request, selected)
 
 
 def is_anthropic_server_tool_definition(tool: Tool) -> bool:
@@ -107,16 +117,16 @@ def unsupported_server_tool_error(
     request: MessagesRequest, *, web_tools_enabled: bool
 ) -> str | None:
     """Return the user-facing error when the resolved provider cannot run server tools."""
-    forced = forced_server_tool_name(request)
-    if forced and not web_tools_enabled:
+    selected = selected_server_tool_name(request)
+    if selected and not web_tools_enabled:
         return (
-            f"tool_choice forces Anthropic server tool {forced!r}, but local web server tools are "
-            "disabled (ENABLE_WEB_SERVER_TOOLS=false). Enable them or remove the forced server tool."
+            f"Anthropic server tool {selected!r} is selected, but local web server tools are "
+            "disabled (ENABLE_WEB_SERVER_TOOLS=false). Enable them or remove the server tool."
         )
-    if not forced and has_listed_anthropic_server_tools(request):
+    if not selected and has_listed_anthropic_server_tools(request):
         return (
-            "MCC cannot pass listed Anthropic server tools (web_search / web_fetch) "
-            "to OpenAI Chat upstreams. Set ENABLE_WEB_SERVER_TOOLS=true and force the "
-            "tool with tool_choice, or remove these tools from the request."
+            "MCC cannot pass ambiguous Anthropic server tools (web_search / web_fetch) "
+            "to OpenAI Chat upstreams. Use a dedicated single-tool request with "
+            "tool_choice=auto, force one tool, or remove these tools."
         )
     return None
