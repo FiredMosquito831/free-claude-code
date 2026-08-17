@@ -4,11 +4,13 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from my_claude_code.application.errors import InvalidRequestError
 from my_claude_code.config.provider_catalog import GEMINI_DEFAULT_BASE
+from my_claude_code.core.reasoning import DEFAULT_REASONING_POLICY
 from my_claude_code.providers.base import ProviderConfig
 from my_claude_code.providers.gemini import GeminiProvider
-from my_claude_code.providers.gemini.quirks import (
-    GEMINI_SKIP_THOUGHT_SIGNATURE_VALIDATOR,
+from my_claude_code.providers.google_openai import (
+    GOOGLE_SKIP_THOUGHT_SIGNATURE_VALIDATOR as GEMINI_SKIP_THOUGHT_SIGNATURE_VALIDATOR,
 )
 from tests.providers.request_factory import make_messages_request
 from tests.providers.support import passthrough_rate_limiter, reasoning_for
@@ -120,6 +122,33 @@ def test_build_request_body_reasoning_off_sets_reasoning_none():
     assert "assistant_reasoning_content" not in roles
 
 
+def test_build_request_body_named_effort_sets_reasoning_effort(gemini_provider):
+    """Named effort sets reasoning_effort and avoids thinking_config conflict."""
+    req = make_request(output_config={"effort": "high"})
+    body = gemini_provider._build_request_body(req, reasoning=reasoning_for(req))
+
+    assert body["reasoning_effort"] == "high"
+    eb = body.get("extra_body")
+    if eb:
+        literal = eb.get("extra_body", {})
+        assert "thinking_config" not in literal.get("google", {})
+
+
+def test_build_request_body_budget_tokens_sets_thinking_config(gemini_provider):
+    """Budget tokens encodes to thinking_config without reasoning_effort."""
+    req = make_request(thinking={"type": "enabled", "budget_tokens": 2048})
+    body = gemini_provider._build_request_body(req, reasoning=reasoning_for(req))
+
+    assert "reasoning_effort" not in body
+    eb = body.get("extra_body", {})
+    literal = eb.get("extra_body", {})
+    google = literal.get("google", {})
+    assert google.get("thinking_config") == {
+        "thinking_budget": 2048,
+        "include_thoughts": True,
+    }
+
+
 def test_build_request_body_preserves_caller_extra_body(gemini_provider):
     req = make_request(extra_body={"metadata": {"user": "u1"}})
 
@@ -141,7 +170,6 @@ def test_build_request_body_merges_caller_nested_google(gemini_provider):
             "metadata": {"user": "u1"},
             "extra_body": {
                 "google": {
-                    "thinking_config": {"budget_tokens": 128},
                     "cached_content": "cachedContents/example",
                 }
             },
@@ -161,8 +189,40 @@ def test_build_request_body_merges_caller_nested_google(gemini_provider):
     assert google.get("cached_content") == "cachedContents/example"
     thinking_config = google.get("thinking_config")
     assert isinstance(thinking_config, dict)
-    assert thinking_config.get("budget_tokens") == 128
     assert thinking_config.get("include_thoughts") is True
+
+
+def test_build_request_body_preserves_caller_native_thinking_config(gemini_provider):
+    req = make_request(
+        thinking={"type": "disabled"},
+        extra_body={
+            "extra_body": {
+                "google": {
+                    "thinking_config": {"budget_tokens": 128},
+                }
+            },
+        },
+    )
+    body = gemini_provider._build_request_body(req, reasoning=DEFAULT_REASONING_POLICY)
+    literal_extra_body = body.get("extra_body", {}).get("extra_body", {})
+    google = literal_extra_body.get("google", {})
+    assert google.get("thinking_config") == {"budget_tokens": 128}
+    assert "reasoning_effort" not in body
+
+
+def test_build_request_body_rejects_conflicting_thinking_config(gemini_provider):
+    req = make_request(
+        thinking={"type": "enabled"},
+        extra_body={
+            "extra_body": {
+                "google": {
+                    "thinking_config": {"budget_tokens": 128},
+                }
+            },
+        },
+    )
+    with pytest.raises(InvalidRequestError, match="cannot be combined with FCC"):
+        gemini_provider._build_request_body(req, reasoning=reasoning_for(req))
 
 
 def test_build_request_body_preserves_tool_call_extra_content(gemini_provider):

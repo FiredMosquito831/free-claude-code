@@ -40,6 +40,7 @@ def _patch_status(monkeypatch):
 
 def test_get_returns_status_and_state(monkeypatch, tmp_path):
     _set_home(monkeypatch, tmp_path)
+    _patch_status(monkeypatch)
     rtk_config.save_rtk_state(RtkState(claude=True, pi=True))
     app = create_test_app()
 

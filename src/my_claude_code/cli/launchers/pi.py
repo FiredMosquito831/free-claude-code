@@ -9,6 +9,7 @@ from pathlib import Path
 from my_claude_code.config.proxy_auth import proxy_auth_token
 from my_claude_code.config.server_urls import local_proxy_root_url
 from my_claude_code.config.settings import get_settings
+from my_claude_code.core.identity import owner_for_invocation
 
 from .common import preflight_proxy, resolve_client_binary, run_client_process
 
@@ -56,11 +57,13 @@ def launch(argv: Sequence[str] | None = None) -> None:
     settings = get_settings()
     proxy_root_url = local_proxy_root_url(settings)
     if error := preflight_proxy(proxy_root_url):
+        owner = owner_for_invocation()
+        server_cmd = "mcc-server" if owner.key == "native" else "fcc-server"
         print(
-            f"My Claude Code proxy is not reachable at {proxy_root_url}: {error}",
+            f"{owner.display_name} proxy is not reachable at {proxy_root_url}: {error}",
             file=sys.stderr,
         )
-        print("Start it in another terminal with: fcc-server", file=sys.stderr)
+        print(f"Start it in another terminal with: {server_cmd}", file=sys.stderr)
         raise SystemExit(1)
 
     extension_path = pi_extension_path()
