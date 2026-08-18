@@ -7,6 +7,8 @@ provider implementation imports (see contract tests).
 from dataclasses import dataclass
 
 # Default upstream base URLs are owned here with the provider catalog.
+# Anthropic Messages API root. ``/messages`` and ``/models`` hang off this.
+ANTHROPIC_DEFAULT_BASE = "https://api.anthropic.com/v1"
 NVIDIA_NIM_DEFAULT_BASE = "https://integrate.api.nvidia.com/v1"
 # Moonshot Kimi OpenAI-compatible Chat Completions API.
 KIMI_DEFAULT_BASE = "https://api.moonshot.ai/v1"
@@ -200,6 +202,20 @@ class ProviderDescriptor:
 
 
 PROVIDER_CATALOG: dict[str, ProviderDescriptor] = {
+    # Anthropic's own Messages API, authenticated with a Claude Console API key
+    # and billed per token. This is the authentication method Anthropic
+    # documents for software that calls Claude on a user's behalf.
+    "anthropic": ProviderDescriptor(
+        provider_id="anthropic",
+        display_name="Anthropic (Claude API)",
+        credential_env="ANTHROPIC_API_KEY",
+        credential_url="https://platform.claude.com/settings/keys",
+        credential_attr="anthropic_api_key",
+        default_base_url=ANTHROPIC_DEFAULT_BASE,
+        base_url_attr="anthropic_base_url",
+        proxy_attr="anthropic_proxy",
+        group="direct",
+    ),
     "nvidia_nim": ProviderDescriptor(
         provider_id="nvidia_nim",
         display_name="NVIDIA NIM",

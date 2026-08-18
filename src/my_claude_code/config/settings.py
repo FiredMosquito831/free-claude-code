@@ -124,6 +124,16 @@ class Settings(BaseSettings):
     # ==================== Novita AI Config ====================
     novita_api_key: str = Field(default="", validation_alias="NOVITA_API_KEY")
 
+    # ==================== Anthropic (Claude API) Config ====================
+    # A Claude Console API key, billed per token. Distinct from
+    # ``ANTHROPIC_AUTH_TOKEN``, which is the token clients present to MCC.
+    anthropic_api_key: str = Field(default="", validation_alias="ANTHROPIC_API_KEY")
+    # Deliberately NOT ``ANTHROPIC_BASE_URL``: that variable points Claude Code
+    # at MCC, so reading it here would make the proxy dial itself and loop.
+    anthropic_base_url: str = Field(
+        default="", validation_alias="ANTHROPIC_UPSTREAM_BASE_URL"
+    )
+
     # ==================== Nous Portal Config ====================
     nous_api_key: str = Field(default="", validation_alias="NOUS_API_KEY")
 
@@ -444,6 +454,7 @@ class Settings(BaseSettings):
     novita_proxy: str = Field(default="", validation_alias="NOVITA_PROXY")
     nous_proxy: str = Field(default="", validation_alias="NOUS_PROXY")
     kilo_proxy: str = Field(default="", validation_alias="KILO_PROXY")
+    anthropic_proxy: str = Field(default="", validation_alias="ANTHROPIC_PROXY")
     commandcode_proxy: str = Field(default="", validation_alias="COMMANDCODE_PROXY")
     cline_proxy: str = Field(default="", validation_alias="CLINE_PROXY")
     alibaba_proxy: str = Field(default="", validation_alias="ALIBABA_PROXY")

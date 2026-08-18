@@ -6,6 +6,7 @@ from my_claude_code.config.provider_catalog import (
 )
 
 _EXPECTED_PROVIDER_ORDER: tuple[str, ...] = (
+    "anthropic",
     "nvidia_nim",
     "openai",
     "open_router",

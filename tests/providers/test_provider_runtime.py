@@ -21,6 +21,7 @@ from my_claude_code.config.provider_catalog import (
     VERCEL_AI_GATEWAY_DEFAULT_BASE,
     ZAI_DEFAULT_BASE,
 )
+from my_claude_code.providers.anthropic import AnthropicProvider
 from my_claude_code.providers.chatgpt_oauth import ChatGPTOAuthProvider
 from my_claude_code.providers.cloudflare import CloudflareProvider
 from my_claude_code.providers.commandcode import CommandCodeProvider
@@ -455,6 +456,7 @@ def test_create_provider_instantiates_each_builtin():
         nebius_api_key="test_nebius_key",
         chutes_api_key="test_chutes_key",
         featherless_api_key="test_featherless_key",
+        anthropic_api_key="test_anthropic_key",
     )
     cases = {
         "nvidia_nim": NvidiaNimProvider,
@@ -495,6 +497,7 @@ def test_create_provider_instantiates_each_builtin():
         "cline": OpenAIChatProvider,
         "nous_portal": NousPortalProvider,
         "kilo": KiloProvider,
+        "anthropic": AnthropicProvider,
         "commandcode": CommandCodeProvider,
         "qwencloud": OpenAIChatProvider,
         "qwencloud_coding": OpenAIChatProvider,

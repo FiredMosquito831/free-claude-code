@@ -294,6 +294,7 @@ Enter the listed setting in the Admin UI, open **Model Config**, then search the
 
 | Provider | Admin UI setting | Example `MODEL` |
 | --- | --- | --- |
+| [Anthropic (Claude API)](https://platform.claude.com/settings/keys) | `ANTHROPIC_API_KEY` | `anthropic/claude-sonnet-4-6` |
 | [NVIDIA NIM](https://build.nvidia.com/settings/api-keys) | `NVIDIA_NIM_API_KEY` | `nvidia_nim/nvidia/nemotron-3-super-120b-a12b` |
 | [OpenAI / ChatGPT](https://github.com/openai/codex) | `CHATGPT_OAUTH_ACCESS_TOKEN` | `openai/gpt-5.5` |
 | [OpenRouter](https://openrouter.ai/keys) | `OPENROUTER_API_KEY` | `open_router/openrouter/free` |

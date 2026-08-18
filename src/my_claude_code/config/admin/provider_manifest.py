@@ -134,6 +134,17 @@ _PROVIDER_FIELD_OVERRIDES: dict[str, dict[str, Any]] = {
             "api.kilo.ai/api/gateway (create at [app.kilo.ai](https://app.kilo.ai/))."
         ),
     },
+    "ANTHROPIC_API_KEY": {
+        "label": "Anthropic API Key",
+        "description": (
+            "Claude Console API key (`sk-ant-...`) for Anthropic's own Messages API, "
+            "billed per token. This is the authentication method Anthropic documents "
+            "for software that calls Claude on your behalf "
+            "(create at [platform.claude.com](https://platform.claude.com/settings/keys)). "
+            "Not the same as `ANTHROPIC_AUTH_TOKEN`, which is the token Claude Code "
+            "presents to MCC."
+        ),
+    },
     "COMMANDCODE_API_KEY": {
         "label": "Command Code API Key",
         "description": (

@@ -21,6 +21,7 @@ from my_claude_code.providers.stream_recovery import (
     RecoveryFailureAction,
 )
 
+from .auth import AnthropicMessagesAuth, BearerTokenAuth
 from .request import build_anthropic_messages_body
 from .streaming import iter_anthropic_sse_frames
 
@@ -34,10 +35,16 @@ class AnthropicMessagesProvider(BaseProvider):
         *,
         provider_name: str,
         rate_limiter: ProviderRateLimiter,
+        auth: AnthropicMessagesAuth | None = None,
+        extra_headers: dict[str, str] | None = None,
     ) -> None:
         super().__init__(config)
         self._provider_name = provider_name
         self._base_url = config.base_url.rstrip("/")
+        # Default preserves the bearer-token shape every existing caller uses;
+        # upstreams with a different credential contract inject their own.
+        self._auth = auth if auth is not None else BearerTokenAuth(config.api_key)
+        self._extra_headers = dict(extra_headers or {})
         self._rate_limiter = rate_limiter
         self._client = httpx.AsyncClient(
             proxy=config.proxy or None,
@@ -70,13 +77,15 @@ class AnthropicMessagesProvider(BaseProvider):
         build_anthropic_messages_body(request, reasoning=reasoning)
 
     async def _send_stream_request(self, body: dict[str, Any]) -> httpx.Response:
+        headers = {"Content-Type": "application/json"}
+        headers.update(self._extra_headers)
+        # Resolved per request: a short-lived credential may refresh between
+        # attempts, so the header cannot be captured once at construction.
+        headers.update(await self._auth.headers())
         request = self._client.build_request(
             "POST",
             f"{self._base_url}/messages",
-            headers={
-                "Authorization": f"Bearer {self._config.api_key}",
-                "Content-Type": "application/json",
-            },
+            headers=headers,
             json=body,
         )
         response = await self._client.send(request, stream=True)
