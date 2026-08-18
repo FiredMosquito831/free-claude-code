@@ -72,6 +72,16 @@ def _create_kilo(
     return KiloProvider(config, rate_limiter=rate_limiter)
 
 
+def _create_anthropic(
+    config: ProviderConfig,
+    _settings: Settings,
+    rate_limiter: ProviderRateLimiter,
+) -> BaseProvider:
+    from my_claude_code.providers.anthropic import AnthropicProvider
+
+    return AnthropicProvider(config, rate_limiter=rate_limiter)
+
+
 def _create_commandcode(
     config: ProviderConfig,
     _settings: Settings,
@@ -190,6 +200,7 @@ _SPECIAL_PROVIDER_FACTORIES: dict[str, ProviderFactory] = {
     "open_router": _create_open_router,
     "nous_portal": _create_nous_portal,
     "kilo": _create_kilo,
+    "anthropic": _create_anthropic,
     "commandcode": _create_commandcode,
     "mistral": _create_mistral,
     "deepseek": _create_deepseek,
