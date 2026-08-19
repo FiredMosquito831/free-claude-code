@@ -1,10 +1,15 @@
 """Packaged visual assets owned by the MCC desktop shell.
 
-The tray icon is a placeholder: a solid accent rounded square with an "MC"
-monogram. A real ``app-icon.png`` ships under ``my_claude_code/assets``; when
-it is missing, a matching placeholder is generated at runtime with Pillow.
-That means the project owner can swap in the real logo later by dropping a
-single file at that path -- no code change.
+Two real brand assets ship under ``my_claude_code/assets``:
+
+- ``app-icon.*`` (10% margin mark) for windows, taskbar, and app icons, in
+  ``.png``, ``.ico`` (multi-size), and ``.icns`` (multi-size) formats.
+- ``tray-icon.png`` (2% margin, same mark) sized for 16-24px tray rendering.
+
+If either file is missing at runtime, a placeholder "MC" monogram is
+generated with Pillow so the tray never launches without an icon. That
+fallback should be unreachable in normal operation now that the real files
+are packaged.
 """
 
 import io
@@ -12,9 +17,13 @@ import os
 from importlib.resources import files
 from pathlib import Path
 
-_ICON_FILES = {
+_APP_ICON_FILES = {
     ".png": "app-icon.png",
+    ".ico": "app-icon.ico",
+    ".icns": "app-icon.icns",
 }
+
+_TRAY_ICON_FILE = "tray-icon.png"
 
 # Accent color drawn from the admin UI's "midnight" theme accent. The real
 # logo replaces the asset, not this fallback's palette.
@@ -30,15 +39,40 @@ def app_icon_bytes(suffix: str) -> bytes:
     """
 
     normalized_suffix = suffix.lower()
-    if normalized_suffix not in _ICON_FILES:
-        supported = ", ".join(sorted(_ICON_FILES))
+    if normalized_suffix not in _APP_ICON_FILES:
+        supported = ", ".join(sorted(_APP_ICON_FILES))
         raise ValueError(
             f"Unsupported app icon format {suffix!r}; expected one of: {supported}"
         )
 
     asset_path = files("my_claude_code").joinpath(
-        "assets", _ICON_FILES[normalized_suffix]
+        "assets", _APP_ICON_FILES[normalized_suffix]
     )
+    try:
+        return asset_path.read_bytes()
+    except OSError:
+        if normalized_suffix != ".png":
+            # The placeholder generator only produces a PNG. Returning those
+            # bytes for a ".ico"/".icns" request would write an invalid,
+            # unusable icon file (Windows/macOS both refuse to load a PNG
+            # with the wrong container), so fail loudly instead of shipping
+            # a broken shortcut icon.
+            raise FileNotFoundError(
+                f"Packaged app icon {_APP_ICON_FILES[normalized_suffix]!r} is "
+                f"missing and no {normalized_suffix} placeholder can be "
+                "generated (only a .png placeholder is supported)."
+            ) from None
+        return _placeholder_png()
+
+
+def tray_icon_bytes() -> bytes:
+    """Read the packaged tray icon (2% margin variant for 16-24px rendering).
+
+    Falls back to a generated placeholder when the asset file has not
+    shipped, so the tray never launches without an icon.
+    """
+
+    asset_path = files("my_claude_code").joinpath("assets", _TRAY_ICON_FILE)
     try:
         return asset_path.read_bytes()
     except OSError:
@@ -46,7 +80,11 @@ def app_icon_bytes(suffix: str) -> bytes:
 
 
 def export_app_icon(destination: Path) -> None:
-    """Copy the packaged app icon to an installer-owned destination."""
+    """Copy the packaged app icon to an installer-owned destination.
+
+    ``destination.suffix`` selects the source format (``.png``, ``.ico``, or
+    ``.icns``); the bytes are copied as-is, no conversion is performed.
+    """
 
     destination.parent.mkdir(parents=True, exist_ok=True)
     destination.write_bytes(app_icon_bytes(destination.suffix))

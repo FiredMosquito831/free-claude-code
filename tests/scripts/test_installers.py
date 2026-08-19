@@ -26,6 +26,9 @@ _SHELL_HELPER_NAMES = frozenset(
         "verify_uv",
         "current_uv_version",
         "version_ge",
+        "create_desktop_shortcut",
+        "create_linux_desktop_entry",
+        "create_macos_app_bundle",
     }
 )
 _POWERSHELL_HELPER_NAMES = frozenset(
@@ -38,6 +41,7 @@ _POWERSHELL_HELPER_NAMES = frozenset(
         "Get-UvVersion",
         "Convert-UvVersionOutput",
         "Test-UvVersionAtLeast",
+        "New-DesktopShortcut",
     }
 )
 
@@ -1530,6 +1534,77 @@ def test_install_ps1_rtk_dry_run_prints_enable_command() -> None:
     powershell = (_repo_root() / "scripts" / "install.ps1").read_text(encoding="utf-8")
 
     assert 'Write-Host "+ mcc-rtk enable claude,codex,pi"' in powershell
+
+
+def test_install_sh_desktop_flag_in_usage_and_parse_args() -> None:
+    shell = (_repo_root() / "scripts" / "install.sh").read_text(encoding="utf-8")
+
+    assert "Create a desktop launcher" in shell
+    # A parse_args case entry sets the flag.
+    assert "\n            --desktop)\n                enable_desktop=1\n" in shell
+    # Opt-in only: default is off.
+    assert "enable_desktop=0" in shell
+
+
+def test_install_sh_desktop_shortcut_step_runs_after_rtk() -> None:
+    shell = (_repo_root() / "scripts" / "install.sh").read_text(encoding="utf-8")
+
+    # The desktop shortcut step is invoked in the main flow after RTK.
+    rtk_call = shell.index("enable_rtk_for_agents\n")
+    desktop_call = shell.index("create_desktop_shortcut\n")
+    assert rtk_call < desktop_call
+
+
+def test_install_sh_desktop_shortcut_never_fails_install() -> None:
+    shell = (_repo_root() / "scripts" / "install.sh").read_text(encoding="utf-8")
+
+    # A failed shortcut creation is downgraded to a warning, not a `fail` call,
+    # and the closing summary reports the real error rather than hedging.
+    assert "desktop_launcher_created=$(create_macos_app_bundle" in shell
+    assert "desktop_launcher_created=$(create_linux_desktop_entry" in shell
+    assert (
+        "printf 'warning: %s; continuing without it.\\n' \"$desktop_launcher_error\""
+        in shell
+    )
+    assert (
+        "fail "
+        not in shell.split("create_desktop_shortcut() {")[1].split(
+            "\ncreate_linux_desktop_entry"
+        )[0]
+    )
+
+
+def test_install_ps1_desktop_flag_in_usage_and_param() -> None:
+    powershell = (_repo_root() / "scripts" / "install.ps1").read_text(encoding="utf-8")
+
+    assert "[switch] $Desktop," in powershell
+    assert "-Desktop               Create a Start Menu shortcut" in powershell
+    assert "$script:EnableDesktop = $Desktop.IsPresent" in powershell
+
+
+def test_install_ps1_desktop_shortcut_never_fails_install() -> None:
+    powershell = (_repo_root() / "scripts" / "install.ps1").read_text(encoding="utf-8")
+
+    # The shortcut function wraps its work in try/catch and only warns on
+    # failure -- it must never let an exception propagate and abort install.
+    function_start = powershell.index("function New-DesktopShortcut {")
+    function_end = powershell.index("\nfunction ", function_start + 1)
+    function_body = powershell[function_start:function_end]
+    assert "try {" in function_body
+    assert "catch {" in function_body
+    assert "Write-Warning" in function_body
+
+
+def test_install_ps1_desktop_shortcut_runs_after_rtk() -> None:
+    powershell = (_repo_root() / "scripts" / "install.ps1").read_text(encoding="utf-8")
+
+    call_sites = re.findall(r"^ {4}Enable-RtkForAgents\n(.*\n)", powershell, re.M)
+    assert call_sites, "expected at least one Enable-RtkForAgents call site"
+    for following_line in call_sites:
+        assert following_line.startswith("    New-DesktopShortcut"), (
+            "New-DesktopShortcut must be called immediately after "
+            "Enable-RtkForAgents at every call site"
+        )
 
 
 def test_install_ps1_does_not_rely_on_script_scope_for_release_state() -> None:
