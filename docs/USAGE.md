@@ -16,6 +16,7 @@ The [README](../README.md) is the overview. This is the long-form manual.
 - [5. Tutorial: connect Claude Desktop](#5-tutorial-connect-claude-desktop)
 - [6. Tutorial: connect Codex and Pi](#6-tutorial-connect-codex-and-pi)
 - [7. Providers and API keys](#7-providers-and-api-keys)
+  - [Using Claude models](#using-claude-models)
 - [8. Model tiers and routing](#8-model-tiers-and-routing)
 - [9. Web search](#9-web-search)
 - [10. Analytics](#10-analytics)
@@ -29,7 +30,7 @@ The [README](../README.md) is the overview. This is the long-form manual.
 
 ## 1. How it works
 
-My Claude Code is a **local server that speaks Anthropic's API**. Your coding agent believes it is talking to Anthropic. The proxy receives that request, forwards it to whichever provider you configured — NVIDIA NIM, OpenRouter, a local Ollama, 54 of them — and translates the response back into Anthropic's wire format.
+My Claude Code is a **local server that speaks Anthropic's API**. Your coding agent believes it is talking to Anthropic. The proxy receives that request, forwards it to whichever provider you configured — NVIDIA NIM, OpenRouter, a local Ollama, 56 of them — and translates the response back into Anthropic's wire format.
 
 <div align="center">
   <img src="../assets/how-it-works.svg" alt="Request flow from agent through the proxy to a provider" width="760">
@@ -351,7 +352,7 @@ Codex reads a model catalog that MCC generates, so its own picker works normally
 
 ## 7. Providers and API keys
 
-Open the **Providers** tab. Every provider is one card in a single searchable grid — there are 54 of them, so start by typing in **Search providers**. It matches the provider's name, its id and its environment variable, so `groq`, `GROQ_API_KEY` and `alibaba` all find what you would expect. **Only configured** hides everything you have not set up yet.
+Open the **Providers** tab. Every provider is one card in a single searchable grid — there are 56 of them, so start by typing in **Search providers**. It matches the provider's name, its id and its environment variable, so `groq`, `GROQ_API_KEY` and `alibaba` all find what you would expect. **Only configured** hides everything you have not set up yet.
 
 <div align="center">
   <img src="../assets/admin-requests.png" alt="Provider configuration in the Admin UI" width="860">
@@ -368,6 +369,30 @@ Open the **Providers** tab. Every provider is one card in a single searchable gr
 A provider holds a **pool** of keys, not a single value. Each key in the pool shows its own health (healthy, cooling down, locked out) and has its own **Remove**, which also takes effect immediately. If you added more than one key, pick a **Rotation** policy and press **Apply** — rotation is a restart-required setting, so the server restarts when you apply it.
 
 Local backends (LM Studio, llama.cpp, Ollama) take a base URL instead of a key, and offer **Test connection** where remote providers offer Refresh models.
+
+<a id="using-claude-models"></a>
+
+### Using Claude models
+
+There are two Anthropic providers, and the difference between them matters.
+
+**`anthropic` — a Claude Console API key.** This is the ordinary, supported path: Anthropic's own Messages API, billed per token like any other provider here.
+
+1. Create a key at [platform.claude.com/settings/keys](https://platform.claude.com/settings/keys).
+2. Paste it into the **Anthropic (Claude API)** card, exactly like any other provider.
+3. Set a model ref such as `anthropic/claude-sonnet-4-6` on **Model Config**.
+
+One thing to know: the override for the upstream address is `ANTHROPIC_UPSTREAM_BASE_URL`, **not** `ANTHROPIC_BASE_URL`. The latter is the variable that points Claude Code *at* MCC — if MCC read it as its own upstream, the proxy would call itself. You almost certainly never need to set either.
+
+**`anthropic_oauth` — a Claude Pro/Max subscription. Anthropic does not permit this.**
+
+Their published terms state that plan OAuth credentials are for Claude Code and Claude.ai only, and that third-party products may not route requests through them. There is no "inside Claude Code" exemption, because once MCC is interposed it is MCC that presents your credential upstream. Anthropic may enforce without notice, and **the risk is to your Claude account**.
+
+If you enable it anyway, MCC refuses by default to use the subscription for anything that did not come from the Claude Code CLI — it reads the `cc_entrypoint=cli` marker Claude Code puts in the request body, so an Agent SDK script pointed at your proxy is refused rather than silently billed to your plan.
+
+**Read [ANTHROPIC-SUBSCRIPTION.md](ANTHROPIC-SUBSCRIPTION.md) first.** It is the full disclaimer, the settings, and the credential handling.
+
+Claude models also reach you through `bedrock`, `vertex`, and gateways such as `kilo`, `nous_portal` and `cline` — all pay-per-token, none with a policy question attached.
 
 ### Reading a failed Refresh models
 

@@ -980,6 +980,7 @@
                 <p class="eyebrow guide-toc-eyebrow">On this page</p>
                 <a href="#guide-start">How it works</a>
                 <a href="#guide-keys">Add a provider</a>
+                <a href="#guide-claude-models">Use Claude models</a>
                 <a href="#guide-models">Map model tiers</a>
                 <a href="#guide-cli">Claude Code</a>
                 <a href="#guide-desktop">Claude Desktop</a>
@@ -1059,6 +1060,52 @@ OLLAMA_BASE_URL="http://127.0.0.1:11434"</code></pre>
                 <p>
                   Everything is stored in <code>~/.fcc/.env</code>. Edit that file directly
                   if you prefer, then restart the server &mdash; config is read at startup.
+                </p>
+
+                <h3 id="guide-claude-models">Use Claude models</h3>
+                <p>
+                  There are two Anthropic providers and the difference matters.
+                </p>
+                <p>
+                  <strong>Anthropic (Claude API)</strong> is the ordinary path: a
+                  Claude Console API key, billed per token like every other provider
+                  here. Create one at
+                  <a href="https://platform.claude.com/settings/keys" target="_blank" rel="noreferrer noopener">platform.claude.com</a>,
+                  paste it into the card, press <em>Refresh models</em>, and set a
+                  model ref such as <code>anthropic/claude-sonnet-4-6</code>. This is
+                  the authentication method Anthropic documents for software that
+                  calls Claude on your behalf.
+                </p>
+                <div class="guide-note guide-note-warn">
+                  <p>
+                    <strong>Anthropic Claude subscription (OAuth) is not permitted by
+                    Anthropic.</strong> Their terms state that Free, Pro and Max OAuth
+                    credentials are for Claude Code and Claude.ai only, and that
+                    third-party products may not route requests through them. There is
+                    no &ldquo;inside Claude Code&rdquo; exemption &mdash; once My Claude
+                    Code is in the path, it is My Claude Code that presents your
+                    credential upstream. Anthropic may enforce without prior notice,
+                    and the risk is to your Claude account.
+                  </p>
+                  <p>
+                    If you enable it anyway, this provider refuses by default to serve
+                    anything that did not come from the Claude Code CLI: it reads the
+                    <code>cc_entrypoint=cli</code> marker Claude Code writes into the
+                    request body, so an Agent SDK script pointed at your proxy is
+                    refused rather than quietly billed to your plan.
+                  </p>
+                  <p>
+                    Read <code>docs/ANTHROPIC-SUBSCRIPTION.md</code> before switching it
+                    on. The supported alternative is the Claude API card above.
+                  </p>
+                </div>
+                <p>
+                  Claude models also arrive through <code>bedrock</code>,
+                  <code>vertex</code>, and gateways such as <code>kilo</code>,
+                  <code>nous_portal</code> and <code>cline</code> &mdash; all
+                  pay-per-token, none with a policy question attached. And the two-door
+                  pattern still works: keep native <code>claude</code> for your
+                  subscription, and use <code>mcc-claude</code> for everything else.
                 </p>
 
                 <h3 id="guide-models">Map model tiers</h3>

@@ -2,7 +2,7 @@
 
 # 🤖 My Claude Code
 
-An Anthropic-compatible local proxy for Claude Code, Codex, Pi, and their IDE extensions — backed by 54 model providers, with multi-key rotation everywhere, built-in web search providers, and full request analytics.
+An Anthropic-compatible local proxy for Claude Code, Codex, Pi, and their IDE extensions — backed by 56 model providers, with multi-key rotation everywhere, built-in web search providers, and full request analytics.
 
 [![License: PolyForm Noncommercial](https://img.shields.io/badge/License-PolyForm%20Noncommercial-blue.svg?style=for-the-badge)](https://polyformproject.org/licenses/noncommercial/1.0.0)
 [![Python 3.14](https://img.shields.io/badge/python-3.14-3776ab.svg?style=for-the-badge&logo=python&logoColor=white)](https://www.python.org/downloads/)
@@ -47,7 +47,8 @@ Run your coding agents with free, paid, or local models. Choose and validate pro
 | Area | What you get |
 | --- | --- |
 | **Coding agents** | Launch Claude Code with `mcc-claude`, Codex with `mcc-codex`, or Pi with `mcc-pi`; Codex and Pi's native model pickers always list the MCC catalog, Claude Code's needs `mcc-claude --discover-models` (or `mcc-claude-old`). Legacy `fcc-claude`, `fcc-codex`, and `fcc-pi` aliases still work. |
-| **Model providers** | 54 cloud and local providers, including Kimi For Coding and an experimental ChatGPT OAuth provider. Switch and validate providers from the Admin UI. |
+| **Model providers** | 56 cloud and local providers, including Anthropic's own Claude API, Kimi For Coding, and experimental ChatGPT OAuth. Switch and validate providers from the Admin UI. |
+| **Claude, direct** | `anthropic` speaks Anthropic's native Messages API with a Claude Console API key, billed per token. A separate `anthropic_oauth` provider can use a Pro/Max subscription instead — **which Anthropic does not permit**; read [docs/ANTHROPIC-SUBSCRIPTION.md](docs/ANTHROPIC-SUBSCRIPTION.md) before enabling it. |
 | **Model-tier routing** | Route Fable, Opus, Sonnet, Haiku, and fallback traffic to different models, each with an ordered fallback chain. |
 | **Vision adapter** | Image requests are diverted to a model that can see when the tier's own model cannot, with its own fallback chain. |
 | **Protocol fidelity** | Streaming, tool use, reasoning, and image input preserved across compatible models, with configurable reasoning control. |
@@ -828,6 +829,30 @@ Prefer the command line? Re-running the install command from [Quick Start](#inst
 <a id="oauth-providers"></a>
 
 ## OAuth Providers
+
+### Anthropic Claude subscription (OAuth) — not permitted by Anthropic
+
+> **Read [docs/ANTHROPIC-SUBSCRIPTION.md](docs/ANTHROPIC-SUBSCRIPTION.md) before enabling this.** It is the disclaimer, and this section is only the summary.
+
+MCC can route requests with the OAuth credential from a Claude Pro or Max subscription, discovered from Claude Code's own `~/.claude/.credentials.json` or obtained with `mcc-anthropic-oauth-login`.
+
+**Anthropic's published terms forbid it.** From [Claude Code → Legal and compliance](https://code.claude.com/docs/en/legal-and-compliance):
+
+> Anthropic does not permit third-party developers to offer Claude.ai login or to route requests through Free, Pro, or Max plan credentials on behalf of their users.
+
+There is **no "inside Claude Code" exemption**. Once MCC is interposed, Claude Code authenticates to *MCC*, and *MCC* makes the upstream call with your plan credential — which is exactly the sentence above, whatever launched the session. Anthropic states it may enforce without prior notice, and enforcement is account-level. **The risk is to your Claude account.**
+
+**What MCC does to limit it.** Claude Code stamps an attribution line at the head of the system prompt, inside the request body:
+
+```
+x-anthropic-billing-header: cc_version=2.1.235.2db; cc_entrypoint=cli;
+```
+
+The terminal CLI reports `cc_entrypoint=cli`; the Python Agent SDK reports `sdk-py`. Because the marker travels in the body, a proxy can neither forge it nor strip it. **By default this provider refuses any request that does not report `cli`**, and points it at the `anthropic` provider instead — so the Agent SDK, other harnesses, and bare API calls never touch the subscription credential. Set `ANTHROPIC_OAUTH_REQUIRE_CLAUDE_CODE=false` to remove that protection.
+
+MCC's own credential lives at `~/.fcc/anthropic_oauth.json` (mode `0600`). Claude Code's file is read-only to MCC and is never refreshed in place — rotating it would log out your real client. A raw `ANTHROPIC_OAUTH_ACCESS_TOKEN` works as an override but cannot be refreshed.
+
+**The supported alternative is already here:** the `anthropic` provider with a [Claude Console API key](https://platform.claude.com/settings/keys), billed per token. Claude models also arrive through `bedrock`, `vertex`, and several gateways. And the two-door pattern still works — native `claude` for your subscription, `mcc-claude` for everything else.
 
 ### ChatGPT OAuth Provider (experimental)
 

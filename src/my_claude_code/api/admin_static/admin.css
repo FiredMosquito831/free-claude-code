@@ -3242,6 +3242,14 @@ details.turn-pane > summary:focus-visible {
   color: var(--text);
 }
 
+/* A callout whose advice is a risk rather than a tip. The semantic colour
+   carries the border and the fill only: --warn as body text measures 4.1:1 on
+   the light theme, under AA, so the prose stays on the neutral text token. */
+.guide-note-warn {
+  border-left-color: var(--warn);
+  background: var(--warn-bg);
+}
+
 /* Screenshots are the whole point of a tutorial; they get the full column
    width and open at full size on click. */
 .guide-shot {
