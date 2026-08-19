@@ -15,6 +15,9 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
+# uv colours output when it thinks stdout is a terminal, which PowerShell's
+# capture looks like. Ask for plain text; Remove-AnsiEscape is the fallback.
+$env:NO_COLOR = "1"
 
 $FccRepo = "FiredMosquito831/my-claude-code"
 $FccLatestReleaseUrl = "https://api.github.com/repos/$FccRepo/releases/latest"
@@ -106,6 +109,21 @@ function Invoke-NativeCommand {
     }
 }
 
+function Remove-AnsiEscape {
+    param([string] $Text)
+
+    # uv colours its output when it believes stdout is a terminal. PowerShell's
+    # capture does not look like a pipe to it, while POSIX $(...) does -- which
+    # is why this only ever bit Windows. `uv tool dir --bin` came back as
+    # ESC[36m + path + ESC[39m, so the path was 35 characters where the
+    # directory name is 25: Test-Path failed and every "is this command inside
+    # the tool bin?" comparison could never match.
+    if ([string]::IsNullOrEmpty($Text)) {
+        return $Text
+    }
+    return [regex]::Replace($Text, "\[[0-9;]*[A-Za-z]", "")
+}
+
 function Invoke-NativeCapture {
     param(
         [string] $FilePath,
@@ -121,7 +139,8 @@ function Invoke-NativeCapture {
         throw "Command failed with exit code ${exitCode}: $commandText"
     }
 
-    return ($output | Out-String).Trim()
+    # Strip colour before anything compares or path-tests this value.
+    return (Remove-AnsiEscape (($output | Out-String).Trim())).Trim()
 }
 
 function Get-ApplicationCommand {
@@ -914,12 +933,22 @@ function Write-MccCommandReference {
 function Get-LauncherCommands {
     # Both command families share the tool bin directory, so any of them holds
     # the shim uv must replace.
+    #
+    # This MUST list every name in [project.scripts] and [project.gui-scripts].
+    # It silently fell four features behind -- mcc-desktop, mcc-rtk, mcc-help
+    # and mcc-anthropic-oauth-login -- and a running mcc-desktop was therefore
+    # invisible here. uv then tried to delete a tool environment whose
+    # pythonw.exe was still live, failed with "Access is denied (os error 5)",
+    # and left the install half-removed. A contract test now compares this list
+    # against pyproject so it cannot drift again.
     return @(
         "fcc-server", "fcc-claude", "fcc-claude-old", "fcc-codex", "fcc-pi",
         "fcc-init", "fcc-chatgpt-oauth-login", "fcc-compact-log",
         "free-claude-code",
+        "fcc-anthropic-oauth-login", "fcc-rtk", "fcc-help", "fcc-desktop",
         "mcc-server", "mcc-claude", "mcc-claude-old", "mcc-codex", "mcc-pi",
         "mcc-init", "mcc-chatgpt-oauth-login", "mcc-compact-log",
+        "mcc-anthropic-oauth-login", "mcc-rtk", "mcc-help", "mcc-desktop",
         "my-claude-code"
     )
 }
