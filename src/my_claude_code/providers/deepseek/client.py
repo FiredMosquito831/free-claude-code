@@ -2,6 +2,8 @@
 
 from typing import Any
 
+from loguru import logger
+
 from my_claude_code.core.anthropic.models import MessagesRequest
 from my_claude_code.core.reasoning import DEFAULT_REASONING_POLICY, ReasoningPolicy
 from my_claude_code.providers.base import ProviderConfig
@@ -14,6 +16,10 @@ from my_claude_code.providers.openai_chat import (
 from my_claude_code.providers.rate_limit import ProviderRateLimiter
 
 from .compat import DEEPSEEK_REQUEST_POLICY, build_deepseek_request_body
+from .tool_choice import (
+    clone_body_with_required_tool_choice,
+    is_deepseek_tool_choice_rejection,
+)
 
 _PROFILE = OpenAIChatProfile(
     DEEPSEEK_REQUEST_POLICY,
@@ -41,6 +47,25 @@ class DeepSeekProvider(OpenAIChatProvider):
             request,
             reasoning=reasoning,
         )
+
+    def _get_retry_request_body(self, error: Exception, body: dict) -> dict | None:
+        """Retry once with a forced named tool_choice downgraded to "required".
+
+        DeepSeek's request-level retry hook is called at most once per
+        request (``used_retry_kinds`` in ``OpenAIChatProvider._create_stream``
+        gates the "provider_specific" retry kind), so a second rejection of
+        "required" itself is not recovered -- it propagates as a failure.
+        """
+        if not is_deepseek_tool_choice_rejection(error):
+            return None
+        retry_body = clone_body_with_required_tool_choice(body)
+        if retry_body is None:
+            return None
+        logger.warning(
+            "DEEPSEEK_STREAM: retrying with tool_choice downgraded to 'required' "
+            "after upstream rejection of forced named tool_choice"
+        )
+        return retry_body
 
     def _anthropic_usage_fields(self, usage_info: Any) -> dict[str, int]:
         """Map DeepSeek's hit/miss split onto Anthropic's cache fields.
