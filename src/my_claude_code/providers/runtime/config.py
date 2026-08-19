@@ -41,6 +41,11 @@ def require_provider_credential(
     """Raise a user-facing configuration error when a required key is missing."""
     if descriptor.credential_env is None:
         return
+    if descriptor.credential_discoverable:
+        # The provider finds its own credential (a stored login, or a file
+        # another tool owns), so an empty setting is not an error here. The
+        # provider raises its own, more specific error if discovery fails too.
+        return
     if credential and credential.strip():
         return
     message = f"{descriptor.credential_env} is not set. Add it to your .env file."

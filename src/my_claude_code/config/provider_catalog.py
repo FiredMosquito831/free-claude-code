@@ -9,6 +9,9 @@ from dataclasses import dataclass
 # Default upstream base URLs are owned here with the provider catalog.
 # Anthropic Messages API root. ``/messages`` and ``/models`` hang off this.
 ANTHROPIC_DEFAULT_BASE = "https://api.anthropic.com/v1"
+# Same API, reached with a Claude subscription OAuth credential instead of a
+# Console API key. See docs/ANTHROPIC-SUBSCRIPTION.md before enabling it.
+ANTHROPIC_OAUTH_DEFAULT_BASE = "https://api.anthropic.com/v1"
 NVIDIA_NIM_DEFAULT_BASE = "https://integrate.api.nvidia.com/v1"
 # Moonshot Kimi OpenAI-compatible Chat Completions API.
 KIMI_DEFAULT_BASE = "https://api.moonshot.ai/v1"
@@ -178,6 +181,11 @@ class ProviderDescriptor:
     credential_url: str | None = None
     credential_attr: str | None = None
     static_credential: str | None = None
+    # ``True`` when the credential may legitimately come from somewhere other
+    # than settings -- a login the provider performs itself, or a file another
+    # tool owns. The card still offers the field so a value can be pasted, but
+    # an empty one is not a configuration error.
+    credential_discoverable: bool = False
     default_base_url: str | None = None
     base_url_attr: str | None = None
     proxy_attr: str | None = None
@@ -215,6 +223,27 @@ PROVIDER_CATALOG: dict[str, ProviderDescriptor] = {
         base_url_attr="anthropic_base_url",
         proxy_attr="anthropic_proxy",
         group="direct",
+    ),
+    # Claude subscription (Pro/Max) OAuth. Anthropic's published position is
+    # that these credentials are for Claude Code and Claude.ai only and may not
+    # be routed through a third-party product; this provider does so at the
+    # operator's explicit instruction, and refuses any request that did not
+    # come from the Claude Code CLI. See docs/ANTHROPIC-SUBSCRIPTION.md.
+    "anthropic_oauth": ProviderDescriptor(
+        provider_id="anthropic_oauth",
+        display_name="Anthropic Claude subscription (OAuth, unsupported)",
+        credential_env="ANTHROPIC_OAUTH_ACCESS_TOKEN",
+        credential_url="https://claude.com/pricing",
+        credential_attr="anthropic_oauth_access_token",
+        # The credential normally comes from mcc-anthropic-oauth-login or from
+        # Claude Code's own ~/.claude/.credentials.json, so an empty setting is
+        # not a configuration error -- but the field still exists so a token
+        # can be pasted from the Admin UI.
+        credential_discoverable=True,
+        default_base_url=ANTHROPIC_OAUTH_DEFAULT_BASE,
+        base_url_attr="anthropic_oauth_base_url",
+        proxy_attr="anthropic_oauth_proxy",
+        group="subscription",
     ),
     "nvidia_nim": ProviderDescriptor(
         provider_id="nvidia_nim",

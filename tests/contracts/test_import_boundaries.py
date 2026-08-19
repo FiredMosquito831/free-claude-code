@@ -46,6 +46,13 @@ IMPORT_EXCEPTIONS: dict[tuple[str, str], str] = {
         "Reason: the command delegates to the provider's OAuth login utility."
     ),
     (
+        "my_claude_code.cli.commands",
+        "my_claude_code.providers.anthropic_oauth",
+    ): (
+        "Owner: installed Anthropic subscription OAuth login command. "
+        "Reason: the command delegates to the provider's OAuth login utility."
+    ),
+    (
         "my_claude_code.api.admin_routes",
         "my_claude_code.providers.chatgpt_oauth.oauth_login",
     ): (

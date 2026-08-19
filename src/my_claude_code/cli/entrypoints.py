@@ -39,6 +39,9 @@ Use a coding agent through the proxy:
 Manage and inspect:
   mcc-init                Create or repair ~/.fcc/.env with the config template
   mcc-chatgpt-oauth-login Log in to ChatGPT/Codex via OAuth device flow
+  mcc-anthropic-oauth-login Log in to a Claude subscription via OAuth
+                          (unsupported by Anthropic -- see
+                          docs/ANTHROPIC-SUBSCRIPTION.md)
   mcc-compact-log         Compact the request log (deduplicate + compress)
   mcc-rtk                 Manage the RTK token optimizer
   mcc-help                Show this command reference
@@ -82,6 +85,16 @@ def chatgpt_oauth_login(argv: Sequence[str] | None = None) -> None:
         return
 
     from my_claude_code.cli.commands import chatgpt_oauth_login as run_login
+
+    run_login()
+
+
+def anthropic_oauth_login(argv: Sequence[str] | None = None) -> None:
+    """Log in to a Claude subscription via OAuth (see docs/ANTHROPIC-SUBSCRIPTION.md)."""
+    if _print_version_if_requested(argv):
+        return
+
+    from my_claude_code.cli.commands import anthropic_oauth_login as run_login
 
     run_login()
 

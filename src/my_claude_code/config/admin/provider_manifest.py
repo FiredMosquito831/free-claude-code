@@ -145,6 +145,19 @@ _PROVIDER_FIELD_OVERRIDES: dict[str, dict[str, Any]] = {
             "presents to MCC."
         ),
     },
+    "ANTHROPIC_OAUTH_ACCESS_TOKEN": {
+        "label": "Claude subscription OAuth token (unsupported)",
+        "description": (
+            "**Anthropic does not permit this.** Their terms state Claude Free/Pro/Max "
+            "OAuth credentials are for Claude Code and Claude.ai only and may not be "
+            "routed through a third-party product, and that they may enforce without "
+            "notice — the risk is to your Claude account. Read "
+            "docs/ANTHROPIC-SUBSCRIPTION.md first. Normally left empty: MCC discovers "
+            "the credential from `mcc-anthropic-oauth-login` or from Claude Code's own "
+            "`~/.claude/.credentials.json`. A pasted token cannot be refreshed. The "
+            "supported alternative is the Anthropic API Key field above."
+        ),
+    },
     "COMMANDCODE_API_KEY": {
         "label": "Command Code API Key",
         "description": (

@@ -75,6 +75,7 @@ PROVIDER_SMOKE_DEFAULT_MODELS: dict[str, str] = {
     "nous_portal": "nous_portal/deepseek/deepseek-v4-flash-0731",
     "kilo": "kilo/kilo-auto/balanced",
     "anthropic": "anthropic/claude-sonnet-4-6",
+    "anthropic_oauth": "anthropic_oauth/claude-sonnet-4-6",
     "commandcode": "commandcode/deepseek/deepseek-v4-flash",
     "cline": "cline/anthropic/claude-sonnet-4-6",
     "cerebras": "cerebras/llama3.1-8b",
@@ -335,6 +336,13 @@ class SmokeConfig:
             return bool(getattr(self.settings, "nous_api_key", "").strip())
         if provider == "kilo":
             return bool(getattr(self.settings, "kilo_api_key", "").strip())
+        if provider == "anthropic_oauth":
+            # Explicit setting only. Probing the filesystem for a discovered
+            # credential would make this answer depend on whether the machine
+            # running the suite happens to be logged in to Claude Code.
+            return bool(
+                getattr(self.settings, "anthropic_oauth_access_token", "").strip()
+            )
         if provider == "anthropic":
             return bool(getattr(self.settings, "anthropic_api_key", "").strip())
         if provider == "commandcode":

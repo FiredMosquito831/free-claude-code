@@ -82,6 +82,22 @@ def _create_anthropic(
     return AnthropicProvider(config, rate_limiter=rate_limiter)
 
 
+def _create_anthropic_oauth(
+    config: ProviderConfig,
+    settings: Settings,
+    rate_limiter: ProviderRateLimiter,
+) -> BaseProvider:
+    from my_claude_code.providers.anthropic_oauth import AnthropicOAuthProvider
+
+    return AnthropicOAuthProvider(
+        config,
+        rate_limiter=rate_limiter,
+        require_claude_code_cli=bool(
+            getattr(settings, "anthropic_oauth_require_claude_code", True)
+        ),
+    )
+
+
 def _create_commandcode(
     config: ProviderConfig,
     _settings: Settings,
@@ -201,6 +217,7 @@ _SPECIAL_PROVIDER_FACTORIES: dict[str, ProviderFactory] = {
     "nous_portal": _create_nous_portal,
     "kilo": _create_kilo,
     "anthropic": _create_anthropic,
+    "anthropic_oauth": _create_anthropic_oauth,
     "commandcode": _create_commandcode,
     "mistral": _create_mistral,
     "deepseek": _create_deepseek,
