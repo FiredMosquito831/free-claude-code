@@ -202,3 +202,61 @@ def test_docs_say_a_blank_limit_falls_back_to_its_default() -> None:
         lowered = text.lower()
         assert "blank" in lowered, f"{name} never mentions a blank value"
         assert "default" in lowered, f"{name} does not say blank means the default"
+
+
+# ---------------------------------------------------------------------------
+# The Anthropic subscription disclaimer
+#
+# This one is not a label check. ``anthropic_oauth`` uses a credential in a way
+# Anthropic's published terms forbid, and the only thing standing between a
+# user and an account-level consequence is that the docs say so. A future edit
+# that trims the warning for brevity, or renames the doc without updating the
+# links, would leave the provider shipped and the disclaimer gone -- which is
+# exactly the drift every other guard in this file exists to stop.
+# ---------------------------------------------------------------------------
+
+
+def test_the_subscription_disclaimer_exists_and_says_it_is_not_permitted() -> None:
+    repo_root = Path(__file__).resolve().parents[2]
+    doc = repo_root / "docs" / "ANTHROPIC-SUBSCRIPTION.md"
+
+    assert doc.is_file(), (
+        "docs/ANTHROPIC-SUBSCRIPTION.md is the disclaimer for anthropic_oauth"
+    )
+    text = doc.read_text(encoding="utf-8")
+
+    # The claim itself, and the misconception it exists to correct.
+    assert "does not permit" in text
+    assert "cc_entrypoint=cli" in text
+    assert "ANTHROPIC_OAUTH_REQUIRE_CLAUDE_CODE" in text
+    # The supported alternative must stay named, or the warning has no exit.
+    assert "ANTHROPIC_API_KEY" in text
+    # The primary source, so a reader can check rather than trust us.
+    assert "code.claude.com/docs/en/legal-and-compliance" in text
+
+
+def test_the_docs_that_offer_the_provider_link_the_disclaimer() -> None:
+    """Anywhere anthropic_oauth is offered must point at the warning."""
+    repo_root = Path(__file__).resolve().parents[2]
+
+    for relative in ("README.md", "docs/USAGE.md"):
+        text = (repo_root / relative).read_text(encoding="utf-8")
+        if "anthropic_oauth" not in text and "Claude subscription" not in text:
+            continue
+        assert "ANTHROPIC-SUBSCRIPTION.md" in text, (
+            f"{relative} offers the subscription provider without linking the disclaimer"
+        )
+
+
+def test_the_guide_warns_before_it_explains() -> None:
+    """The in-dashboard Guide carries the warning, not just the repo docs."""
+    repo_root = Path(__file__).resolve().parents[2]
+    html = (repo_root / "src/my_claude_code/api/admin_static/index.html").read_text(
+        encoding="utf-8"
+    )
+
+    assert 'id="guide-claude-models"' in html
+    assert "not permitted by" in html
+    assert "cc_entrypoint=cli" in html
+    # Rendered as a warning, not as ordinary prose.
+    assert "guide-note-warn" in html
