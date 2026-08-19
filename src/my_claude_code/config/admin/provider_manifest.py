@@ -416,6 +416,7 @@ def provider_field_specs() -> tuple[dict[str, Any], ...]:
         *_rotation_field_specs(),
         *_chatgpt_oauth_login_field_specs(),
         *_chatgpt_oauth_account_field_specs(),
+        *_anthropic_oauth_login_field_specs(),
         *_cloudflare_account_field_specs(),
         *_vertex_field_specs(),
         *_base_url_field_specs(),
@@ -591,6 +592,25 @@ def _chatgpt_oauth_login_field_specs() -> tuple[dict[str, Any], ...]:
                 "Experimental/unsanctioned: if you have already run 'codex login', "
                 "copy its renewable credentials into MCC's private auth store. "
                 "The Codex CLI file remains unchanged."
+            ),
+        },
+    )
+
+
+def _anthropic_oauth_login_field_specs() -> tuple[dict[str, Any], ...]:
+    return (
+        {
+            "key": "ANTHROPIC_OAUTH_MANAGE",
+            "label": "Claude Subscription Credential",
+            "section_id": "providers",
+            "provider": "anthropic_oauth",
+            "field_type": "oauth_login",
+            "description": (
+                "Anthropic does not permit this: read "
+                "docs/ANTHROPIC-SUBSCRIPTION.md before using either option. "
+                "Import the credential Claude Code already has, or sign in "
+                "directly; either way MCC stores its own renewable copy and "
+                "never writes back to Claude Code's credential file."
             ),
         },
     )

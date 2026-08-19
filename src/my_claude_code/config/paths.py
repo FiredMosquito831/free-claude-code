@@ -14,6 +14,7 @@ SERVER_LOG_FILENAME = "server.log"
 CODEX_MODEL_CATALOG_FILENAME = "codex-model-catalog.json"
 AUTH_DIRNAME = "auth"
 CHATGPT_OAUTH_AUTH_FILENAME = "chatgpt-oauth.json"
+ANTHROPIC_OAUTH_MANAGED_STORE_FILENAME = "anthropic_oauth.json"
 CLAUDE_CONFIG_DIRNAME = ".claude"
 CLAUDE_SETTINGS_FILENAME = "settings.json"
 ONBOARDING_STATE_FILENAME = "onboarding.json"
@@ -75,6 +76,12 @@ def chatgpt_oauth_auth_path() -> Path:
     """Return FCC's private renewable ChatGPT OAuth credential path."""
 
     return config_dir_path() / AUTH_DIRNAME / CHATGPT_OAUTH_AUTH_FILENAME
+
+
+def anthropic_oauth_managed_store_path() -> Path:
+    """Return FCC's private renewable Claude subscription OAuth credential path."""
+
+    return config_dir_path() / ANTHROPIC_OAUTH_MANAGED_STORE_FILENAME
 
 
 def claude_settings_path() -> Path:

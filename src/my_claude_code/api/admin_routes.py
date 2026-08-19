@@ -35,7 +35,11 @@ from my_claude_code.config.claude_settings import (
     read_status,
 )
 from my_claude_code.config.constants import (
+    ANTHROPIC_OAUTH_MANAGED_CREDENTIAL_REFERENCE,
     CHATGPT_OAUTH_MANAGED_CREDENTIAL_REFERENCE,
+)
+from my_claude_code.config.credentials import (
+    mask_key_label as mask_credential_label,
 )
 from my_claude_code.config.credentials import parse_credential_keys
 from my_claude_code.config.desktop import (
@@ -80,6 +84,24 @@ from my_claude_code.config.websearch_catalog import (
     WebSearchDescriptor,
 )
 from my_claude_code.core.request_log import RequestLogStore, store_from_settings
+from my_claude_code.providers.anthropic_oauth.credentials import (
+    OAuthTokens,
+    claude_credentials_path,
+    load_claude_code_tokens,
+    load_managed_tokens,
+)
+from my_claude_code.providers.anthropic_oauth.credentials import (
+    store_tokens as store_anthropic_oauth_tokens,
+)
+from my_claude_code.providers.anthropic_oauth.oauth_login import (
+    AnthropicOAuthLoginError,
+    build_authorize_url,
+    generate_pkce_verifier,
+    split_pasted_code,
+)
+from my_claude_code.providers.anthropic_oauth.oauth_login import (
+    exchange_code as exchange_anthropic_oauth_code,
+)
 from my_claude_code.providers.chatgpt_oauth.browser_login import (
     ChatGPTOAuthBrowserUnavailableError,
     browser_login_status,
@@ -1200,6 +1222,125 @@ async def chatgpt_oauth_import_codex(request: Request):
         credential_reference=CHATGPT_OAUTH_MANAGED_CREDENTIAL_REFERENCE,
         account_id=credentials.account_id,
         message="Copied renewable Codex credentials into MCC's private store.",
+    )
+
+
+class _AnthropicOAuthSourceInfo(BaseModel):
+    available: bool
+    masked_token: str = ""
+    expires_at: int | None = None
+    subscription_type: str | None = None
+
+
+class _AnthropicOAuthSourcesResponse(BaseModel):
+    claude_code: _AnthropicOAuthSourceInfo
+    mcc: _AnthropicOAuthSourceInfo
+
+
+def _anthropic_oauth_source_info(
+    tokens: OAuthTokens | None,
+) -> _AnthropicOAuthSourceInfo:
+    if tokens is None:
+        return _AnthropicOAuthSourceInfo(available=False)
+    return _AnthropicOAuthSourceInfo(
+        available=True,
+        masked_token=mask_credential_label(tokens.access_token),
+        expires_at=tokens.expires_at,
+        subscription_type=tokens.subscription_type,
+    )
+
+
+@router.get("/admin/api/anthropic-oauth/sources")
+async def anthropic_oauth_sources(request: Request):
+    """Report which Claude subscription credential sources are available.
+
+    Never reads or returns a raw token: only masked labels and expiry.
+    """
+    require_loopback_admin(request)
+    claude_code_tokens = await asyncio.to_thread(load_claude_code_tokens)
+    mcc_tokens = await asyncio.to_thread(load_managed_tokens)
+    return _AnthropicOAuthSourcesResponse(
+        claude_code=_anthropic_oauth_source_info(claude_code_tokens),
+        mcc=_anthropic_oauth_source_info(mcc_tokens),
+    )
+
+
+class _AnthropicOAuthImportResponse(BaseModel):
+    status: str
+    credential_reference: str = ""
+    subscription_type: str | None = None
+    message: str = ""
+
+
+@router.post("/admin/api/anthropic-oauth/import-claude-code")
+async def anthropic_oauth_import_claude_code(request: Request):
+    """Copy Claude Code's own OAuth credential into MCC's private store.
+
+    Read-only against ``~/.claude/.credentials.json``: this only reads that
+    file and writes MCC's own managed store. Claude Code's file is never
+    written to and never refreshed in place.
+    """
+    require_loopback_admin(request)
+    tokens = await asyncio.to_thread(load_claude_code_tokens)
+    if tokens is None:
+        raise HTTPException(
+            status_code=400,
+            detail=f"No Claude Code credential found at {claude_credentials_path()}",
+        )
+    await asyncio.to_thread(store_anthropic_oauth_tokens, tokens)
+    return _AnthropicOAuthImportResponse(
+        status="complete",
+        credential_reference=ANTHROPIC_OAUTH_MANAGED_CREDENTIAL_REFERENCE,
+        subscription_type=tokens.subscription_type,
+        message="Copied Claude Code's credential into MCC's private store.",
+    )
+
+
+class _AnthropicOAuthInitiateResponse(BaseModel):
+    authorize_url: str
+    verifier: str
+
+
+@router.post("/admin/api/anthropic-oauth/initiate")
+async def anthropic_oauth_initiate(request: Request):
+    """Start a Claude subscription OAuth login (PKCE, paste-code flow)."""
+    require_loopback_admin(request)
+    verifier = generate_pkce_verifier()
+    return _AnthropicOAuthInitiateResponse(
+        authorize_url=build_authorize_url(verifier),
+        verifier=verifier,
+    )
+
+
+class _AnthropicOAuthCompleteRequest(BaseModel):
+    pasted_code: str
+    verifier: str
+
+
+class _AnthropicOAuthCompleteResponse(BaseModel):
+    status: str
+    credential_reference: str = ""
+    subscription_type: str | None = None
+    message: str = ""
+
+
+@router.post("/admin/api/anthropic-oauth/complete")
+async def anthropic_oauth_complete(
+    payload: _AnthropicOAuthCompleteRequest,
+    request: Request,
+):
+    """Finish a Claude subscription OAuth login with the pasted code."""
+    require_loopback_admin(request)
+    code, state = split_pasted_code(payload.pasted_code)
+    try:
+        tokens = await exchange_anthropic_oauth_code(code, payload.verifier, state)
+    except AnthropicOAuthLoginError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return _AnthropicOAuthCompleteResponse(
+        status="complete",
+        credential_reference=ANTHROPIC_OAUTH_MANAGED_CREDENTIAL_REFERENCE,
+        subscription_type=tokens.subscription_type,
+        message="Signed in. Credential stored in MCC's private store.",
     )
 
 

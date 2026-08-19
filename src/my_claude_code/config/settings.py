@@ -8,6 +8,7 @@ from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from .constants import (
+    ANTHROPIC_OAUTH_MANAGED_CREDENTIAL_REFERENCE,
     CHATGPT_OAUTH_MANAGED_CREDENTIAL_REFERENCE,
     CREDENTIAL_CIRCUIT_THRESHOLD_DEFAULT,
     DESKTOP_ACTIVATION_POLL_SECONDS_DEFAULT,
@@ -42,7 +43,7 @@ from .env_files import (
 from .limits import LIMIT_RANGES
 from .model_refs import format_model_ref_list, parse_model_ref_list
 from .nim import NimSettings
-from .paths import chatgpt_oauth_auth_path
+from .paths import anthropic_oauth_managed_store_path, chatgpt_oauth_auth_path
 from .provider_registry import get_provider_registry
 from .reasoning import ReasoningPreference
 from .websearch_catalog import SUPPORTED_WEBSEARCH_PROVIDER_IDS
@@ -1043,6 +1044,17 @@ class Settings(BaseSettings):
             return self
         if chatgpt_oauth_auth_path().is_file():
             self.chatgpt_oauth_access_token = CHATGPT_OAUTH_MANAGED_CREDENTIAL_REFERENCE
+        return self
+
+    @model_validator(mode="after")
+    def reference_managed_anthropic_oauth_credentials(self) -> Settings:
+        """Mark an FCC-owned Claude subscription credential without loading secrets."""
+        if self.anthropic_oauth_access_token.strip():
+            return self
+        if anthropic_oauth_managed_store_path().is_file():
+            self.anthropic_oauth_access_token = (
+                ANTHROPIC_OAUTH_MANAGED_CREDENTIAL_REFERENCE
+            )
         return self
 
     @model_validator(mode="after")

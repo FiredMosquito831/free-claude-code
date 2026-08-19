@@ -54,6 +54,22 @@ IMPORT_EXCEPTIONS: dict[tuple[str, str], str] = {
     ),
     (
         "my_claude_code.api.admin_routes",
+        "my_claude_code.providers.anthropic_oauth.credentials",
+    ): (
+        "Owner: admin dashboard Anthropic subscription OAuth API. "
+        "Reason: admin routes expose Claude Code import and credential-source "
+        "endpoints backed by the provider utility."
+    ),
+    (
+        "my_claude_code.api.admin_routes",
+        "my_claude_code.providers.anthropic_oauth.oauth_login",
+    ): (
+        "Owner: admin dashboard Anthropic subscription OAuth login API. "
+        "Reason: admin routes expose PKCE login endpoints backed by the "
+        "provider utility."
+    ),
+    (
+        "my_claude_code.api.admin_routes",
         "my_claude_code.providers.chatgpt_oauth.oauth_login",
     ): (
         "Owner: admin dashboard ChatGPT OAuth login API. "
