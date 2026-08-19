@@ -17,6 +17,11 @@ pytest.importorskip("pystray")
 from my_claude_code.cli.desktop import DesktopController
 from my_claude_code.cli.desktop_tray import PystrayDesktopTray
 from my_claude_code.config import rtk as rtk_config
+from my_claude_code.config.desktop import (
+    load_desktop_state,
+    set_start_at_login,
+    set_tray_enabled,
+)
 from my_claude_code.config.rtk import RtkState, load_rtk_state
 
 
@@ -122,6 +127,31 @@ def test_toggling_does_not_disturb_other_agents(monkeypatch, tmp_path):
     assert applied == [RtkState(claude=True, codex=False, pi=True)]
 
 
+def test_toggle_survives_concurrent_external_write(monkeypatch, tmp_path):
+    """A lost-update regression test.
+
+    Simulates the admin HTTP API (a separate process) enabling ``codex`` on
+    disk *after* the tray already cached state at construction time, then
+    toggling ``claude`` through the tray. The externally-written ``codex``
+    value must survive, and the tray's own cache must reflect the fresh
+    disk state (not the stale snapshot) afterward.
+    """
+
+    tray, applied = _patched_tray(monkeypatch, tmp_path)
+
+    # External writer (e.g. the admin API) changes codex after tray startup,
+    # while the tray's cache still holds the all-False snapshot from init.
+    rtk_config.save_rtk_state(RtkState(claude=False, codex=True, pi=False))
+
+    submenu = _token_optimizer_menu(tray)
+    _toggle(tray, _agent_item(submenu, "Claude Code"))
+
+    assert load_rtk_state() == RtkState(claude=True, codex=True, pi=False)
+    assert applied == [RtkState(claude=True, codex=True, pi=False)]
+    # The in-memory cache backing the checkmarks must be refreshed too.
+    assert tray._rtk_state == {"claude": True, "codex": True, "pi": False}
+
+
 def test_checked_reflects_persisted_state(monkeypatch, tmp_path):
     _set_home(monkeypatch, tmp_path)
     rtk_config.save_rtk_state(RtkState(claude=True, codex=False, pi=True))
@@ -131,3 +161,49 @@ def test_checked_reflects_persisted_state(monkeypatch, tmp_path):
     checks = {item.text: item.checked for item in submenu.items}
 
     assert checks == {"Claude Code": True, "Codex": False, "Pi": True}
+
+
+def _real_state_tray(monkeypatch, tmp_path):
+    """Build a tray against the real desktop-state file under a temp home."""
+    _set_home(monkeypatch, tmp_path)
+    monkeypatch.setattr(
+        "my_claude_code.cli.desktop_tray.apply_rtk_state",
+        lambda state, **kwargs: None,
+    )
+    controller = cast(
+        DesktopController, type("Controller", (), {"status": "running"})()
+    )
+    return PystrayDesktopTray(controller)
+
+
+def test_start_at_login_toggle_reads_disk_not_the_stale_cache(monkeypatch, tmp_path):
+    """An externally changed field must toggle in the right direction.
+
+    The tray caches desktop state at construction. If the dashboard enables
+    "start at login" afterwards, a tray toggle computed from the stale cache
+    flips False -> True and writes True, which disk already holds: the click
+    appears to do nothing. Deriving the new value from disk flips it off.
+    """
+
+    tray = _real_state_tray(monkeypatch, tmp_path)
+    assert load_desktop_state().start_at_login is False
+
+    # The dashboard (another process) turns it on after the tray started.
+    set_start_at_login(True)
+
+    tray._toggle_start_at_login(None, None)
+
+    assert load_desktop_state().start_at_login is False
+    assert tray._start_at_login is False
+
+
+def test_tray_enabled_toggle_reads_disk_not_the_stale_cache(monkeypatch, tmp_path):
+    tray = _real_state_tray(monkeypatch, tmp_path)
+    assert load_desktop_state().tray_enabled is True
+
+    set_tray_enabled(False)
+
+    tray._toggle_tray_enabled(None, None)
+
+    assert load_desktop_state().tray_enabled is True
+    assert tray._tray_enabled is True
