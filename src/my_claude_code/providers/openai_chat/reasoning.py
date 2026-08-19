@@ -96,6 +96,58 @@ class ThinkingObjectReasoning:
 
 
 @dataclass(frozen=True, slots=True)
+class EffortOrThinkingBudgetReasoning:
+    """Encode providers whose named-effort and numeric-budget fields are
+    mutually exclusive on the wire.
+
+    Some OpenAI-compatible gateways expose two reasoning knobs that the
+    vendor's own API rejects together in one request: a string enum
+    ``reasoning_effort`` field, and a separate ``thinking`` object carrying
+    an exact ``budget_tokens`` integer. This encoder picks exactly one shape
+    per request and never emits both:
+
+    - An explicit client ``budget_tokens`` always wins and is sent as
+      ``{"type": "enabled", "budget_tokens": N}`` under ``thinking_field``,
+      clamped up to ``min_budget_tokens`` (never down, per the vendor's
+      documented floor). ``field`` is omitted entirely.
+    - Otherwise a named effort is translated through ``efforts`` into
+      ``field`` (typically ``reasoning_effort``). ``thinking_field`` is
+      omitted entirely.
+    - With no effort or budget but reasoning explicitly ``ON``,
+      ``enabled_value`` (if set) is sent through ``field``.
+    - Reasoning explicitly ``OFF`` sends ``{"type": "disabled"}`` under
+      ``thinking_field`` and never sets ``field``.
+    """
+
+    efforts: EffortValues
+    field: str = "reasoning_effort"
+    thinking_field: str = "thinking"
+    enabled_value: str | None = None
+    min_budget_tokens: int = 1024
+
+    def encode(self, body: dict[str, Any], policy: ReasoningPolicy) -> None:
+        if policy.control is ReasoningControl.OFF:
+            _extra_body(body)[self.thinking_field] = {"type": "disabled"}
+            return
+
+        if policy.budget_tokens is not None:
+            budget = max(self.min_budget_tokens, policy.budget_tokens)
+            _extra_body(body)[self.thinking_field] = {
+                "type": "enabled",
+                "budget_tokens": budget,
+            }
+            return
+
+        effort = dict(self.efforts).get(policy.effort)
+        if effort is not None:
+            body[self.field] = effort
+            return
+
+        if policy.control is ReasoningControl.ON and self.enabled_value is not None:
+            body[self.field] = self.enabled_value
+
+
+@dataclass(frozen=True, slots=True)
 class ChatTemplateReasoning:
     """Encode a provider-wide chat-template boolean without model guessing."""
 

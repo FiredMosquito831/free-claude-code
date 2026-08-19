@@ -22,6 +22,7 @@ from .reasoning import (
     NO_REASONING,
     SPLIT_REASONING_OUTPUT,
     ChatTemplateReasoning,
+    EffortOrThinkingBudgetReasoning,
     NamedEffortReasoning,
     ReasoningEncoder,
     ReasoningObject,
@@ -339,18 +340,16 @@ OPENAI_CHAT_PROFILES: dict[str, OpenAIChatProfile] = {
             extra_body_validator=validate_extra_body_does_not_override_canonical_fields,
             default_max_tokens=ANTHROPIC_DEFAULT_MAX_OUTPUT_TOKENS,
         ),
-        NamedEffortReasoning(
+        EffortOrThinkingBudgetReasoning(
             (
                 (ReasoningEffort.MINIMAL, "low"),
                 (ReasoningEffort.LOW, "low"),
                 (ReasoningEffort.MEDIUM, "medium"),
                 (ReasoningEffort.HIGH, "high"),
-                (ReasoningEffort.XHIGH, "xhigh"),
-                (ReasoningEffort.MAX, "max"),
+                (ReasoningEffort.XHIGH, "high"),
+                (ReasoningEffort.MAX, "high"),
             ),
-            disabled_value="none",
             enabled_value="high",
-            budget_field="reasoning_effort",
         ),
     ),
     "novita": OpenAIChatProfile(
