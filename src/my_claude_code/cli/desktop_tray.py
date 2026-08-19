@@ -166,11 +166,17 @@ class PystrayDesktopTray:
         self._set_server_mode("off")
 
     def _toggle_start_at_login(self, _icon: Icon, _item: MenuItem) -> None:
-        self._start_at_login = not self._start_at_login
+        # Flip the value on disk, not the cached one: another process may have
+        # changed this field since the tray started, and toggling a stale
+        # value computes the wrong direction (the click then appears to do
+        # nothing). set_start_at_login itself preserves the other fields.
+        self._start_at_login = not load_desktop_state().start_at_login
         set_start_at_login(self._start_at_login)
 
     def _toggle_tray_enabled(self, _icon: Icon, _item: MenuItem) -> None:
-        self._tray_enabled = not self._tray_enabled
+        # Same reasoning as _toggle_start_at_login: derive the new value from
+        # persisted state so an externally changed field toggles correctly.
+        self._tray_enabled = not load_desktop_state().tray_enabled
         set_tray_enabled(self._tray_enabled)
 
     def _rtk_checked(self, _item: MenuItem, agent: str) -> bool:
@@ -186,14 +192,20 @@ class PystrayDesktopTray:
         self._toggle_rtk_agent("pi")
 
     def _toggle_rtk_agent(self, agent: str) -> None:
-        self._rtk_state[agent] = not self._rtk_state[agent]
-        state = RtkState(
-            claude=self._rtk_state["claude"],
-            codex=self._rtk_state["codex"],
-            pi=self._rtk_state["pi"],
-        )
+        # Re-read from disk instead of writing from the in-memory cache: the
+        # tray and the admin HTTP API are separate processes that both
+        # persist RtkState to the same file, and the tray's cache can be
+        # stale relative to a change the API made after the tray started.
+        # Writing all three fields reconstructed from a stale cache would
+        # silently revert whatever the other process last wrote. Do not
+        # "optimise" this back into a cached write.
+        fresh = load_rtk_state()
+        rtk_values = {"claude": fresh.claude, "codex": fresh.codex, "pi": fresh.pi}
+        rtk_values[agent] = not rtk_values[agent]
+        state = RtkState(**rtk_values)
         save_rtk_state(state)
         apply_rtk_state(state)
+        self._rtk_state = rtk_values
 
     def _quit(self, _icon: Icon, _item: MenuItem) -> None:
         self._controller.quit()
