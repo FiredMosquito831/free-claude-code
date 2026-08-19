@@ -6,7 +6,7 @@ token. See ``docs/ANTHROPIC-SUBSCRIPTION.md`` for why the subscription OAuth
 credential is a separate provider with its own warning.
 """
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from typing import Any
 
 import httpx
@@ -39,6 +39,7 @@ class AnthropicProvider(BaseProvider):
         auth: AnthropicMessagesAuth | None = None,
         provider_name: str = PROVIDER_NAME,
         extra_headers: dict[str, str] | None = None,
+        body_transform: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
     ) -> None:
         super().__init__(config)
         self._provider_name = provider_name
@@ -52,6 +53,7 @@ class AnthropicProvider(BaseProvider):
             rate_limiter=rate_limiter,
             auth=self._auth,
             extra_headers=self._extra_headers,
+            body_transform=body_transform,
         )
         self._client = httpx.AsyncClient(
             proxy=config.proxy or None,

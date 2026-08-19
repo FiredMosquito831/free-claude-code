@@ -389,6 +389,15 @@ def chatgpt_oauth_login() -> None:
     chatgpt_oauth_login_command()
 
 
+def anthropic_oauth_login() -> None:
+    """Run the Claude subscription OAuth (PKCE) login."""
+    from my_claude_code.providers.anthropic_oauth import (
+        anthropic_oauth_login_command,
+    )
+
+    anthropic_oauth_login_command()
+
+
 def compact_log() -> None:
     """Rewrite an existing request log into deduplicated compressed bodies."""
     from my_claude_code.core.request_log import (

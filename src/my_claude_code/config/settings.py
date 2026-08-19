@@ -134,6 +134,23 @@ class Settings(BaseSettings):
         default="", validation_alias="ANTHROPIC_UPSTREAM_BASE_URL"
     )
 
+    # ============ Anthropic Claude subscription (OAuth) ============
+    # Optional: the credential is normally discovered from MCC's own store or
+    # from ~/.claude/.credentials.json, so this stays empty for most setups.
+    anthropic_oauth_access_token: str = Field(
+        default="", validation_alias="ANTHROPIC_OAUTH_ACCESS_TOKEN"
+    )
+    anthropic_oauth_base_url: str = Field(
+        default="", validation_alias="ANTHROPIC_OAUTH_UPSTREAM_BASE_URL"
+    )
+    # Refuse any request that did not come from the Claude Code CLI. Turning
+    # this off routes Agent SDK and other harness traffic onto the
+    # subscription credential, which is the case Anthropic's policy names
+    # explicitly. See docs/ANTHROPIC-SUBSCRIPTION.md.
+    anthropic_oauth_require_claude_code: bool = Field(
+        default=True, validation_alias="ANTHROPIC_OAUTH_REQUIRE_CLAUDE_CODE"
+    )
+
     # ==================== Nous Portal Config ====================
     nous_api_key: str = Field(default="", validation_alias="NOUS_API_KEY")
 
@@ -455,6 +472,9 @@ class Settings(BaseSettings):
     nous_proxy: str = Field(default="", validation_alias="NOUS_PROXY")
     kilo_proxy: str = Field(default="", validation_alias="KILO_PROXY")
     anthropic_proxy: str = Field(default="", validation_alias="ANTHROPIC_PROXY")
+    anthropic_oauth_proxy: str = Field(
+        default="", validation_alias="ANTHROPIC_OAUTH_PROXY"
+    )
     commandcode_proxy: str = Field(default="", validation_alias="COMMANDCODE_PROXY")
     cline_proxy: str = Field(default="", validation_alias="CLINE_PROXY")
     alibaba_proxy: str = Field(default="", validation_alias="ALIBABA_PROXY")

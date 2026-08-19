@@ -2,7 +2,7 @@
 
 import asyncio
 import sys
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from typing import Any
 
 import httpx
@@ -37,6 +37,7 @@ class AnthropicMessagesProvider(BaseProvider):
         rate_limiter: ProviderRateLimiter,
         auth: AnthropicMessagesAuth | None = None,
         extra_headers: dict[str, str] | None = None,
+        body_transform: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
     ) -> None:
         super().__init__(config)
         self._provider_name = provider_name
@@ -45,6 +46,9 @@ class AnthropicMessagesProvider(BaseProvider):
         # upstreams with a different credential contract inject their own.
         self._auth = auth if auth is not None else BearerTokenAuth(config.api_key)
         self._extra_headers = dict(extra_headers or {})
+        # Applied to the serialized body just before it goes upstream, for
+        # upstreams whose wire format differs from the canonical one.
+        self._body_transform = body_transform
         self._rate_limiter = rate_limiter
         self._client = httpx.AsyncClient(
             proxy=config.proxy or None,
@@ -124,6 +128,8 @@ class AnthropicMessagesProvider(BaseProvider):
         tag = self._provider_name
         req_tag = f" request_id={request_id}" if request_id else ""
         body = build_anthropic_messages_body(request, reasoning=reasoning)
+        if self._body_transform is not None:
+            body = self._body_transform(body)
         trace_event(
             stage="provider",
             event="provider.request.sent",

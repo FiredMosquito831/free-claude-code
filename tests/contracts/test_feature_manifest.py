@@ -4,6 +4,7 @@ from pathlib import Path
 from my_claude_code.config.provider_catalog import PROVIDER_CATALOG
 from my_claude_code.messaging.platforms.factory import create_messaging_components
 from my_claude_code.providers.anthropic import AnthropicProvider
+from my_claude_code.providers.anthropic_oauth import AnthropicOAuthProvider
 from my_claude_code.providers.base import BaseProvider
 from my_claude_code.providers.chatgpt_oauth import ChatGPTOAuthProvider
 from my_claude_code.providers.cloudflare import CloudflareProvider
@@ -97,6 +98,7 @@ def test_product_coverage_is_not_satisfied_by_prereq_probes() -> None:
 def test_provider_and_platform_registries_include_advertised_builtins() -> None:
     specialized_provider_classes = {
         "anthropic": AnthropicProvider,
+        "anthropic_oauth": AnthropicOAuthProvider,
         "nvidia_nim": NvidiaNimProvider,
         "open_router": OpenRouterProvider,
         "nous_portal": NousPortalProvider,
