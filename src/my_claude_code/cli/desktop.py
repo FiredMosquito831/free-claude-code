@@ -28,7 +28,7 @@ from my_claude_code.cli.port_diagnostics import (
     probe_port_available,
 )
 from my_claude_code.config.claude_discovery import native_origin
-from my_claude_code.config.desktop import load_desktop_state
+from my_claude_code.config.desktop import load_desktop_state, set_window_open
 from my_claude_code.config.paths import config_dir_path
 from my_claude_code.config.server_urls import local_admin_url, local_proxy_root_url
 from my_claude_code.config.settings import get_settings
@@ -339,8 +339,10 @@ class DesktopController:
         if window is None:
             return
         if window.is_open and window.focus():
+            set_window_open(True)
             return
         window.open(local_admin_url(get_settings()))
+        set_window_open(True)
 
     def close_window(self) -> None:
         """Close the window only.
@@ -353,6 +355,7 @@ class DesktopController:
         window = self._window
         if window is not None:
             window.close()
+        set_window_open(False)
 
     def handle_window_closed(self) -> bool:
         """Return True when the app should keep running after a window close.
@@ -360,10 +363,19 @@ class DesktopController:
         ``minimize_to_tray`` is the user's answer to "did closing the window
         mean quit?". With a tray to fall back to, closing hides the window;
         with no tray, closing is the only way out, so it ends the app.
+
+        Only a close that the app SURVIVES records "no window". When the close
+        ends the app -- the default, since ``minimize_to_tray`` is off -- the
+        user's last intent was an app with a window, so the state is left
+        alone. Recording it either way would mean the ordinary act of closing
+        the app stopped it ever opening a window again.
         """
 
         state = load_desktop_state()
-        return state.minimize_to_tray and state.tray_enabled
+        keep_running = state.minimize_to_tray and state.tray_enabled
+        if keep_running:
+            set_window_open(False)
+        return keep_running
 
     # -- health monitor ----------------------------------------------------
 
@@ -555,7 +567,8 @@ def launch_desktop(
     )
     try:
         controller.ensure_server()
-        controller.show_window()
+        if state.window_open:
+            controller.show_window()
         controller.start_health_monitor(
             lambda: notify(SERVER_DOWN_NOTIFICATION),
             on_recovered=lambda: notify(SERVER_RECOVERED_NOTIFICATION),

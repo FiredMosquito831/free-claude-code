@@ -17,6 +17,7 @@ here ever presents a ``file://`` origin, because the admin API's
 ``require_loopback_admin`` rejects one with a 403.
 """
 
+import json
 import logging
 import subprocess
 import sys
@@ -29,6 +30,8 @@ from my_claude_code.config.desktop import (
     WINDOW_PREFERENCES,
     WindowPreference,
     chromium_binary,
+    load_desktop_state,
+    record_applied_window_size,
 )
 from my_claude_code.config.paths import config_dir_path
 from my_claude_code.config.settings import get_settings
@@ -68,6 +71,27 @@ class DesktopWindow(Protocol):
 # crossing into ``cli`` (see ``tests/contracts/test_import_boundaries.py``).
 
 
+def _has_remembered_window_placement(profile_dir: Path) -> bool:
+    """Best-effort check for a Chromium-remembered window placement.
+
+    Chromium records the last window geometry in ``<profile>/Default/Preferences``
+    under the ``browser.window_placement`` key once the user has actually shown
+    a window in that profile. A missing file (first run), an unreadable file,
+    or malformed JSON must all read as "no memory yet" rather than raise --
+    this is a best-effort read, not a schema-validated one.
+    """
+
+    prefs_path = profile_dir / "Default" / "Preferences"
+    try:
+        data = json.loads(prefs_path.read_text(encoding="utf-8"))
+    except OSError, ValueError, TypeError:
+        return False
+    if not isinstance(data, dict):
+        return False
+    browser = data.get("browser")
+    return isinstance(browser, dict) and "window_placement" in browser
+
+
 class AppModeWindow:
     """A dedicated Chrome/Edge/Brave window launched with ``--app``.
 
@@ -91,15 +115,39 @@ class AppModeWindow:
         binary = chromium_binary()
         return None if binary is None else cls(binary)
 
-    def command(self, url: str) -> list[str]:
+    def _pending_window_size(self) -> tuple[int, int] | None:
+        """Return the size to force this launch, or ``None`` to defer to Chromium.
+
+        Chromium already persists window geometry per profile in
+        ``<profile>/Default/Preferences``. Passing ``--window-size`` on every
+        launch would overwrite that memory the moment the user resizes or
+        moves the window, so it is only forced on the profile's first run
+        (no remembered placement yet) or when the configured size has
+        actually changed since we last forced it -- a config change is
+        expected to take effect even after the user has resized the window.
+        """
+
         settings = get_settings()
+        width, height = settings.desktop_window_width, settings.desktop_window_height
+        if not _has_remembered_window_placement(self._profile_dir):
+            return width, height
+        state = load_desktop_state()
+        if (state.last_applied_window_width, state.last_applied_window_height) != (
+            width,
+            height,
+        ):
+            return width, height
+        return None
+
+    def command(self, url: str) -> list[str]:
         command = [
             self._binary,
             f"--app={url}",
             f"--user-data-dir={self._profile_dir}",
-            f"--window-size={settings.desktop_window_width},"
-            f"{settings.desktop_window_height}",
         ]
+        size = self._pending_window_size()
+        if size is not None:
+            command.append(f"--window-size={size[0]},{size[1]}")
         if sys.platform not in {"win32", "darwin"}:
             # Without an explicit WM class the window groups under "Chromium".
             command.append(f"--class={LINUX_WM_CLASS}")
@@ -108,12 +156,16 @@ class AppModeWindow:
     def open(self, url: str) -> None:
         self._last_url = url
         self._profile_dir.mkdir(parents=True, exist_ok=True)
+        size = self._pending_window_size()
         try:
             self._process = subprocess.Popen(self.command(url))
         except OSError:
             logger.warning("Could not launch %s in app mode.", self._binary)
             self._process = None
             webbrowser.open(url)
+            return
+        if size is not None:
+            record_applied_window_size(size[0], size[1])
 
     def focus(self) -> bool:
         """Re-invoke the same app command so the profile raises its window.

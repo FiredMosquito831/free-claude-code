@@ -35,6 +35,7 @@ _BOOLEAN_DEFAULTS: dict[str, bool] = {
     "tray_enabled": True,
     "start_at_login": False,
     "minimize_to_tray": False,
+    "window_open": True,
 }
 
 
@@ -51,6 +52,9 @@ class DesktopState:
     minimize_to_tray: bool = False
     server_mode: ServerMode = "spawn"
     window: WindowPreference = "auto"
+    window_open: bool = True
+    last_applied_window_width: int | None = None
+    last_applied_window_height: int | None = None
 
 
 def desktop_state_path() -> Path:
@@ -90,12 +94,21 @@ def load_desktop_state() -> DesktopState:
     window: WindowPreference = (
         raw_window if raw_window in WINDOW_PREFERENCES else "auto"
     )
+
+    last_width = data.get("last_applied_window_width")
+    last_height = data.get("last_applied_window_height")
+    applied_width = last_width if isinstance(last_width, int) else None
+    applied_height = last_height if isinstance(last_height, int) else None
+
     return DesktopState(
         tray_enabled=bool(values["tray_enabled"]),
         start_at_login=bool(values["start_at_login"]),
         minimize_to_tray=bool(values["minimize_to_tray"]),
         server_mode=server_mode,
         window=window,
+        window_open=bool(values["window_open"]),
+        last_applied_window_width=applied_width,
+        last_applied_window_height=applied_height,
     )
 
 
@@ -113,8 +126,28 @@ def save_desktop_state(state: DesktopState) -> None:
         raise DesktopStateError(f"Failed to save desktop state: {exc}") from exc
 
 
-def _update_state(**overrides: bool | ServerMode | WindowPreference) -> DesktopState:
+def _int_or_none(value: object) -> int | None:
+    return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+
+def _update_state(
+    **overrides: bool | ServerMode | WindowPreference | int | None,
+) -> DesktopState:
     current = load_desktop_state()
+
+    raw_server_mode = overrides.get("server_mode")
+    server_mode = (
+        cast(ServerMode, raw_server_mode)
+        if "server_mode" in overrides and raw_server_mode in SERVER_MODES
+        else current.server_mode
+    )
+    raw_window = overrides.get("window")
+    window = (
+        cast(WindowPreference, raw_window)
+        if "window" in overrides and raw_window in WINDOW_PREFERENCES
+        else current.window
+    )
+
     updated = DesktopState(
         tray_enabled=bool(overrides["tray_enabled"])
         if "tray_enabled" in overrides
@@ -125,12 +158,17 @@ def _update_state(**overrides: bool | ServerMode | WindowPreference) -> DesktopS
         minimize_to_tray=bool(overrides["minimize_to_tray"])
         if "minimize_to_tray" in overrides
         else current.minimize_to_tray,
-        server_mode=overrides["server_mode"]
-        if "server_mode" in overrides and overrides["server_mode"] in SERVER_MODES
-        else current.server_mode,
-        window=overrides["window"]
-        if "window" in overrides and overrides["window"] in WINDOW_PREFERENCES
-        else current.window,
+        server_mode=server_mode,
+        window=window,
+        window_open=bool(overrides["window_open"])
+        if "window_open" in overrides
+        else current.window_open,
+        last_applied_window_width=_int_or_none(overrides["last_applied_window_width"])
+        if "last_applied_window_width" in overrides
+        else current.last_applied_window_width,
+        last_applied_window_height=_int_or_none(overrides["last_applied_window_height"])
+        if "last_applied_window_height" in overrides
+        else current.last_applied_window_height,
     )
     save_desktop_state(updated)
     return updated
@@ -152,6 +190,25 @@ def set_window_preference(value: str) -> DesktopState:
 
 def set_tray_enabled(enabled: bool) -> DesktopState:
     return _update_state(tray_enabled=enabled)
+
+
+def set_window_open(open_: bool) -> DesktopState:
+    """Record whether a window is currently showing, for next-launch restore."""
+
+    return _update_state(window_open=open_)
+
+
+def record_applied_window_size(width: int, height: int) -> DesktopState:
+    """Record the size we last forced with ``--window-size``.
+
+    Read back on the next app-mode launch to tell "the user resized the
+    window, leave Chromium's memory alone" apart from "the configured size
+    changed, honour it once more".
+    """
+
+    return _update_state(
+        last_applied_window_width=width, last_applied_window_height=height
+    )
 
 
 # ------------------------------------------------------ window provider resolution

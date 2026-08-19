@@ -105,6 +105,112 @@ class TestAppModeCommand:
         assert window.is_open is False
 
 
+class TestAppModeWindowSizePersistence:
+    """``--window-size`` must not fight Chromium's own remembered geometry."""
+
+    def _write_placement(self, profile_dir, present=True):
+        prefs_dir = profile_dir / "Default"
+        prefs_dir.mkdir(parents=True, exist_ok=True)
+        payload = (
+            {"browser": {"window_placement": {"left": 10, "top": 10}}}
+            if present
+            else {"browser": {}}
+        )
+        (prefs_dir / "Preferences").write_text(
+            __import__("json").dumps(payload), encoding="utf-8"
+        )
+
+    def test_first_run_passes_configured_size(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(desktop_window.sys, "platform", "win32")
+        window = AppModeWindow("chrome.exe", profile_dir=tmp_path / "profile")
+
+        command = window.command("http://127.0.0.1:8082/admin")
+
+        assert "--window-size=1400,900" in command
+
+    def test_remembered_placement_skips_window_size(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(desktop_window.sys, "platform", "win32")
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.setenv("USERPROFILE", str(tmp_path))
+        profile_dir = tmp_path / "profile"
+        self._write_placement(profile_dir, present=True)
+        # A prior launch already forced today's configured size once.
+        desktop_window.record_applied_window_size(1400, 900)
+        window = AppModeWindow("chrome.exe", profile_dir=profile_dir)
+
+        command = window.command("http://127.0.0.1:8082/admin")
+
+        assert not any(part.startswith("--window-size=") for part in command)
+
+    def test_changed_config_overrides_remembered_placement(self, monkeypatch, tmp_path):
+        """A config change since the last forced size takes effect once."""
+
+        monkeypatch.setattr(desktop_window.sys, "platform", "win32")
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.setenv("USERPROFILE", str(tmp_path))
+        profile_dir = tmp_path / "profile"
+        self._write_placement(profile_dir, present=True)
+        # The last time we forced a size, it matched the (then-current) config.
+        desktop_window.record_applied_window_size(1400, 900)
+        window = AppModeWindow("chrome.exe", profile_dir=profile_dir)
+
+        # Simulate the user changing DESKTOP_WINDOW_WIDTH in the dashboard.
+        monkeypatch.setenv("DESKTOP_WINDOW_WIDTH", "1600")
+        desktop_window.get_settings.cache_clear()
+        try:
+            command = window.command("http://127.0.0.1:8082/admin")
+            assert "--window-size=1600,900" in command
+        finally:
+            desktop_window.get_settings.cache_clear()
+
+    def test_corrupt_preferences_file_is_treated_as_no_memory(
+        self, monkeypatch, tmp_path
+    ):
+        monkeypatch.setattr(desktop_window.sys, "platform", "win32")
+        profile_dir = tmp_path / "profile"
+        prefs_dir = profile_dir / "Default"
+        prefs_dir.mkdir(parents=True, exist_ok=True)
+        (prefs_dir / "Preferences").write_text("{not json", encoding="utf-8")
+        window = AppModeWindow("chrome.exe", profile_dir=profile_dir)
+
+        command = window.command("http://127.0.0.1:8082/admin")
+
+        assert "--window-size=1400,900" in command
+
+    def test_missing_preferences_file_is_treated_as_no_memory(
+        self, monkeypatch, tmp_path
+    ):
+        monkeypatch.setattr(desktop_window.sys, "platform", "win32")
+        window = AppModeWindow("chrome.exe", profile_dir=tmp_path / "no-such-profile")
+
+        command = window.command("http://127.0.0.1:8082/admin")
+
+        assert "--window-size=1400,900" in command
+
+    def test_open_records_applied_size_only_when_size_was_passed(
+        self, monkeypatch, tmp_path
+    ):
+        monkeypatch.setattr(desktop_window.sys, "platform", "win32")
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.setenv("USERPROFILE", str(tmp_path))
+        profile_dir = tmp_path / "profile"
+
+        class _FakeProcess:
+            def poll(self):
+                return None
+
+        monkeypatch.setattr(
+            desktop_window.subprocess, "Popen", lambda *a, **k: _FakeProcess()
+        )
+        window = AppModeWindow("chrome.exe", profile_dir=profile_dir)
+
+        window.open("http://127.0.0.1:8082/admin")
+
+        state = desktop_window.load_desktop_state()
+        assert state.last_applied_window_width == 1400
+        assert state.last_applied_window_height == 900
+
+
 class TestBrowserTabWindow:
     def test_open_uses_webbrowser_and_cannot_focus(self, monkeypatch):
         opened: list[str] = []

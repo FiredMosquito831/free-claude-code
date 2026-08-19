@@ -804,6 +804,13 @@ async def update_desktop(payload: DesktopUpdatePayload, request: Request):
         minimize_to_tray=updates.get("minimize_to_tray", current.minimize_to_tray),
         server_mode=updates.get("server_mode", current.server_mode),
         window=updates.get("window", current.window),
+        # window_open and the last-applied-window-size fields are lifecycle
+        # state owned by the desktop tray, not user preferences -- they are
+        # never part of the admin payload, but must still be carried forward
+        # here or an unrelated dashboard save would silently reset them.
+        window_open=current.window_open,
+        last_applied_window_width=current.last_applied_window_width,
+        last_applied_window_height=current.last_applied_window_height,
     )
     await asyncio.to_thread(save_desktop_state, updated)
     return await asyncio.to_thread(_desktop_state_response, updated)
