@@ -51,12 +51,7 @@ def test_the_view_registry_is_parsable() -> None:
 # Sections that are deliberately not on any page, with the reason. Keep this
 # empty if you can: an entry here is a field the user can set in .env and can
 # never see in the dashboard.
-KNOWN_UNRENDERED = {
-    # Smoke-test configuration (FCC_SMOKE_MODEL_*) is developer tooling driven
-    # from the smoke suite and the environment, not from the admin UI. It
-    # predates this guard; it is listed so a NEW orphan still fails.
-    "smoke",
-}
+KNOWN_UNRENDERED: set[str] = set()
 
 
 def test_every_manifest_section_is_rendered_by_some_view() -> None:

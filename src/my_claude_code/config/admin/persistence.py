@@ -206,6 +206,16 @@ def quote_env_value(value: str) -> str:
     return value
 
 
+# Project-owned env prefix. Keys under this prefix (e.g. FCC_SMOKE_*) are
+# real, settable environment variables that belong to this project even when
+# no admin field or Settings alias reads them -- developer tooling such as
+# smoke/ reads them straight from os.environ. A populated value here is a
+# deliberate user choice and must survive a save the same way an
+# admin-managed field would; an empty value configures nothing and is safe
+# to drop.
+_FCC_OWNED_ENV_PREFIX = "FCC_"
+
+
 def settings_env_aliases() -> frozenset[str]:
     """Env names Settings still reads.
 
@@ -233,10 +243,13 @@ def unmanaged_env_values(path: Path | None = None) -> dict[str, str]:
 
     existing = dotenv_values_from_file(path or managed_env_path())
     managed = {field.key for field in FIELDS}
+    aliases = settings_env_aliases()
     return {
         key: value
         for key, value in existing.items()
-        if key not in managed and value is not None and key in settings_env_aliases()
+        if key not in managed
+        and value is not None
+        and (key in aliases or (key.startswith(_FCC_OWNED_ENV_PREFIX) and value != ""))
     }
 
 
