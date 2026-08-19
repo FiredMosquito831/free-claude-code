@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "my-claude-code"
-version = "5.26.0"
+version = "5.27.0"
 description = "Local proxy connecting coding agents to OpenAI-compatible AI providers"
 readme = "README.md"
 requires-python = ">=3.14.0"
@@ -161,4 +161,11 @@ python-platform = "all"
 [tool.ty.analysis]
 # Optional voice_local extra: torch, transformers, librosa for local whisper transcription
 # Optional voice extra: nvidia-riva-client for nvidia_nim transcription provider
-allowed-unresolved-imports = ["torch", "transformers", "librosa", "riva.client", "pystray"]
+allowed-unresolved-imports = [
+    "torch",
+    "transformers",
+    "librosa",
+    "riva.client",
+    "pystray",
+    "webview",
+]

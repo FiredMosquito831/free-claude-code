@@ -4,13 +4,16 @@ import sys
 from collections.abc import Sequence
 from pathlib import Path
 
+from my_claude_code.cli.desktop import headless_refusal_reason
 from my_claude_code.cli.desktop_assets import export_app_icon
 from my_claude_code.config.desktop import (
     SERVER_MODES,
+    WINDOW_PREFERENCES,
     apply_tray_registration,
     load_desktop_state,
     set_server_mode,
     set_start_at_login,
+    set_window_preference,
 )
 
 
@@ -20,11 +23,13 @@ def _print_state() -> None:
     print(f"start_at_login={str(state.start_at_login).lower()}")
     print(f"minimize_to_tray={str(state.minimize_to_tray).lower()}")
     print(f"server_mode={state.server_mode}")
+    print(f"window={state.window}")
 
 
 def _print_usage() -> None:
     print(
         "Usage: mcc-desktop [--server-mode spawn|attach|off] "
+        "[--window auto|app-mode|pywebview|browser] "
         "[--autostart on|off] "
         "[--start-at-login | --no-start-at-login | "
         "--tray-enabled | --no-tray-enabled | --status | --export-icon PATH]",
@@ -65,6 +70,18 @@ def launch(argv: Sequence[str] | None = None) -> None:
         set_server_mode(args[1])
         return
 
+    if len(args) == 2 and args[0] == "--window":
+        if args[1] not in WINDOW_PREFERENCES:
+            print(
+                f"Unknown window provider: {args[1]}. Choose one of "
+                f"{', '.join(WINDOW_PREFERENCES)}; 'auto' picks the first one "
+                f"this machine can run.",
+                file=sys.stderr,
+            )
+            raise SystemExit(2)
+        set_window_preference(args[1])
+        return
+
     if len(args) == 2 and args[0] == "--autostart":
         if args[1] == "on":
             set_start_at_login(True)
@@ -83,12 +100,10 @@ def launch(argv: Sequence[str] | None = None) -> None:
         _print_usage()
         raise SystemExit(2)
 
-    if sys.platform not in {"darwin", "win32"}:
-        print(
-            "MCC Desktop is supported on Windows and macOS. Linux launches the "
-            "tray best-effort; pystray may not have a backend available.",
-            file=sys.stderr,
-        )
+    refusal = headless_refusal_reason()
+    if refusal is not None:
+        print(refusal, file=sys.stderr)
+        raise SystemExit(1)
 
     from my_claude_code.cli.desktop_tray import launch as launch_tray
 

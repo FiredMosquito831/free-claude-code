@@ -16,7 +16,9 @@ from .paths import config_dir_path
 
 DESKTOP_STATE_FILENAME = "desktop.json"
 SERVER_MODES = ("spawn", "attach", "off")
+WINDOW_PREFERENCES = ("auto", "app-mode", "pywebview", "browser")
 type ServerMode = Literal["spawn", "attach", "off"]
+type WindowPreference = Literal["auto", "app-mode", "pywebview", "browser"]
 type AutostartTarget = Literal["tray", "server"]
 
 WINDOWS_RUN_VALUE = "MyClaudeCodeDesktop"
@@ -43,6 +45,7 @@ class DesktopState:
     start_at_login: bool = False
     minimize_to_tray: bool = False
     server_mode: ServerMode = "spawn"
+    window: WindowPreference = "auto"
 
 
 def desktop_state_path() -> Path:
@@ -63,7 +66,7 @@ def load_desktop_state() -> DesktopState:
     if not isinstance(data, dict):
         return _default_state()
 
-    values: dict[str, bool | ServerMode] = dict(_BOOLEAN_DEFAULTS)
+    values: dict[str, bool | ServerMode | WindowPreference] = dict(_BOOLEAN_DEFAULTS)
     for name in _BOOLEAN_DEFAULTS:
         if isinstance(data.get(name), bool):
             values[name] = data[name]
@@ -75,11 +78,19 @@ def load_desktop_state() -> DesktopState:
         server_mode = "spawn" if data["server_auto_start"] else "attach"
     else:
         server_mode = "spawn"
+
+    raw_window = data.get("window")
+    # An unknown persisted preference is tolerated, not fatal: the desktop app
+    # must still start after a downgrade that no longer knows the value.
+    window: WindowPreference = (
+        raw_window if raw_window in WINDOW_PREFERENCES else "auto"
+    )
     return DesktopState(
         tray_enabled=bool(values["tray_enabled"]),
         start_at_login=bool(values["start_at_login"]),
         minimize_to_tray=bool(values["minimize_to_tray"]),
         server_mode=server_mode,
+        window=window,
     )
 
 
@@ -97,7 +108,7 @@ def save_desktop_state(state: DesktopState) -> None:
         raise DesktopStateError(f"Failed to save desktop state: {exc}") from exc
 
 
-def _update_state(**overrides: bool | ServerMode) -> DesktopState:
+def _update_state(**overrides: bool | ServerMode | WindowPreference) -> DesktopState:
     current = load_desktop_state()
     updated = DesktopState(
         tray_enabled=bool(overrides["tray_enabled"])
@@ -112,6 +123,9 @@ def _update_state(**overrides: bool | ServerMode) -> DesktopState:
         server_mode=overrides["server_mode"]
         if "server_mode" in overrides and overrides["server_mode"] in SERVER_MODES
         else current.server_mode,
+        window=overrides["window"]
+        if "window" in overrides and overrides["window"] in WINDOW_PREFERENCES
+        else current.window,
     )
     save_desktop_state(updated)
     return updated
@@ -122,6 +136,13 @@ def set_server_mode(mode: str) -> DesktopState:
         raise ValueError(f"Invalid server mode: {mode}")
     validated = cast(ServerMode, mode)
     return _update_state(server_mode=validated)
+
+
+def set_window_preference(value: str) -> DesktopState:
+    if value not in WINDOW_PREFERENCES:
+        raise ValueError(f"Invalid window preference: {value}")
+    validated = cast(WindowPreference, value)
+    return _update_state(window=validated)
 
 
 def set_tray_enabled(enabled: bool) -> DesktopState:
