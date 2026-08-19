@@ -59,7 +59,6 @@ def build_deepseek_request_body(
     if "messages" in data:
         data["messages"] = _strip_unsupported_attachment_blocks(data["messages"])
     _validate_deepseek_request_dict(data)
-    _downgrade_forced_tool_choice(data)
 
     has_tool_history = _has_tool_history(data)
     has_replayable_tool_thinking = _all_tool_calls_have_replayable_thinking(data)
@@ -415,22 +414,6 @@ def _normalize_tool_result_content(messages: Any) -> Any:
         normalized.append(new_msg)
 
     return normalized
-
-
-def _downgrade_forced_tool_choice(data: dict[str, Any]) -> None:
-    tool_choice = data.get("tool_choice")
-    if not isinstance(tool_choice, dict):
-        return
-    if tool_choice.get("type") != "tool" or not isinstance(
-        tool_choice.get("name"), str
-    ):
-        return
-    logger.debug(
-        "DEEPSEEK_REQUEST: downgrading forced tool_choice to auto for unsupported "
-        "native request shape tool={}",
-        tool_choice["name"],
-    )
-    data["tool_choice"] = {"type": "auto"}
 
 
 def _apply_deepseek_chat_extras(

@@ -3,9 +3,10 @@
 import json
 import logging
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
+import openai
 import pytest
 from openai import AsyncOpenAI
 
@@ -19,14 +20,60 @@ from my_claude_code.core.anthropic.models import (
     Tool,
 )
 from my_claude_code.core.anthropic.stream_contracts import parse_sse_text
+from my_claude_code.core.failures import ExecutionFailure
 from my_claude_code.providers.base import ProviderConfig
 from my_claude_code.providers.deepseek import DeepSeekProvider
+from my_claude_code.providers.deepseek.tool_choice import (
+    clone_body_with_required_tool_choice,
+    is_deepseek_tool_choice_rejection,
+)
 from tests.providers.support import (
     REASONING_OFF,
     REASONING_ON,
     passthrough_rate_limiter,
     reasoning_for,
 )
+
+
+def _make_deepseek_bad_request_error(message: str) -> openai.BadRequestError:
+    request = httpx.Request("POST", "https://api.deepseek.com/chat/completions")
+    response = httpx.Response(400, request=request)
+    body = {"error": {"message": message}}
+    return openai.BadRequestError(message, response=response, body=body)
+
+
+def _forced_tool_choice_request() -> MessagesRequest:
+    return MessagesRequest.model_validate(
+        {
+            "model": "m",
+            "messages": [{"role": "user", "content": "x"}],
+            "tool_choice": {"type": "tool", "name": "Read"},
+            "tools": [
+                {
+                    "name": "Read",
+                    "description": "Read a file",
+                    "input_schema": {"type": "object", "properties": {}},
+                }
+            ],
+        }
+    )
+
+
+def _fake_recovered_stream():
+    async def _iter():
+        chunk = MagicMock()
+        chunk.choices = [
+            MagicMock(
+                delta=MagicMock(
+                    content="Recovered", reasoning_content=None, tool_calls=None
+                ),
+                finish_reason="stop",
+            )
+        ]
+        chunk.usage = MagicMock(completion_tokens=5, prompt_tokens=10)
+        yield chunk
+
+    return _iter()
 
 
 @pytest.fixture
@@ -176,9 +223,15 @@ def test_build_request_body_tool_choice_keeps_thinking(deepseek_provider):
     assert body["tool_choice"] == "auto"
 
 
-def test_build_request_body_forced_tool_choice_downgrades_to_auto(
+def test_build_request_body_forced_tool_choice_reaches_wire_unmodified(
     deepseek_provider,
 ):
+    """A forced named tool_choice must not be silently downgraded up front.
+
+    DeepSeek's documented API supports a forced named tool_choice; the
+    request builder must send it as-is. Rejection (if any) is handled
+    reactively via DeepSeekProvider._get_retry_request_body.
+    """
     request = MessagesRequest.model_validate(
         {
             "model": "m",
@@ -200,7 +253,7 @@ def test_build_request_body_forced_tool_choice_downgrades_to_auto(
     )
 
     assert body["extra_body"]["thinking"] == {"type": "enabled"}
-    assert body["tool_choice"] == "auto"
+    assert body["tool_choice"] == {"type": "function", "function": {"name": "Read"}}
 
 
 def test_build_request_body_encodes_reasoning_off():
@@ -1417,3 +1470,197 @@ def test_no_warning_when_no_attachments(deepseek_provider, caplog):
         for r in caplog.records
         if r.levelno == logging.WARNING
     )
+
+
+def test_is_deepseek_tool_choice_rejection_matches_tool_choice_400():
+    error = _make_deepseek_bad_request_error(
+        "deepseek-reasoner does not support this tool_choice"
+    )
+    assert is_deepseek_tool_choice_rejection(error) is True
+
+
+def test_is_deepseek_tool_choice_rejection_ignores_unrelated_400():
+    error = _make_deepseek_bad_request_error(
+        "This model's maximum context length is exceeded"
+    )
+    assert is_deepseek_tool_choice_rejection(error) is False
+
+
+def test_is_deepseek_tool_choice_rejection_ignores_non_400():
+    class _NotBadRequest(Exception):
+        status_code = 500
+
+    error = _NotBadRequest("tool_choice not supported")
+    assert is_deepseek_tool_choice_rejection(error) is False
+
+
+def test_clone_body_with_required_tool_choice_downgrades_named_choice():
+    body = {
+        "model": "m",
+        "tool_choice": {"type": "function", "function": {"name": "Read"}},
+    }
+    retry_body = clone_body_with_required_tool_choice(body)
+    assert retry_body is not None
+    assert retry_body["tool_choice"] == "required"
+    # original body is untouched
+    assert body["tool_choice"] == {"type": "function", "function": {"name": "Read"}}
+
+
+@pytest.mark.parametrize("tool_choice", ["auto", "none", "required", None])
+def test_clone_body_with_required_tool_choice_ignores_non_forced_choice(tool_choice):
+    body = {"model": "m", "tool_choice": tool_choice}
+    assert clone_body_with_required_tool_choice(body) is None
+
+
+def test_get_retry_request_body_downgrades_on_tool_choice_rejection(
+    deepseek_provider,
+):
+    body = {
+        "model": "m",
+        "tool_choice": {"type": "function", "function": {"name": "Read"}},
+    }
+    error = _make_deepseek_bad_request_error(
+        "deepseek-reasoner does not support this tool_choice"
+    )
+
+    retry_body = deepseek_provider._get_retry_request_body(error, body)
+
+    assert retry_body is not None
+    assert retry_body["tool_choice"] == "required"
+
+
+def test_get_retry_request_body_ignores_unrelated_error(deepseek_provider):
+    body = {
+        "model": "m",
+        "tool_choice": {"type": "function", "function": {"name": "Read"}},
+    }
+    error = _make_deepseek_bad_request_error(
+        "This model's maximum context length is exceeded"
+    )
+
+    assert deepseek_provider._get_retry_request_body(error, body) is None
+
+
+@pytest.mark.asyncio
+async def test_stream_response_retries_tool_choice_rejection_with_required(
+    deepseek_provider, caplog
+):
+    request = _forced_tool_choice_request()
+    error = _make_deepseek_bad_request_error(
+        "deepseek-reasoner does not support this tool_choice"
+    )
+
+    with patch.object(
+        deepseek_provider._client.chat.completions, "create", new_callable=AsyncMock
+    ) as mock_create:
+        mock_create.side_effect = [error, _fake_recovered_stream()]
+
+        with caplog.at_level(logging.WARNING):
+            events = [
+                e
+                async for e in deepseek_provider.stream_response(
+                    request, reasoning=reasoning_for(request)
+                )
+            ]
+
+    assert mock_create.await_count == 2
+    first_call = mock_create.await_args_list[0].kwargs
+    second_call = mock_create.await_args_list[1].kwargs
+    assert first_call["tool_choice"] == {
+        "type": "function",
+        "function": {"name": "Read"},
+    }
+    assert second_call["tool_choice"] == "required"
+    assert any("Recovered" in e for e in events)
+    assert any(
+        "downgraded to 'required'" in r.message
+        for r in caplog.records
+        if r.levelno == logging.WARNING
+    )
+
+
+@pytest.mark.asyncio
+async def test_stream_response_second_tool_choice_rejection_is_not_recovered(
+    deepseek_provider,
+):
+    """The provider-specific retry hook fires at most once per request.
+
+    See OpenAIChatProvider._next_create_retry_body: it gates the
+    "provider_specific" retry kind behind `used_retry_kinds`, so once one
+    provider-specific retry has been consumed, a second rejection of the
+    same kind is not retried again and propagates as a failure.
+    """
+    request = _forced_tool_choice_request()
+    error = _make_deepseek_bad_request_error(
+        "deepseek-reasoner does not support this tool_choice"
+    )
+
+    with patch.object(
+        deepseek_provider._client.chat.completions, "create", new_callable=AsyncMock
+    ) as mock_create:
+        mock_create.side_effect = [error, error, error]
+
+        with pytest.raises(ExecutionFailure):
+            [
+                e
+                async for e in deepseek_provider.stream_response(
+                    request, reasoning=reasoning_for(request)
+                )
+            ]
+
+    # exactly one retry was attempted (named -> required), then it failed
+    assert mock_create.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_stream_response_unrelated_bad_request_does_not_downgrade_tool_choice(
+    deepseek_provider,
+):
+    request = _forced_tool_choice_request()
+    error = _make_deepseek_bad_request_error(
+        "This model's maximum context length is exceeded"
+    )
+
+    with patch.object(
+        deepseek_provider._client.chat.completions, "create", new_callable=AsyncMock
+    ) as mock_create:
+        mock_create.side_effect = error
+
+        with pytest.raises(ExecutionFailure):
+            [
+                e
+                async for e in deepseek_provider.stream_response(
+                    request, reasoning=reasoning_for(request)
+                )
+            ]
+
+    assert mock_create.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_stream_response_tool_choice_auto_passes_through_untouched(
+    deepseek_provider,
+):
+    request = MessagesRequest.model_validate(
+        {
+            "model": "m",
+            "messages": [{"role": "user", "content": "x"}],
+            "tool_choice": {"type": "auto"},
+        }
+    )
+
+    with patch.object(
+        deepseek_provider._client.chat.completions,
+        "create",
+        new_callable=AsyncMock,
+        return_value=_fake_recovered_stream(),
+    ) as mock_create:
+        [
+            e
+            async for e in deepseek_provider.stream_response(
+                request, reasoning=reasoning_for(request)
+            )
+        ]
+
+    assert mock_create.await_count == 1
+    assert mock_create.await_args_list[0].kwargs["tool_choice"] == "auto"
