@@ -18,8 +18,9 @@ llama_cache
 # Local PowerShell analysis cache
 Microsoft/
 
-# Local working notes (practices, lessons, open items)
+# Local working notes (practices, lessons, open items) and their dated archive
 WORKING-NOTES.md
+JOURNAL.md
 
 # Cached upstream Claude Code docs used by scripts/gen_claude_config_reference.py
 .claude-docs-cache/
