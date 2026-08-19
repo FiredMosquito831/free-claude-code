@@ -289,6 +289,50 @@ Use the port from your server's startup log if it isn't `8082`, and match the AP
 
 With **Model discovery** on, the app auto-populates its picker from MCC's `/v1/models` at launch; you can leave **Model list** empty. The **initial warning dialog can be safely ignored** — the picker fills in once discovery completes. One limitation: with a gateway active, the desktop app runs **local sessions only** (no Anthropic-hosted cloud environments).
 
+<a id="desktop-app"></a>
+
+## Desktop App
+
+`mcc-desktop` is a system-tray app that wraps a **window** around the same server `mcc-server` runs headless. It doesn't replace `mcc-server` — it is a second, optional process that can own one for you, sit in the tray, and open a window onto the dashboard.
+
+### Server modes
+
+The tray's **Server mode** — set from the dashboard's Deployment card or the tray menu — picks one of three:
+
+| Mode | Meaning |
+| --- | --- |
+| `spawn` | The tray owns `mcc-server` as a child process. On launch, if nothing is listening on `:8082`, it starts the server itself. |
+| `attach` | The tray connects to an existing server on `:8082` and never spawns one — for people who already run `mcc-server` themselves. |
+| `off` | Tray only; the desktop app does not touch the server at all. |
+
+See [docs/USAGE.md](docs/USAGE.md#running-the-server-with-the-desktop-tray) for the full walkthrough.
+
+### The window, and why app-mode is the default
+
+There is no single "native window" API that works the same way across Windows, macOS, and Linux — WebView2, WKWebView, and WebKitGTK all behave differently. So `mcc-desktop` resolves its window through a **provider chain** that prefers Chromium **app-mode**: a real browser process launched with no tabs and no URL bar, its own taskbar entry, and a private profile under `~/.fcc/desktop-profile`.
+
+This preference is not aesthetic. Three things the dashboard depends on **break inside an embedded webview**: `window.open` (both OAuth logins use it), `<a download>` (the analytics export), and `navigator.clipboard` (every copy button). App-mode is a real browser process, so all three work normally.
+
+Pick the mode with `--window`:
+
+```bash
+mcc-desktop --window auto|app-mode|pywebview|browser
+```
+
+`auto` (the default) tries app-mode first and falls back to a plain browser tab if no Chromium-family browser is found. `mcc-desktop --status` shows which one is currently in effect. An unavailable choice falls back with a warning rather than failing outright.
+
+The dashboard's Deployment card exposes the same choice as a **Window** control, with a fourth option, **Embedded webview**, that is **not installed by default** (see pywebview below) — OAuth login, downloads, and copy buttons may not work in it.
+
+### `--desktop` at install time
+
+The installer's opt-in `--desktop` flag (`-Desktop` on PowerShell) adds a Start Menu shortcut (`.lnk`) on Windows, a `.desktop` entry on Linux, or a minimal `.app` bundle on macOS. It's opt-in — the default install is unchanged — and if shortcut creation fails, the installer warns and continues rather than failing the install.
+
+### DESKTOP_* settings
+
+Nine settings, editable from **Admin → Limits → Desktop** or directly in `~/.fcc/.env`, tune how `mcc-desktop` behaves: `DESKTOP_HEALTH_POLL_SECONDS`, `DESKTOP_HEALTH_FAILURE_THRESHOLD`, `DESKTOP_ACTIVATION_POLL_SECONDS`, `DESKTOP_SERVER_START_TIMEOUT`, `DESKTOP_ADMIN_REQUEST_TIMEOUT`, `DESKTOP_HEALTH_CHECK_INTERVAL`, `DESKTOP_WINDOW_WIDTH`, `DESKTOP_WINDOW_HEIGHT`, and `DESKTOP_BROWSER_PATH` (points at a browser binary in a nonstandard location; falls back to the built-in search with a warning if it no longer exists). Full ranges and defaults are in [docs/USAGE.md](docs/USAGE.md#desktop-settings-apply-on-the-next-launch) and the Admin UI itself.
+
+**These settings apply on the next `mcc-desktop` launch, not to a tray already running** — `mcc-desktop` is a separate process that reads them once at start.
+
 <a id="model-providers"></a>
 
 ## Model Providers

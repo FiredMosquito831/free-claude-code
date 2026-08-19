@@ -12,6 +12,11 @@ The [README](../README.md) is the overview. This is the long-form manual.
 - [2. Install](#2-install)
 - [3. First run](#3-first-run)
   - [Running the server with the desktop tray](#running-the-server-with-the-desktop-tray)
+  - [Picking a window](#picking-a-window)
+  - [Installing the desktop shortcut](#installing-the-desktop-shortcut)
+  - [DESKTOP_* settings apply on the next launch](#desktop-settings-apply-on-the-next-launch)
+  - [WSL and headless: there is no tray](#wsl-and-headless-there-is-no-tray)
+  - [The embedded webview (pywebview), and its caveat](#the-embedded-webview-pywebview-and-its-caveat)
 - [4. Tutorial: connect Claude Code (CLI)](#4-tutorial-connect-claude-code-cli)
 - [5. Tutorial: connect Claude Desktop](#5-tutorial-connect-claude-desktop)
 - [6. Tutorial: connect Codex and Pi](#6-tutorial-connect-codex-and-pi)
@@ -172,6 +177,80 @@ mcc-desktop --server-mode spawn|attach|off
 mcc-desktop --autostart on|off
 mcc-desktop --status
 ```
+
+<a id="picking-a-window"></a>
+
+### Picking a window
+
+There is no single "native window" API that behaves the same across Windows, macOS, and Linux (WebView2 / WKWebView / WebKitGTK all differ), so `mcc-desktop` resolves its window through a **provider chain** that prefers Chromium **app-mode**: a real browser process launched with no tabs and no URL bar, its own taskbar entry, and a private profile under `~/.fcc/desktop-profile`.
+
+This is not a cosmetic preference. Three things the dashboard depends on **break inside an embedded webview**: `window.open` (both OAuth logins use it), `<a download>` (the analytics export), and `navigator.clipboard` (every copy button). App-mode is a real browser process, so all three keep working.
+
+Choose it with `--window`:
+
+```bash
+mcc-desktop --window auto|app-mode|pywebview|browser
+```
+
+`auto` is the default — it tries app-mode first, then falls back to a plain browser tab if no Chromium-family browser (Edge, Chrome, Brave) is found. `mcc-desktop --status` reports which provider is currently in effect. Picking an option that isn't available on this machine falls back with a warning, not a failure.
+
+The same choice is on the dashboard's Deployment card as a **Window** control, with a line underneath showing what `auto` currently resolves to (for example `auto → app-mode (Microsoft Edge)`). Reading this at launch means a change applies to the **next** `mcc-desktop` start, not a window already open.
+
+Launching `mcc-desktop` a second time raises the existing window instead of opening a duplicate; closing the window does **not** stop the server (close ≠ quit) — use the tray menu or `--server-mode off` for that.
+
+<a id="installing-the-desktop-shortcut"></a>
+
+### Installing the desktop shortcut
+
+Pass `--desktop` to the installer (`-Desktop` on PowerShell) to add a platform shortcut at install time:
+
+```bash
+curl -fsSL <install-script-url> | sh -s -- --desktop
+```
+
+```powershell
+.\install.ps1 -Desktop
+```
+
+This writes a Start Menu `.lnk` on Windows, a `.desktop` entry on Linux, and a minimal `.app` bundle on macOS. It's opt-in — a plain install is unchanged — and if the shortcut can't be created, the installer warns and continues rather than failing the whole install.
+
+<a id="desktop-settings-apply-on-the-next-launch"></a>
+
+### DESKTOP_* settings apply on the next launch
+
+> **These settings apply on the next `mcc-desktop` launch, not to a tray already running.** `mcc-desktop` is a separate process from `mcc-server` and reads them once at start — changing one in the dashboard or in `~/.fcc/.env` does nothing to a tray you already have open. Quit and relaunch `mcc-desktop` to pick it up.
+
+Nine settings live under **Admin → Limits → Desktop**:
+
+| Setting | Default | Range |
+| --- | --- | --- |
+| `DESKTOP_HEALTH_POLL_SECONDS` | 5 | 0.5–3600 |
+| `DESKTOP_HEALTH_FAILURE_THRESHOLD` | 3 | 1–1000 |
+| `DESKTOP_ACTIVATION_POLL_SECONDS` | 1 | 0.1–3600 |
+| `DESKTOP_SERVER_START_TIMEOUT` | 15 | 1–300 |
+| `DESKTOP_ADMIN_REQUEST_TIMEOUT` | 5 | 0.5–60 |
+| `DESKTOP_HEALTH_CHECK_INTERVAL` | 0.25 | 0.05–5 |
+| `DESKTOP_WINDOW_WIDTH` | 1400 | 640–7680 |
+| `DESKTOP_WINDOW_HEIGHT` | 900 | 480–4320 |
+| `DESKTOP_BROWSER_PATH` | (empty) | any path |
+
+`DESKTOP_BROWSER_PATH` points at a browser binary in a nonstandard location; if the path no longer exists, `mcc-desktop` warns and falls back to the built-in search instead of failing to start. `DESKTOP_WINDOW_WIDTH`/`HEIGHT` are only the window's *initial* size — once it has opened, its size and position are remembered across launches, so changing these later applies on first run or when you actually change the setting, not every launch.
+
+<a id="wsl-and-headless-there-is-no-tray"></a>
+
+### WSL and headless: there is no tray
+
+`mcc-desktop` needs a desktop session — a tray, a window manager, a browser it can launch. WSL and headless Linux don't have one. Run `mcc-server` there instead; it's the same server without the tray, and it's the canonical path for WSL / headless Linux / macOS server (see [Running the server with the desktop tray](#running-the-server-with-the-desktop-tray) above). Trying to run `mcc-desktop` on WSL/headless now explains this and gives you the dashboard URL instead of hanging.
+
+Reach the dashboard from a Windows browser at the address `mcc-server` prints on startup — normally `http://127.0.0.1:8082/admin`, which WSL forwards to Windows automatically in most configurations.
+
+<a id="the-embedded-webview-pywebview-and-its-caveat"></a>
+
+### The embedded webview (pywebview), and its caveat
+
+A fourth window provider, `pywebview`, exists but **ships switched off** and is **not installed as a dependency**. Two reasons: MCC can't guarantee `pywebview`'s embedded webview handles downloads and external links correctly (the same `window.open` / `<a download>` / clipboard breakage described above), and on macOS its run loop conflicts with the tray's own run loop.
+
+To opt in anyway: install `pywebview` yourself into the same environment MCC runs in, then set `--window pywebview` (or pick **Embedded webview** on the dashboard's Deployment card). It is present, gated, and unexercised by default — treat it as experimental, and expect OAuth login, the analytics export, and copy buttons to potentially misbehave inside it.
 
 ---
 
@@ -896,6 +975,12 @@ Open the attempt detail in Web Search analytics. It shows exactly what was sent 
 
 **Cache hit rate shows `—`.**
 That provider doesn't report prompt caching. Not a fault — see [Reading the token columns](#reading-the-token-columns).
+
+**`mcc-desktop` hangs or does nothing on WSL.**
+There's no tray on WSL/headless — run `mcc-server` instead and open the dashboard from a Windows browser. See [WSL and headless: there is no tray](#wsl-and-headless-there-is-no-tray).
+
+**I changed a `DESKTOP_*` setting and nothing happened.**
+It applies on the next `mcc-desktop` launch, not to a tray already running — quit and relaunch. See [DESKTOP_* settings apply on the next launch](#desktop-settings-apply-on-the-next-launch).
 
 **Update did nothing on Windows.**
 Versions below 4.21.5 had a defect where the deferred installer could stall. A self-updater can't fix its own updater, so update once from the install script; after that the dashboard button works.

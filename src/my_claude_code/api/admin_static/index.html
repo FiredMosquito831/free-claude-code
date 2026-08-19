@@ -1456,6 +1456,51 @@ TAVILY_CHUNKS_PER_SOURCE=3</code></pre>
                   <code>~/.fcc/desktop.json</code>.
                 </p>
                 <p>
+                  The <strong>Window</strong> control on the same Deployment card picks
+                  how <code>mcc-desktop</code> shows the dashboard: <em>Auto</em>
+                  (recommended), <em>App-mode window</em>, <em>Embedded webview</em>, or
+                  <em>Browser tab</em>. Auto prefers <strong>app-mode</strong> &mdash; a
+                  real Chromium browser process with no tabs or URL bar &mdash; and a line
+                  under the select shows what it currently resolves to, e.g.
+                  <code>auto &rarr; app-mode (Microsoft Edge)</code>. This is not
+                  cosmetic: <code>window.open</code> (both OAuth logins), <code>&lt;a
+                  download&gt;</code> (the analytics export), and
+                  <code>navigator.clipboard</code> (every copy button) all
+                  <strong>break inside an embedded webview</strong>, and app-mode is a
+                  real browser process so all three keep working. The CLI equivalent is
+                  <code>mcc-desktop --window auto|app-mode|pywebview|browser</code>.
+                </p>
+                <div class="guide-note guide-note-warn">
+                  <p>
+                    <strong>Embedded webview (pywebview) ships switched off</strong> and
+                    is not installed as a dependency &mdash; it cannot guarantee
+                    downloads and external links behave, and on macOS its run loop
+                    conflicts with the tray's. Install it yourself to opt in; expect
+                    OAuth login, the export, and copy buttons to potentially misbehave.
+                  </p>
+                </div>
+                <p>
+                  A <code>--desktop</code> flag on the installer (<code>-Desktop</code>
+                  on PowerShell) adds a Start Menu shortcut on Windows, a
+                  <code>.desktop</code> entry on Linux, or a minimal <code>.app</code>
+                  bundle on macOS. It's opt-in and never fails the install if the
+                  shortcut can't be created.
+                </p>
+                <p>
+                  Nine <code>DESKTOP_*</code> settings under
+                  <strong>Limits &rarr; Desktop</strong> tune polling intervals,
+                  timeouts, initial window size, and an optional
+                  <code>DESKTOP_BROWSER_PATH</code> override.
+                  <strong>They apply on the next <code>mcc-desktop</code> launch, not to
+                  a tray already running</strong> &mdash; it is a separate process that
+                  reads them once at start.
+                </p>
+                <p>
+                  <strong>No tray on WSL or headless Linux.</strong> Run
+                  <code>mcc-server</code> there instead and reach the dashboard from a
+                  Windows browser at the URL it prints on startup.
+                </p>
+                <p>
                   The <strong>Token optimizer</strong> card manages the RTK binary, which
                   filters noisy terminal output before it reaches the model. Toggle it per
                   agent (Claude Code, Codex, Pi); the state lives in <code>~/.fcc/rtk.json</code>
