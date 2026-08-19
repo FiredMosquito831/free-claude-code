@@ -138,6 +138,82 @@ class TestLoadDesktopState:
 
         assert load_desktop_state().server_mode == "off"
 
+    def test_window_open_defaults_true_when_absent(self, monkeypatch, tmp_path):
+        _set_home(monkeypatch, tmp_path)
+        path = desktop_config.desktop_state_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({}), encoding="utf-8")
+
+        assert load_desktop_state().window_open is True
+
+    def test_window_open_round_trips_false(self, monkeypatch, tmp_path):
+        _set_home(monkeypatch, tmp_path)
+        path = desktop_config.desktop_state_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({"window_open": False}), encoding="utf-8")
+
+        assert load_desktop_state().window_open is False
+
+    def test_last_applied_window_size_round_trips(self, monkeypatch, tmp_path):
+        _set_home(monkeypatch, tmp_path)
+        path = desktop_config.desktop_state_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            json.dumps(
+                {"last_applied_window_width": 1600, "last_applied_window_height": 1000}
+            ),
+            encoding="utf-8",
+        )
+
+        state = load_desktop_state()
+        assert state.last_applied_window_width == 1600
+        assert state.last_applied_window_height == 1000
+
+    def test_corrupt_last_applied_window_size_falls_back_to_none(
+        self, monkeypatch, tmp_path
+    ):
+        _set_home(monkeypatch, tmp_path)
+        path = desktop_config.desktop_state_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            json.dumps(
+                {
+                    "last_applied_window_width": "wide",
+                    "last_applied_window_height": None,
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        state = load_desktop_state()
+        assert state.last_applied_window_width is None
+        assert state.last_applied_window_height is None
+
+
+class TestSessionRestoreRoundTrip:
+    """`window_open` round-trips through set_window_open -> save -> load."""
+
+    def test_set_window_open_persists_and_loads(self, monkeypatch, tmp_path):
+        _set_home(monkeypatch, tmp_path)
+        from my_claude_code.config.desktop import set_window_open
+
+        assert load_desktop_state().window_open is True
+
+        set_window_open(False)
+        assert load_desktop_state().window_open is False
+
+        set_window_open(True)
+        assert load_desktop_state().window_open is True
+
+    def test_record_applied_window_size_persists_and_loads(self, monkeypatch, tmp_path):
+        _set_home(monkeypatch, tmp_path)
+        from my_claude_code.config.desktop import record_applied_window_size
+
+        record_applied_window_size(1500, 950)
+        state = load_desktop_state()
+        assert state.last_applied_window_width == 1500
+        assert state.last_applied_window_height == 950
+
 
 class TestSaveDesktopState:
     def test_round_trip(self, monkeypatch, tmp_path):
@@ -763,3 +839,42 @@ def test_set_start_at_login_persists_flag_and_reconciles_os(
 
     assert load_desktop_state().start_at_login is False
     assert WINDOWS_RUN_VALUE not in fake_winreg.values
+
+
+class TestClosingTheAppDoesNotSuppressTheNextWindow:
+    """A close that ends the app must not persist "no window".
+
+    minimize_to_tray is off by default, so closing the window quits. If that
+    path recorded window_open=False, the ordinary act of closing the app would
+    stop it ever opening a window again on the next launch.
+    """
+
+    def _controller(self, monkeypatch, tmp_path):
+        from my_claude_code.cli.desktop import DesktopController
+        from my_claude_code.core.interprocess_lock import InterprocessFileLock
+
+        _set_home(monkeypatch, tmp_path)
+        return DesktopController(lock=InterprocessFileLock(tmp_path / "d.lock"))
+
+    def test_a_close_that_quits_leaves_the_window_state_alone(
+        self, monkeypatch, tmp_path
+    ):
+        controller = self._controller(monkeypatch, tmp_path)
+        desktop_config.set_window_open(True)
+        # Default: no minimize-to-tray, so closing the window ends the app.
+        desktop_config._update_state(minimize_to_tray=False)
+
+        keeps_running = controller.handle_window_closed()
+
+        assert keeps_running is False
+        assert desktop_config.load_desktop_state().window_open is True
+
+    def test_a_close_that_minimises_records_no_window(self, monkeypatch, tmp_path):
+        controller = self._controller(monkeypatch, tmp_path)
+        desktop_config.set_window_open(True)
+        desktop_config._update_state(minimize_to_tray=True, tray_enabled=True)
+
+        keeps_running = controller.handle_window_closed()
+
+        assert keeps_running is True
+        assert desktop_config.load_desktop_state().window_open is False
