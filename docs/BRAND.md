@@ -47,20 +47,47 @@ Precise, local-first, active, factual, and explicit about trade-offs.
 Use this as the hero/positioning line. It is the canonical summary of the
 product's local-first stance.
 
-## 5. Signature mark — the "MC route glyph"
+## 5. Signature mark — the MCC mark
 
-The brand mark is a compact **MC route glyph**: two routing lanes converging
-through a single control point (the local proxy). It visualises the product's
-core mechanic — many models/agents in, one controlled route out.
+> Superseded: earlier drafts of this document described a text "MC"
+> monogram placeholder rendered at runtime with Pillow, and before that an
+> unbuilt "MC route glyph" concept (two routing lanes converging through a
+> single control point). Neither shipped. The product now ships a real,
+> designed mark as static image assets — this section documents what
+> actually exists in `src/my_claude_code/assets/`.
+
+The brand mark ships as **two separate PNG renders of the same mark**, cut at
+different margins for the two contexts they render in, plus packaged
+multi-size `.ico`/`.icns` derivatives of the wider-margin render for native
+OS icon slots:
+
+| Asset | Margin | Size | Use case |
+| --- | --- | --- | --- |
+| `app-icon.png` | 10% | 256×256, RGBA, transparent | Windows/taskbar app icons, Start Menu shortcuts, `.app` bundle resources, docs |
+| `app-icon.ico` | 10% (same render as above) | multi-size: 16/24/32/48/64/128/256 | Windows executables, `.lnk` shortcut icons |
+| `app-icon.icns` | 10% (same render as above) | multi-size slots: 16/32/128/256/512 | macOS `.app` bundle `CFBundleIconFile` |
+| `tray-icon.png` | 2% | 128×128, RGBA, transparent | System tray / menu-bar rendering at 16-24px, where the extra margin of the app-icon render would make the mark look too small |
+
+These are deliberately **two separate source files**, not one file scaled at
+render time: the tighter 2% margin on `tray-icon.png` keeps the mark legible
+at the tiny sizes trays actually render (16-24px), where the 10% margin used
+everywhere else would shrink the glyph too far to read. Always use
+`app_icon_bytes()` / `tray_icon_bytes()` / `export_app_icon()` in
+`src/my_claude_code/cli/desktop_assets.py` to read or export these — never
+read the mark from a hardcoded string literal or re-derive it.
 
 Rules:
 
-- **Use the route glyph**, not gradient initials, emoji, or a generic AI
-  sparkle. The glyph is the only approved logo mark.
-- Render it monochrome or in the palette accent; do not add gradients, glow, or
-  photographic elements.
-- Keep it small and geometric. It reads at 16px favicon scale and at dashboard
-  header scale.
+- **Use the packaged mark**, not gradient initials, emoji, or a generic AI
+  sparkle. It is the only approved logo mark.
+- Do not add gradients, glow, drop shadows, or photographic elements on top of
+  the mark; it ships pre-rendered.
+- Never stretch, recolor, or crop the mark. Use the `app-icon` variant or the
+  `tray-icon` variant as-is for their respective contexts.
+- A Pillow-generated "MC" monogram remains in `desktop_assets.py` as a
+  defensive fallback only, for the case where the packaged asset file is
+  missing at runtime (e.g. a corrupted install). It is not a design choice
+  and should be unreachable in normal operation.
 
 ## 6. Typography
 
@@ -89,6 +116,23 @@ All colors are **semantic tokens** built on primitive tokens (see
 Token tiers: **primitives → semantic → component**. Components reference
 semantic tokens only; never hardcode raw hex in component styles. Charts read
 colors through the `token()` helper so they re-theme automatically.
+
+### Measured mark color
+
+The palette above is fixed and is not re-derived here. As a validation
+check, the mark's red was sampled directly from the shipped
+`src/my_claude_code/assets/app-icon.png` (fully-opaque pixels only, via
+Pillow) rather than assumed:
+
+- Darkest solid fill sampled: `#9f1131`
+- Lightest solid fill sampled: `#dd2643`
+- Average of all fully-opaque mark pixels: `#b22242`
+
+All three sit in the roughly `#b01030`–`#f02040` red band, and land close to
+the existing **Velvet** theme's accent, `#e6435e` — confirming the mark reads
+correctly next to Velvet without needing a new accent. This is a measurement
+of the existing asset, not a new palette decision; do not add a fifth theme
+or new accent token from this sample.
 
 ## 8. Motion
 

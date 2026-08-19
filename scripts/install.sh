@@ -20,6 +20,11 @@ voice_local=0
 voice_all=0
 torch_backend=""
 enable_rtk=0
+enable_desktop=0
+# Set by the launcher-creation helpers so the closing message reports what
+# actually happened instead of hedging with "(if the platform supports it)".
+desktop_launcher_created=""
+desktop_launcher_error=""
 temporary_script=""
 temporary_directory=""
 release_wheel_path=""
@@ -40,6 +45,7 @@ Options:
   --voice-all              Install all voice transcription backends.
   --torch-backend VALUE    Use a uv PyTorch backend, such as cu130. Requires local voice.
   --rtk                    Enable RTK token optimization for Claude Code, Codex, and Pi.
+  --desktop                Create a desktop launcher (app menu entry / .app bundle) for mcc-desktop.
   --dry-run                Print commands without running them.
   --help                   Show this help text.
 USAGE
@@ -316,6 +322,9 @@ parse_args() {
             --rtk)
                 enable_rtk=1
                 ;;
+            --desktop)
+                enable_desktop=1
+                ;;
             --version)
                 shift
                 [ "$#" -gt 0 ] || fail "--version requires a value."
@@ -478,6 +487,123 @@ enable_rtk_for_agents() {
     fi
 }
 
+create_desktop_shortcut() {
+    [ "$enable_desktop" -eq 1 ] || return 0
+
+    step "Creating a desktop launcher"
+    if [ "$dry_run" -eq 1 ]; then
+        printf '+ export app icon and write a desktop launcher for mcc-desktop\n'
+        return 0
+    fi
+
+    if desktop_launcher_path=$(command -v mcc-desktop 2>/dev/null); then
+        :
+    else
+        desktop_launcher_path="$tool_bin/mcc-desktop"
+    fi
+
+    case "$(uname -s 2>/dev/null)" in
+        Darwin)
+            if desktop_launcher_created=$(create_macos_app_bundle "$desktop_launcher_path"); then
+                printf '%s\n' "$desktop_launcher_created"
+            else
+                desktop_launcher_error="could not write the app bundle under ~/Applications (icon export or bundle write failed)"
+                printf 'warning: %s; continuing without it.\n' "$desktop_launcher_error" >&2
+            fi
+            ;;
+        *)
+            if desktop_launcher_created=$(create_linux_desktop_entry "$desktop_launcher_path"); then
+                printf '%s\n' "$desktop_launcher_created"
+            else
+                desktop_launcher_error="could not write the desktop entry under ~/.local/share (icon export or entry write failed)"
+                printf 'warning: %s; continuing without it.\n' "$desktop_launcher_error" >&2
+            fi
+            ;;
+    esac
+}
+
+create_linux_desktop_entry() {
+    launcher_path=$1
+    icons_dir="$HOME/.local/share/icons/hicolor/256x256/apps"
+    applications_dir="$HOME/.local/share/applications"
+    icon_path="$icons_dir/my-claude-code.png"
+    desktop_file="$applications_dir/my-claude-code.desktop"
+
+    mkdir -p "$icons_dir" "$applications_dir" || return 1
+
+    # An entry whose Icon= points at a missing file renders as a blank tile, so
+    # verify the export produced real bytes rather than trusting the exit code.
+    if ! "$launcher_path" --export-icon "$icon_path" >/dev/null 2>&1 || [ ! -s "$icon_path" ]; then
+        printf 'warning: could not export the app icon; the entry will use no icon.\n' >&2
+        icon_path=""
+    fi
+
+    cat > "$desktop_file" <<DESKTOP_ENTRY
+[Desktop Entry]
+Type=Application
+Name=My Claude Code
+Comment=Local proxy connecting coding agents to OpenAI-compatible AI providers
+Exec=$launcher_path
+Icon=$icon_path
+Terminal=false
+Categories=Development;Utility;
+DESKTOP_ENTRY
+
+    if command -v update-desktop-database >/dev/null 2>&1; then
+        update-desktop-database "$applications_dir" >/dev/null 2>&1 || true
+    fi
+
+    desktop_launcher_created="$desktop_file"
+    printf 'Created desktop launcher: %s\n' "$desktop_file"
+}
+
+create_macos_app_bundle() {
+    launcher_path=$1
+    app_dir="$HOME/Applications/My Claude Code.app"
+    contents_dir="$app_dir/Contents"
+    macos_dir="$contents_dir/MacOS"
+    resources_dir="$contents_dir/Resources"
+    icns_path="$resources_dir/app-icon.icns"
+
+    mkdir -p "$macos_dir" "$resources_dir" || return 1
+
+    if ! "$launcher_path" --export-icon "$icns_path" >/dev/null 2>&1 || [ ! -s "$icns_path" ]; then
+        printf 'warning: could not export the app icon; the bundle will use the default icon.\n' >&2
+    fi
+
+    cat > "$contents_dir/Info.plist" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleName</key>
+    <string>My Claude Code</string>
+    <key>CFBundleDisplayName</key>
+    <string>My Claude Code</string>
+    <key>CFBundleIdentifier</key>
+    <string>com.my-claude-code.desktop</string>
+    <key>CFBundleExecutable</key>
+    <string>my-claude-code</string>
+    <key>CFBundleIconFile</key>
+    <string>app-icon.icns</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleShortVersionString</key>
+    <string>1.0</string>
+</dict>
+</plist>
+PLIST
+
+    cat > "$macos_dir/my-claude-code" <<WRAPPER
+#!/bin/sh
+exec "$launcher_path" "\$@"
+WRAPPER
+    chmod +x "$macos_dir/my-claude-code" || return 1
+
+    desktop_launcher_created="$app_dir"
+    printf 'Created macOS app bundle: %s\n' "$app_dir"
+}
+
 configure_and_verify_my_claude_code() {
     run uv tool update-shell
 
@@ -542,6 +668,7 @@ step "Configuring PATH and verifying My Claude Code"
 configure_and_verify_my_claude_code
 
 enable_rtk_for_agents
+create_desktop_shortcut
 
 if [ "$dry_run" -eq 1 ]; then
     printf '\nDry run complete. No changes were made.\n'
@@ -559,6 +686,13 @@ else
     printf '  mcc-init                Create or repair ~/.fcc/.env\n'
     printf '  mcc-rtk                 Manage the RTK token optimizer\n'
     printf '  mcc-help                Show what each command does\n'
+    if [ "$enable_desktop" -eq 1 ]; then
+        if [ -n "$desktop_launcher_created" ]; then
+            printf '\nDesktop launcher: %s\n' "$desktop_launcher_created"
+        elif [ -n "$desktop_launcher_error" ]; then
+            printf '\nThe desktop launcher was not created: %s.\n' "$desktop_launcher_error"
+        fi
+    fi
     printf '\nThe legacy fcc-* commands (fcc-server, fcc-claude, ...) remain as aliases.\n'
     printf '\nTo use an update installed while the server is running, restart the proxy\n'
     printf 'with: mcc-server\n'

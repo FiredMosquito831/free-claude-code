@@ -1,6 +1,8 @@
 <div align="center">
 
-# 🤖 My Claude Code
+<img src="assets/logo-lockup.png" alt="My Claude Code" width="420">
+
+# My Claude Code
 
 An Anthropic-compatible local proxy for Claude Code, Codex, Pi, and their IDE extensions — backed by 56 model providers, with multi-key rotation everywhere, built-in web search providers, and full request analytics.
 

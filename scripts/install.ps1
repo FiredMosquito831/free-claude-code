@@ -5,6 +5,7 @@ param(
     [switch] $VoiceAll,
     [string] $TorchBackend = "",
     [switch] $Rtk,
+    [switch] $Desktop,
     [switch] $DryRun,
     [switch] $Help,
     [Parameter(ValueFromRemainingArguments = $true)]
@@ -30,6 +31,11 @@ $script:RenamedWhileRunning = $false
 # not be overwritten (os error 32); a detached helper finishes it after exit.
 $script:NeedDeferredFinish = $false
 $script:EnableRtk = $Rtk.IsPresent
+$script:EnableDesktop = $Desktop.IsPresent
+# Set by New-DesktopShortcut so the closing message reports what actually
+# happened instead of hedging with "(if this succeeded)".
+$script:DesktopShortcutPath = ""
+$script:DesktopShortcutError = ""
 
 function Show-Usage {
     @"
@@ -47,6 +53,7 @@ Options:
   -VoiceAll              Install all voice transcription backends.
   -TorchBackend VALUE    Use a uv PyTorch backend, such as cu130. Requires local voice.
   -Rtk                   Enable RTK token optimization for Claude Code, Codex, and Pi.
+  -Desktop               Create a Start Menu shortcut for mcc-desktop.
   -DryRun                Print commands without running them.
   -Help                  Show this help text.
 "@
@@ -729,6 +736,69 @@ function Enable-RtkForAgents {
     Invoke-NativeCommand -FilePath $rtkShim -Arguments @("enable", "claude,codex,pi")
 }
 
+function New-DesktopShortcut {
+    if (-not $script:EnableDesktop) {
+        return
+    }
+
+    Write-Step "Creating a Start Menu shortcut"
+    if ($DryRun) {
+        Write-Host "+ export app-icon.ico and create a Start Menu shortcut for mcc-desktop"
+        return
+    }
+
+    try {
+        $mccDesktopCommand = Get-ApplicationCommand "mcc-desktop"
+        if ($mccDesktopCommand) {
+            $launcherPath = $mccDesktopCommand.Source
+        }
+        else {
+            $uvCommand = Get-ApplicationCommand "uv"
+            $toolBin = Invoke-NativeCapture -FilePath $uvCommand.Source -Arguments @("tool", "dir", "--bin")
+            $launcherPath = Join-Path $toolBin "mcc-desktop.exe"
+        }
+
+        $configDir = Join-Path $env:USERPROFILE ".fcc"
+        New-Item -ItemType Directory -Path $configDir -Force | Out-Null
+        $iconPath = Join-Path $configDir "app-icon.ico"
+
+        # mcc-desktop is a [project.gui-scripts] entry, so mcc-desktop.exe is a
+        # GUI-subsystem binary and PowerShell's call operator does NOT wait for
+        # it. Invoke-NativeCommand would return in ~0.5s with LASTEXITCODE 0
+        # while the icon is still being written, and IconLocation below would
+        # point at a file that does not exist yet -- a shortcut with a blank
+        # icon, reported as success. Start-Process -Wait is what actually waits.
+        $export = Start-Process -FilePath $launcherPath `
+            -ArgumentList @("--export-icon", $iconPath) `
+            -Wait -PassThru -NoNewWindow
+        $iconReady = ($export.ExitCode -eq 0) -and (Test-Path $iconPath)
+        if (-not $iconReady) {
+            Write-Warning "Could not export the app icon; the shortcut will use the default icon."
+        }
+
+        $startMenuDir = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs"
+        New-Item -ItemType Directory -Path $startMenuDir -Force | Out-Null
+        $shortcutPath = Join-Path $startMenuDir "My Claude Code.lnk"
+
+        $shell = New-Object -ComObject WScript.Shell
+        $shortcut = $shell.CreateShortcut($shortcutPath)
+        $shortcut.TargetPath = $launcherPath
+        # A missing icon must never cost the user the shortcut itself.
+        if ($iconReady) {
+            $shortcut.IconLocation = $iconPath
+        }
+        $shortcut.Description = "My Claude Code"
+        $shortcut.Save()
+
+        $script:DesktopShortcutPath = $shortcutPath
+        Write-Host "Created Start Menu shortcut: $shortcutPath"
+    }
+    catch {
+        $script:DesktopShortcutError = $_.Exception.Message
+        Write-Warning "Could not create the Start Menu shortcut: $($_.Exception.Message)"
+    }
+}
+
 function Configure-AndConfirmFreeClaudeCode {
     param([Parameter(Mandatory = $true)] [string] $ExpectedVersion)
 
@@ -824,6 +894,16 @@ function Write-MccCommandReference {
     Write-Host "  mcc-init                Create or repair ~/.fcc/.env"
     Write-Host "  mcc-rtk                 Manage the RTK token optimizer"
     Write-Host "  mcc-help                Show what each command does"
+    if ($script:EnableDesktop) {
+        Write-Host ""
+        if ($script:DesktopShortcutPath) {
+            Write-Host "Start Menu shortcut: $($script:DesktopShortcutPath)"
+        }
+        elseif ($script:DesktopShortcutError) {
+            Write-Host "The Start Menu shortcut was not created: $($script:DesktopShortcutError)"
+            Write-Host "Run mcc-desktop directly, or rerun this installer with -Desktop."
+        }
+    }
     Write-Host ""
     Write-Host "The legacy fcc-* commands (fcc-server, fcc-claude, ...) remain as aliases."
     Write-Host ""
@@ -1001,6 +1081,7 @@ if ($script:RenamedWhileRunning) {
     Configure-AndConfirmFreeClaudeCode -ExpectedVersion $InstalledVersion
 
     Enable-RtkForAgents
+    New-DesktopShortcut
 
     Write-Host ""
     Write-Host "My Claude Code $InstalledVersion is installed and verified."
@@ -1014,9 +1095,17 @@ if ($script:RenamedWhileRunning) {
 elseif ($script:Deferred) {
     Write-Host ""
     Write-Host "Update staged for after restart."
+    if ($script:EnableDesktop) {
+        # The install has not run yet, so mcc-desktop.exe is not in place to
+        # export its icon. Say so rather than leaving -Desktop silently ignored.
+        Write-Host ""
+        Write-Host "The Start Menu shortcut was not created: the install completes after you stop"
+        Write-Host "the running app. Rerun this installer with -Desktop once it has finished."
+    }
 }
 elseif ($DryRun) {
     Enable-RtkForAgents
+    New-DesktopShortcut
 
     Write-Host ""
     Write-Host "Dry run complete. No changes were made."
@@ -1026,6 +1115,7 @@ else {
     Configure-AndConfirmFreeClaudeCode -ExpectedVersion $InstalledVersion
 
     Enable-RtkForAgents
+    New-DesktopShortcut
 
     Write-Host ""
     Write-Host "My Claude Code $InstalledVersion is installed and verified."
