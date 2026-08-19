@@ -1,6 +1,7 @@
 """Desktop deployment preferences and per-platform login registration."""
 
 import json
+import logging
 import os
 import shlex
 import shutil
@@ -14,6 +15,9 @@ from typing import Literal, cast
 
 from .claude_discovery import native_origin
 from .paths import config_dir_path
+from .settings import get_settings
+
+logger = logging.getLogger(__name__)
 
 DESKTOP_STATE_FILENAME = "desktop.json"
 SERVER_MODES = ("spawn", "attach", "off")
@@ -260,9 +264,33 @@ def chromium_binary() -> str | None:
     return None if found is None else found[0]
 
 
+def _configured_browser_path() -> tuple[str, str] | None:
+    """Return ``(path, display_name)`` for an explicit ``DESKTOP_BROWSER_PATH``.
+
+    An explicit path takes precedence over the candidate search below, since
+    that search is the only way today to find a Chromium installed somewhere
+    unusual. A path that does not exist is a guardrail, not an outage: it
+    logs a warning and falls through to the search rather than failing.
+    """
+
+    configured = get_settings().desktop_browser_path.strip()
+    if not configured:
+        return None
+    if Path(configured).is_file():
+        return configured, "configured browser"
+    logger.warning(
+        "DESKTOP_BROWSER_PATH %r does not exist; falling back to browser search.",
+        configured,
+    )
+    return None
+
+
 def _chromium_binary_with_label() -> tuple[str, str] | None:
     """Return ``(path, display_name)`` for the first Chromium-family browser found."""
 
+    configured = _configured_browser_path()
+    if configured is not None:
+        return configured
     for candidate in _chromium_candidates():
         resolved = candidate.resolve()
         if resolved is not None:

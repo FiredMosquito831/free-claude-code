@@ -34,17 +34,10 @@ from my_claude_code.config.server_urls import local_admin_url, local_proxy_root_
 from my_claude_code.config.settings import get_settings
 from my_claude_code.core.interprocess_lock import InterprocessFileLock
 
-_HEALTH_CHECK_INTERVAL_SECONDS = 0.25
-_START_WAIT_SECONDS = 15.0
-_ADMIN_REQUEST_TIMEOUT_SECONDS = 5.0
-
 _SERVER_MODULE = "my_claude_code.cli.entrypoints"
 
 LOCK_FILENAME = "desktop.lock"
 ACTIVATION_FILENAME = "desktop.activate"
-ACTIVATION_POLL_SECONDS = 1.0
-HEALTH_POLL_INTERVAL_SECONDS = 5.0
-HEALTH_FAILURE_THRESHOLD = 3
 
 #: Three distinguishable states of the configured host:port.
 type ServerPresence = Literal["healthy", "foreign", "free"]
@@ -103,8 +96,13 @@ class HealthTracker:
     notification, and only one notification is raised per outage.
     """
 
-    def __init__(self, threshold: int = HEALTH_FAILURE_THRESHOLD) -> None:
-        self._threshold = max(1, threshold)
+    def __init__(self, threshold: int | None = None) -> None:
+        resolved = (
+            threshold
+            if threshold is not None
+            else get_settings().desktop_health_failure_threshold
+        )
+        self._threshold = max(1, resolved)
         self._failures = 0
         self._notified = False
 
@@ -233,12 +231,12 @@ class DesktopController:
         except OSError as exc:
             raise DesktopError(f"Could not start the MCC server: {exc}") from exc
 
-        deadline = time.monotonic() + _START_WAIT_SECONDS
+        deadline = time.monotonic() + settings.desktop_server_start_timeout
         root_url = local_proxy_root_url(settings)
         while time.monotonic() < deadline:
             if preflight_proxy(root_url) is None:
                 return
-            time.sleep(_HEALTH_CHECK_INTERVAL_SECONDS)
+            time.sleep(settings.desktop_health_check_interval)
         raise DesktopError(
             "The MCC server did not become healthy in time. It may be starting "
             "still, or it failed to bind its port."
@@ -302,7 +300,9 @@ class DesktopController:
             headers={"Content-Type": "application/json"} if data else {},
         )
         try:
-            with urlopen(request, timeout=_ADMIN_REQUEST_TIMEOUT_SECONDS) as response:
+            with urlopen(
+                request, timeout=get_settings().desktop_admin_request_timeout
+            ) as response:
                 raw = response.read()
         except HTTPError as exc:
             detail = exc.read().decode("utf-8", "replace")
@@ -372,8 +372,8 @@ class DesktopController:
         on_unhealthy: Callable[[], None],
         *,
         on_recovered: Callable[[], None] | None = None,
-        interval: float = HEALTH_POLL_INTERVAL_SECONDS,
-        threshold: int = HEALTH_FAILURE_THRESHOLD,
+        interval: float | None = None,
+        threshold: int | None = None,
     ) -> None:
         """Poll the server on a daemon thread and report an outage once.
 
@@ -384,6 +384,11 @@ class DesktopController:
 
         if self._health_stop is not None:
             return
+        settings = get_settings()
+        if interval is None:
+            interval = settings.desktop_health_poll_seconds
+        if threshold is None:
+            threshold = settings.desktop_health_failure_threshold
         stop = threading.Event()
         self._health_stop = stop
         threading.Thread(
@@ -582,7 +587,7 @@ def _watch_activation(
     controller: DesktopController,
     stop: threading.Event,
 ) -> None:
-    while not stop.wait(ACTIVATION_POLL_SECONDS):
+    while not stop.wait(get_settings().desktop_activation_poll_seconds):
         if signal.poll():
             with suppress(Exception):
                 controller.show_window()

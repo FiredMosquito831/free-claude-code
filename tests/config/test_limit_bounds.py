@@ -100,3 +100,25 @@ def test_the_form_rejects_an_out_of_range_value_instead_of_clamping() -> None:
 def test_a_field_without_a_range_is_left_alone() -> None:
     assert range_for("model") is None
     assert range_for(None) is None
+
+
+def test_a_below_floor_desktop_window_width_is_clamped_to_the_real_floor() -> None:
+    """Locks the actual usable floor, not just whatever the table currently says.
+
+    The generic parametrized checks above read their expectation out of
+    ``LIMIT_RANGES`` itself, so they cannot catch someone silently widening a
+    bound. This hardcodes the real floor a too-small window would be clamped
+    to.
+    """
+    assert _with("desktop_window_width", "100").desktop_window_width == 640
+    assert _with("desktop_window_height", "50").desktop_window_height == 480
+
+
+def test_a_zero_desktop_health_failure_threshold_still_reports_on_first_failure() -> (
+    None
+):
+    """A threshold of 0 would mean "never report an outage"; the floor is 1."""
+    assert (
+        _with("desktop_health_failure_threshold", "0").desktop_health_failure_threshold
+        == 1
+    )

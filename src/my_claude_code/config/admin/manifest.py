@@ -95,6 +95,14 @@ SECTIONS: tuple[ConfigSectionSpec, ...] = (
         "how much history survives on disk.",
     ),
     ConfigSectionSpec(
+        "desktop",
+        "Desktop",
+        "Tray/window timing and sizing for mcc-desktop. mcc-desktop is a "
+        "separate process from the server and reads these once, at launch -- "
+        "a change here applies to the next mcc-desktop start, not to a tray "
+        "already running.",
+    ),
+    ConfigSectionSpec(
         "diagnostics",
         "Diagnostics",
         "Logging and debugging flags.",
@@ -1196,6 +1204,130 @@ _NON_PROVIDER_FIELDS: tuple[ConfigFieldSpec, ...] = (
             "How much the server writes to its log file. DEBUG includes every "
             "routing decision, which is what to use when a fallback behaves "
             "unexpectedly."
+        ),
+    ),
+    # ---- Desktop: mcc-desktop is a separate process, read once at launch --
+    ConfigFieldSpec(
+        "DESKTOP_HEALTH_CHECK_INTERVAL",
+        "Startup health poll",
+        "desktop",
+        "number",
+        settings_attr="desktop_health_check_interval",
+        default="0.25",
+        description=(
+            "How often mcc-desktop checks whether a freshly spawned "
+            "mcc-server has become healthy. Applies the next time mcc-desktop "
+            "starts, not to a tray already running."
+        ),
+    ),
+    ConfigFieldSpec(
+        "DESKTOP_SERVER_START_TIMEOUT",
+        "Server start timeout",
+        "desktop",
+        "number",
+        settings_attr="desktop_server_start_timeout",
+        default="15",
+        description=(
+            "How long mcc-desktop waits for a spawned mcc-server to become "
+            "healthy before reporting a start failure. Applies the next time "
+            "mcc-desktop starts, not to a tray already running."
+        ),
+    ),
+    ConfigFieldSpec(
+        "DESKTOP_ADMIN_REQUEST_TIMEOUT",
+        "Admin API timeout",
+        "desktop",
+        "number",
+        settings_attr="desktop_admin_request_timeout",
+        default="5",
+        description=(
+            "Timeout for one loopback call mcc-desktop makes to the server's "
+            "admin API. Applies the next time mcc-desktop starts, not to a "
+            "tray already running."
+        ),
+    ),
+    ConfigFieldSpec(
+        "DESKTOP_ACTIVATION_POLL_SECONDS",
+        "Activation poll",
+        "desktop",
+        "number",
+        settings_attr="desktop_activation_poll_seconds",
+        default="1",
+        advanced=True,
+        description=(
+            "How often mcc-desktop checks for another launch's \"show my "
+            'window" signal. Applies the next time mcc-desktop starts, not '
+            "to a tray already running."
+        ),
+    ),
+    ConfigFieldSpec(
+        "DESKTOP_HEALTH_POLL_SECONDS",
+        "Ongoing health poll",
+        "desktop",
+        "number",
+        settings_attr="desktop_health_poll_seconds",
+        default="5",
+        description=(
+            "How often the running tray probes mcc-server once it is up. "
+            "Applies the next time mcc-desktop starts, not to a tray already "
+            "running."
+        ),
+    ),
+    ConfigFieldSpec(
+        "DESKTOP_HEALTH_FAILURE_THRESHOLD",
+        "Outage threshold",
+        "desktop",
+        "number",
+        settings_attr="desktop_health_failure_threshold",
+        default="3",
+        description=(
+            "Consecutive failed health probes before mcc-desktop reports an "
+            "outage. This is what keeps a brief self-update restart from "
+            "being read as the server dying. Applies the next time "
+            "mcc-desktop starts, not to a tray already running."
+        ),
+    ),
+    ConfigFieldSpec(
+        "DESKTOP_WINDOW_WIDTH",
+        "Window width",
+        "desktop",
+        "number",
+        settings_attr="desktop_window_width",
+        default="1400",
+        description=(
+            "Width, in CSS pixels, of the app-mode/embedded dashboard window. "
+            "Applies the next time mcc-desktop starts, not to a window "
+            "already open."
+        ),
+    ),
+    ConfigFieldSpec(
+        "DESKTOP_WINDOW_HEIGHT",
+        "Window height",
+        "desktop",
+        "number",
+        settings_attr="desktop_window_height",
+        default="900",
+        description=(
+            "Height, in CSS pixels, of the app-mode/embedded dashboard "
+            "window. Applies the next time mcc-desktop starts, not to a "
+            "window already open."
+        ),
+    ),
+    ConfigFieldSpec(
+        "DESKTOP_BROWSER_PATH",
+        "Browser path",
+        "desktop",
+        "text",
+        settings_attr="desktop_browser_path",
+        default="",
+        description=(
+            "Explicit path to a Chromium-family browser binary (Chrome, "
+            "Edge, Brave, or Chromium). When set, it is used instead of the "
+            "built-in search, which is otherwise the only way an unusually "
+            "installed browser can be found. When set but the file does not "
+            "exist, mcc-desktop logs a warning and falls back to the search "
+            "instead of failing to open a window. Applies the next time "
+            "mcc-desktop starts, not to a window already open."
         ),
     ),
 )

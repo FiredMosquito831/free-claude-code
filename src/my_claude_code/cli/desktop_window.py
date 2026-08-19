@@ -31,10 +31,10 @@ from my_claude_code.config.desktop import (
     chromium_binary,
 )
 from my_claude_code.config.paths import config_dir_path
+from my_claude_code.config.settings import get_settings
 
 logger = logging.getLogger(__name__)
 
-WINDOW_SIZE = "1400,900"
 LINUX_WM_CLASS = "MyClaudeCode"
 PROFILE_DIRNAME = "desktop-profile"
 
@@ -92,11 +92,13 @@ class AppModeWindow:
         return None if binary is None else cls(binary)
 
     def command(self, url: str) -> list[str]:
+        settings = get_settings()
         command = [
             self._binary,
             f"--app={url}",
             f"--user-data-dir={self._profile_dir}",
-            f"--window-size={WINDOW_SIZE}",
+            f"--window-size={settings.desktop_window_width},"
+            f"{settings.desktop_window_height}",
         ]
         if sys.platform not in {"win32", "darwin"}:
             # Without an explicit WM class the window groups under "Chromium".
@@ -226,15 +228,16 @@ class PywebviewWindow:
         import threading
 
         webview = self._webview
-        settings = webview.settings
-        settings["ALLOW_DOWNLOADS"] = True
-        settings["OPEN_EXTERNAL_LINKS_IN_BROWSER"] = True
+        webview_settings = webview.settings
+        webview_settings["ALLOW_DOWNLOADS"] = True
+        webview_settings["OPEN_EXTERNAL_LINKS_IN_BROWSER"] = True
+        mcc_settings = get_settings()
         window = webview.create_window(
             "My Claude Code",
             url,
             js_api=_PywebviewApi(),
-            width=1400,
-            height=900,
+            width=mcc_settings.desktop_window_width,
+            height=mcc_settings.desktop_window_height,
         )
         self._window = window
         loaded = getattr(getattr(window, "events", None), "loaded", None)

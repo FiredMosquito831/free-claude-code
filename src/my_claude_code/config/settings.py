@@ -10,6 +10,14 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from .constants import (
     CHATGPT_OAUTH_MANAGED_CREDENTIAL_REFERENCE,
     CREDENTIAL_CIRCUIT_THRESHOLD_DEFAULT,
+    DESKTOP_ACTIVATION_POLL_SECONDS_DEFAULT,
+    DESKTOP_ADMIN_REQUEST_TIMEOUT_DEFAULT,
+    DESKTOP_HEALTH_CHECK_INTERVAL_DEFAULT,
+    DESKTOP_HEALTH_FAILURE_THRESHOLD_DEFAULT,
+    DESKTOP_HEALTH_POLL_SECONDS_DEFAULT,
+    DESKTOP_SERVER_START_TIMEOUT_DEFAULT,
+    DESKTOP_WINDOW_HEIGHT_DEFAULT,
+    DESKTOP_WINDOW_WIDTH_DEFAULT,
     FALLBACK_EJECT_AFTER_FAILURES_DEFAULT,
     FALLBACK_EJECT_SECONDS_DEFAULT,
     FALLBACK_FIRST_TOKEN_TIMEOUT_DEFAULT,
@@ -765,6 +773,61 @@ class Settings(BaseSettings):
     server_graceful_shutdown_seconds: float = Field(
         default=SERVER_GRACEFUL_SHUTDOWN_SECONDS_DEFAULT,
         validation_alias="SERVER_GRACEFUL_SHUTDOWN_SECONDS",
+    )
+
+    # ==================== Desktop (mcc-desktop) ====================
+    # mcc-desktop is a SEPARATE PROCESS from the server. It calls
+    # get_settings() once, at launch, so a change made here in the dashboard
+    # applies to the next mcc-desktop start, not to a tray already running.
+    #
+    # Tight poll used while waiting for a freshly spawned mcc-server child to
+    # become healthy.
+    desktop_health_check_interval: float = Field(
+        default=DESKTOP_HEALTH_CHECK_INTERVAL_DEFAULT,
+        validation_alias="DESKTOP_HEALTH_CHECK_INTERVAL",
+    )
+    # How long to wait for a spawned mcc-server child to become healthy
+    # before reporting a start failure.
+    desktop_server_start_timeout: float = Field(
+        default=DESKTOP_SERVER_START_TIMEOUT_DEFAULT,
+        validation_alias="DESKTOP_SERVER_START_TIMEOUT",
+    )
+    # Timeout for one loopback call to the server's admin API.
+    desktop_admin_request_timeout: float = Field(
+        default=DESKTOP_ADMIN_REQUEST_TIMEOUT_DEFAULT,
+        validation_alias="DESKTOP_ADMIN_REQUEST_TIMEOUT",
+    )
+    # How often the tray polls for another instance's "show my window" signal.
+    desktop_activation_poll_seconds: float = Field(
+        default=DESKTOP_ACTIVATION_POLL_SECONDS_DEFAULT,
+        validation_alias="DESKTOP_ACTIVATION_POLL_SECONDS",
+    )
+    # How often the tray's background thread probes the running server once
+    # it is up (the ongoing health monitor, distinct from the startup poll).
+    desktop_health_poll_seconds: float = Field(
+        default=DESKTOP_HEALTH_POLL_SECONDS_DEFAULT,
+        validation_alias="DESKTOP_HEALTH_POLL_SECONDS",
+    )
+    # Consecutive failed health probes before the tray reports an outage.
+    # Debounces a self-update restart so it is not read as the server dying.
+    desktop_health_failure_threshold: int = Field(
+        default=DESKTOP_HEALTH_FAILURE_THRESHOLD_DEFAULT,
+        validation_alias="DESKTOP_HEALTH_FAILURE_THRESHOLD",
+    )
+    # Desktop window size, in CSS pixels, for the app-mode/embedded window.
+    desktop_window_width: int = Field(
+        default=DESKTOP_WINDOW_WIDTH_DEFAULT, validation_alias="DESKTOP_WINDOW_WIDTH"
+    )
+    desktop_window_height: int = Field(
+        default=DESKTOP_WINDOW_HEIGHT_DEFAULT,
+        validation_alias="DESKTOP_WINDOW_HEIGHT",
+    )
+    # Explicit path to a Chromium-family binary (Chrome/Edge/Brave/Chromium).
+    # When set, it takes precedence over the built-in candidate search; when
+    # it points at something that does not exist, mcc-desktop logs a warning
+    # and falls through to the search rather than failing to open a window.
+    desktop_browser_path: str = Field(
+        default="", validation_alias="DESKTOP_BROWSER_PATH"
     )
 
     # Handle empty strings for optional string fields

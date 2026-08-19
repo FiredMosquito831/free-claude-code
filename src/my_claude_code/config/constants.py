@@ -71,3 +71,16 @@ REQUEST_LOG_QUEUE_MAX_SIZE_DEFAULT = 10_000
 # screenshot is megabytes; at 512px it is tens of kilobytes and still legible,
 # and identical images are stored once however many turns re-send them.
 REQUEST_LOG_IMAGE_MAX_PIXELS_DEFAULT = 512
+
+# Desktop tray/window process timing and sizing. mcc-desktop is a separate
+# process from the server: it calls get_settings() at launch, so a change
+# made in the dashboard applies to the next mcc-desktop start, not to a tray
+# already running. See config/limits.py for the bounds and their reasons.
+DESKTOP_HEALTH_CHECK_INTERVAL_DEFAULT = 0.25
+DESKTOP_SERVER_START_TIMEOUT_DEFAULT = 15.0
+DESKTOP_ADMIN_REQUEST_TIMEOUT_DEFAULT = 5.0
+DESKTOP_ACTIVATION_POLL_SECONDS_DEFAULT = 1.0
+DESKTOP_HEALTH_POLL_SECONDS_DEFAULT = 5.0
+DESKTOP_HEALTH_FAILURE_THRESHOLD_DEFAULT = 3
+DESKTOP_WINDOW_WIDTH_DEFAULT = 1400
+DESKTOP_WINDOW_HEIGHT_DEFAULT = 900
