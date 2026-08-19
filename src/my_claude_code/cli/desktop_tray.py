@@ -6,7 +6,7 @@ from PIL import Image
 from pystray import Icon, Menu, MenuItem
 
 from my_claude_code.cli.desktop import DesktopController
-from my_claude_code.cli.desktop_assets import app_icon_bytes
+from my_claude_code.cli.desktop_assets import tray_icon_bytes
 from my_claude_code.config.desktop import (
     load_desktop_state,
     set_server_mode,
@@ -112,6 +112,11 @@ class PystrayDesktopTray:
             MenuItem("Quit", self._quit),
         )
 
+    def notify(self, message: str) -> None:
+        """Surface a controller-side event in the platform notification area."""
+
+        self._icon.notify(message, _APP_NAME)
+
     def run(self) -> None:
         self._icon.run()
 
@@ -196,9 +201,15 @@ class PystrayDesktopTray:
 
 
 def _create_icon() -> Image.Image:
-    """Load the same branded artwork used by native desktop launchers."""
+    """Load the tray-specific cut of the brand mark.
 
-    with Image.open(BytesIO(app_icon_bytes(".png"))) as image:
+    Deliberately not ``app_icon_bytes``: that render carries a 10% margin for
+    window and taskbar use, and a status area draws at 16-24px, where the
+    padding costs enough of the glyph to make it unreadable. ``tray-icon.png``
+    is the same mark at a 2% margin for exactly this surface.
+    """
+
+    with Image.open(BytesIO(tray_icon_bytes())) as image:
         return image.convert("RGBA")
 
 

@@ -148,3 +148,39 @@ def test_check_status_off_reports_off(monkeypatch, tmp_path):
     tray._check_status(None, None)
 
     assert notifications == ["Server is off (tray only)."]
+
+
+class TestTrayIconVariant:
+    """The tray must use the tight-margin mark, not the app icon."""
+
+    def test_create_icon_uses_the_tray_render_not_the_app_render(self) -> None:
+        from io import BytesIO
+
+        from PIL import Image
+
+        from my_claude_code.cli import desktop_tray
+        from my_claude_code.cli.desktop_assets import app_icon_bytes
+
+        icon = desktop_tray._create_icon()
+
+        with Image.open(BytesIO(app_icon_bytes(".png"))) as app_icon:
+            app_size = app_icon.size
+
+        # A status area draws at 16-24px, where the app render's 10% margin
+        # costs enough of the glyph to make it unreadable. The two renders are
+        # separate files precisely so this cannot drift back.
+        assert icon.size != app_size
+        assert icon.size == (128, 128)
+
+    def test_the_tray_mark_is_transparent(self) -> None:
+        from my_claude_code.cli import desktop_tray
+
+        icon = desktop_tray._create_icon()
+
+        # Quantising these assets once destroyed the alpha silently, shipping a
+        # faint box behind the mark. Zero alpha must survive to the tray.
+        # Read the alpha band directly rather than unpacking pixel tuples: the
+        # flattened-data API is typed as a flat sequence of ints, so indexing it
+        # per pixel is a type error even though it works at run time.
+        alpha_band = icon.convert("RGBA").getchannel("A")
+        assert alpha_band.getextrema() == (0, 255)

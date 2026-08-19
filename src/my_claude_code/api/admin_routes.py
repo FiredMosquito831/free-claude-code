@@ -720,6 +720,7 @@ def _desktop_state_response(state: DesktopState) -> dict[str, Any]:
         "start_at_login": state.start_at_login,
         "minimize_to_tray": state.minimize_to_tray,
         "server_mode": state.server_mode,
+        "window": state.window,
     }
 
 
@@ -784,6 +785,7 @@ async def update_desktop(payload: DesktopUpdatePayload, request: Request):
         start_at_login=updates.get("start_at_login", current.start_at_login),
         minimize_to_tray=updates.get("minimize_to_tray", current.minimize_to_tray),
         server_mode=updates.get("server_mode", current.server_mode),
+        window=current.window,
     )
     await asyncio.to_thread(save_desktop_state, updated)
     return _desktop_state_response(updated)
