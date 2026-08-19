@@ -101,7 +101,8 @@ def test_replay_is_independent_of_current_turn_reasoning_control():
     body = provider._build_request_body(request, reasoning=REASONING_OFF)
 
     assert body["messages"][0]["reasoning_content"] == "hidden"
-    assert body["reasoning_effort"] == "none"
+    assert body["extra_body"]["thinking"] == {"type": "disabled"}
+    assert "reasoning_effort" not in body
 
 
 def test_build_request_body_preserves_validated_extra_body(fireworks_provider):
