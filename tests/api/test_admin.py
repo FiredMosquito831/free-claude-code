@@ -1,3 +1,4 @@
+import json
 import re
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -1650,6 +1651,248 @@ def test_admin_chatgpt_oauth_import_codex_reports_missing_tokens(monkeypatch, tm
 
     assert response.status_code == 400
     assert "Codex" in response.json()["detail"]
+
+
+# --------------------------------------------------------------------- Anthropic OAuth
+
+
+def _write_claude_code_credentials(tmp_path: Path, *, access_token: str) -> Path:
+    claude_dir = tmp_path / ".claude"
+    claude_dir.mkdir(parents=True, exist_ok=True)
+    path = claude_dir / ".credentials.json"
+    path.write_text(
+        json.dumps(
+            {
+                "claudeAiOauth": {
+                    "accessToken": access_token,
+                    "refreshToken": "refresh-secret-value",
+                    "expiresAt": 9_999_999_999_000,
+                    "subscriptionType": "max",
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    return path
+
+
+def test_admin_anthropic_oauth_sources_is_loopback_only(monkeypatch, tmp_path):
+    _set_home(monkeypatch, tmp_path)
+    _clear_process_config(monkeypatch)
+    app = create_test_app()
+    remote_client = TestClient(app, client=("203.0.113.10", 50000))
+
+    response = remote_client.get("/admin/api/anthropic-oauth/sources")
+
+    assert response.status_code == 403
+
+
+def test_admin_anthropic_oauth_sources_reports_masked_token_only(monkeypatch, tmp_path):
+    """No raw token may appear anywhere in the response body."""
+    _set_home(monkeypatch, tmp_path)
+    _clear_process_config(monkeypatch)
+    _write_claude_code_credentials(
+        tmp_path, access_token="sk-ant-oat-super-secret-value"
+    )
+    app = create_test_app()
+
+    response = _local_client(app).get("/admin/api/anthropic-oauth/sources")
+
+    assert response.status_code == 200
+    body_text = response.text
+    assert "sk-ant-oat-super-secret-value" not in body_text
+    assert "refresh-secret-value" not in body_text
+    data = response.json()
+    assert data["claude_code"]["available"] is True
+    assert data["claude_code"]["masked_token"] == "sk-a…alue"
+    assert data["claude_code"]["subscription_type"] == "max"
+    assert data["mcc"]["available"] is False
+
+
+def test_admin_anthropic_oauth_sources_reports_nothing_available(monkeypatch, tmp_path):
+    _set_home(monkeypatch, tmp_path)
+    _clear_process_config(monkeypatch)
+    app = create_test_app()
+
+    response = _local_client(app).get("/admin/api/anthropic-oauth/sources")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["claude_code"]["available"] is False
+    assert data["mcc"]["available"] is False
+
+
+def test_admin_anthropic_oauth_import_claude_code_is_loopback_only(
+    monkeypatch, tmp_path
+):
+    _set_home(monkeypatch, tmp_path)
+    _clear_process_config(monkeypatch)
+    app = create_test_app()
+    remote_client = TestClient(app, client=("203.0.113.10", 50000))
+
+    response = remote_client.post("/admin/api/anthropic-oauth/import-claude-code")
+
+    assert response.status_code == 403
+
+
+def test_admin_anthropic_oauth_import_claude_code_stores_into_mcc_managed_store(
+    monkeypatch, tmp_path
+):
+    _set_home(monkeypatch, tmp_path)
+    _clear_process_config(monkeypatch)
+    creds_path = _write_claude_code_credentials(
+        tmp_path, access_token="sk-ant-oat-super-secret-value"
+    )
+    app = create_test_app()
+
+    response = _local_client(app).post("/admin/api/anthropic-oauth/import-claude-code")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "complete"
+    assert data["subscription_type"] == "max"
+    assert "sk-ant-oat-super-secret-value" not in response.text
+
+    from my_claude_code.providers.anthropic_oauth.credentials import (
+        load_managed_tokens,
+    )
+
+    stored = load_managed_tokens()
+    assert stored is not None
+    assert stored.access_token == "sk-ant-oat-super-secret-value"
+    # The credential now exists in MCC's own store too.
+    assert creds_path.is_file()
+
+
+def test_admin_anthropic_oauth_import_claude_code_never_writes_claude_credentials_file(
+    monkeypatch, tmp_path
+):
+    """READ-ONLY guarantee: importing must never touch Claude Code's own file."""
+    _set_home(monkeypatch, tmp_path)
+    _clear_process_config(monkeypatch)
+    creds_path = _write_claude_code_credentials(
+        tmp_path, access_token="sk-ant-oat-super-secret-value"
+    )
+    original_bytes = creds_path.read_bytes()
+    original_mtime = creds_path.stat().st_mtime_ns
+    app = create_test_app()
+
+    response = _local_client(app).post("/admin/api/anthropic-oauth/import-claude-code")
+
+    assert response.status_code == 200
+    assert creds_path.read_bytes() == original_bytes
+    assert creds_path.stat().st_mtime_ns == original_mtime
+
+
+def test_admin_anthropic_oauth_import_claude_code_reports_missing_credential(
+    monkeypatch, tmp_path
+):
+    _set_home(monkeypatch, tmp_path)
+    _clear_process_config(monkeypatch)
+    app = create_test_app()
+
+    response = _local_client(app).post("/admin/api/anthropic-oauth/import-claude-code")
+
+    assert response.status_code == 400
+    assert "No Claude Code credential found" in response.json()["detail"]
+
+
+def test_admin_anthropic_oauth_initiate_returns_authorize_url(monkeypatch, tmp_path):
+    _set_home(monkeypatch, tmp_path)
+    _clear_process_config(monkeypatch)
+    app = create_test_app()
+
+    response = _local_client(app).post("/admin/api/anthropic-oauth/initiate")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["authorize_url"].startswith("https://")
+    assert len(data["verifier"]) >= 32
+
+
+def test_admin_anthropic_oauth_complete_never_returns_raw_token(monkeypatch, tmp_path):
+    _set_home(monkeypatch, tmp_path)
+    _clear_process_config(monkeypatch)
+    app = create_test_app()
+
+    from my_claude_code.providers.anthropic_oauth.credentials import OAuthTokens
+
+    async def fake_exchange(code, verifier, state=None):
+        assert code == "auth-code-value"
+        assert verifier == "verifier-value"
+        return OAuthTokens(
+            access_token="sk-ant-oat-super-secret-value",
+            refresh_token="refresh-secret-value",
+            subscription_type="pro",
+            source="mcc",
+        )
+
+    with patch(
+        "my_claude_code.api.admin_routes.exchange_anthropic_oauth_code",
+        fake_exchange,
+    ):
+        response = _local_client(app).post(
+            "/admin/api/anthropic-oauth/complete",
+            json={"pasted_code": "auth-code-value", "verifier": "verifier-value"},
+        )
+
+    assert response.status_code == 200
+    assert "sk-ant-oat-super-secret-value" not in response.text
+    assert "refresh-secret-value" not in response.text
+    data = response.json()
+    assert data["status"] == "complete"
+    assert data["subscription_type"] == "pro"
+
+
+def test_admin_anthropic_oauth_complete_reports_login_failure(monkeypatch, tmp_path):
+    _set_home(monkeypatch, tmp_path)
+    _clear_process_config(monkeypatch)
+    app = create_test_app()
+
+    from my_claude_code.providers.anthropic_oauth.oauth_login import (
+        AnthropicOAuthLoginError,
+    )
+
+    async def fake_exchange(code, verifier, state=None):
+        raise AnthropicOAuthLoginError(400, "bad code")
+
+    with patch(
+        "my_claude_code.api.admin_routes.exchange_anthropic_oauth_code",
+        fake_exchange,
+    ):
+        response = _local_client(app).post(
+            "/admin/api/anthropic-oauth/complete",
+            json={"pasted_code": "bad-code", "verifier": "verifier-value"},
+        )
+
+    assert response.status_code == 400
+
+
+def test_admin_static_anthropic_oauth_card_shows_disclaimer_before_buttons():
+    """The card must carry the warning, reuse an existing CSS class, and put it
+    before both buttons -- not just describe it in prose elsewhere."""
+    script = Path("src/my_claude_code/api/admin_static/admin.js").read_text(
+        encoding="utf-8"
+    )
+
+    control_start = script.index("function buildAnthropicOAuthControl")
+    control_end = script.index("function refreshAnthropicOAuthSources", control_start)
+    control_body = script[control_start:control_end]
+
+    warning_index = control_body.index("guide-note-warn")
+    import_button_index = control_body.index('"Use Claude Code credentials"')
+    login_button_index = control_body.index('"Sign in with Anthropic"')
+
+    assert warning_index < import_button_index
+    assert warning_index < login_button_index
+    assert "does not permit" in control_body
+    assert "cc_entrypoint=cli" in control_body
+    assert "ANTHROPIC-SUBSCRIPTION.md" in control_body
+
+    css = Path("src/my_claude_code/api/admin_static/admin.css").read_text(
+        encoding="utf-8"
+    )
+    assert ".guide-note-warn" in css
 
 
 def test_admin_static_keeps_every_field_input_in_the_document():

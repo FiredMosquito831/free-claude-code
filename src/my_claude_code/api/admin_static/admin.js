@@ -1622,6 +1622,9 @@ function inputForField(field) {
   if (field.type === "oauth_login") {
     const wrapper = document.createElement("div");
     wrapper.className = "oauth-login-control";
+    if (field.key === "ANTHROPIC_OAUTH_MANAGE") {
+      return buildAnthropicOAuthControl(wrapper);
+    }
     if (field.key === "CHATGPT_OAUTH_IMPORT_CODEX") {
       const button = document.createElement("button");
       button.type = "button";
@@ -2230,6 +2233,143 @@ async function refreshModelOptions(button) {
   } finally {
     button.disabled = false;
     button.textContent = original;
+  }
+}
+
+function buildAnthropicOAuthControl(wrapper) {
+  const warning = document.createElement("div");
+  warning.className = "guide-note guide-note-warn";
+  const warningText = document.createElement("p");
+  warningText.textContent =
+    "Anthropic does not permit routing requests through Free, Pro, or Max " +
+    "plan credentials in third-party tools, and this provider additionally " +
+    "refuses any request that does not report cc_entrypoint=cli. Read " +
+    "docs/ANTHROPIC-SUBSCRIPTION.md before using either option below.";
+  warning.appendChild(warningText);
+
+  const status = document.createElement("div");
+  status.className = "field-description";
+  status.textContent = "Checking for available credentials...";
+
+  const importButton = document.createElement("button");
+  importButton.type = "button";
+  importButton.className = "secondary-button";
+  importButton.textContent = "Use Claude Code credentials";
+  importButton.disabled = true;
+
+  const loginButton = document.createElement("button");
+  loginButton.type = "button";
+  loginButton.className = "primary-button";
+  loginButton.textContent = "Sign in with Anthropic";
+
+  const buttons = [importButton, loginButton];
+  importButton.addEventListener("click", () => {
+    importAnthropicOAuthClaudeCode(importButton, buttons, status);
+  });
+  loginButton.addEventListener("click", () => {
+    startAnthropicOAuthLogin(loginButton, buttons, status);
+  });
+
+  wrapper.append(warning, status, importButton, loginButton);
+  refreshAnthropicOAuthSources(importButton, status);
+  return wrapper;
+}
+
+async function refreshAnthropicOAuthSources(importButton, status) {
+  try {
+    const sources = await api("/admin/api/anthropic-oauth/sources");
+    const mccNote = sources.mcc.available
+      ? `An MCC credential is already stored (${sources.mcc.masked_token}).`
+      : "No credential stored in MCC yet.";
+    if (sources.claude_code.available) {
+      importButton.disabled = false;
+      status.textContent =
+        `Claude Code credential found (${sources.claude_code.masked_token}). ` +
+        mccNote;
+    } else {
+      importButton.disabled = true;
+      status.textContent = sources.mcc.available
+        ? `Signed in. ${mccNote}`
+        : "No credentials found. Sign in below, or log in to Claude Code first.";
+    }
+  } catch (error) {
+    status.textContent = `Could not check credential sources: ${error.message}`;
+  }
+}
+
+async function importAnthropicOAuthClaudeCode(button, buttons, status) {
+  buttons.forEach((candidate) => {
+    candidate.disabled = true;
+  });
+  const original = button.textContent;
+  button.textContent = "Importing...";
+  try {
+    const result = await api("/admin/api/anthropic-oauth/import-claude-code", {
+      method: "POST",
+      body: "{}",
+    });
+    if (result.status === "complete") {
+      showMessage(
+        "Imported the Claude Code credential into MCC's private store.",
+        "ok",
+      );
+    }
+  } catch (error) {
+    showMessage(`Could not import Claude Code credentials: ${error.message}`, "error");
+  } finally {
+    button.textContent = original;
+    buttons.forEach((candidate) => {
+      candidate.disabled = false;
+    });
+    refreshAnthropicOAuthSources(buttons[0], status);
+  }
+}
+
+async function startAnthropicOAuthLogin(button, buttons, status) {
+  buttons.forEach((candidate) => {
+    candidate.disabled = true;
+  });
+  const original = button.textContent;
+  button.textContent = "Starting sign-in...";
+  try {
+    const initiate = await api("/admin/api/anthropic-oauth/initiate", {
+      method: "POST",
+      body: "{}",
+    });
+    window.open(initiate.authorize_url, "_blank", "noopener");
+    showMessage(
+      "Anthropic OAuth: approve access in the new tab, then paste the code " +
+        "it shows back here.",
+      "warn",
+    );
+    const pasted = window.prompt(
+      "Paste the code Anthropic showed after you approved access:",
+    );
+    if (!pasted || !pasted.trim()) {
+      status.textContent = "Sign-in cancelled: no code entered.";
+      return;
+    }
+    const result = await api("/admin/api/anthropic-oauth/complete", {
+      method: "POST",
+      body: JSON.stringify({
+        pasted_code: pasted.trim(),
+        verifier: initiate.verifier,
+      }),
+    });
+    if (result.status === "complete") {
+      showMessage(
+        "Signed in with Anthropic. Credential stored in MCC's private store.",
+        "ok",
+      );
+    }
+  } catch (error) {
+    showMessage(`Anthropic sign-in failed: ${error.message}`, "error");
+  } finally {
+    button.textContent = original;
+    buttons.forEach((candidate) => {
+      candidate.disabled = false;
+    });
+    refreshAnthropicOAuthSources(buttons[0], status);
   }
 }
 

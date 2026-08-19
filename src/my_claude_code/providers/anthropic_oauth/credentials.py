@@ -29,7 +29,9 @@ from typing import Any
 import httpx
 from loguru import logger
 
-from my_claude_code.config.paths import config_dir_path
+from my_claude_code.config.paths import (
+    anthropic_oauth_managed_store_path,
+)
 
 from .constants import (
     CLAUDE_CODE_CLIENT_ID,
@@ -38,7 +40,6 @@ from .constants import (
     TOKEN_URL,
 )
 
-MANAGED_STORE_FILENAME = "anthropic_oauth.json"
 CLAUDE_CREDENTIALS_DIRNAME = ".claude"
 CLAUDE_CREDENTIALS_FILENAME = ".credentials.json"
 CLAUDE_OAUTH_KEY = "claudeAiOauth"
@@ -100,7 +101,7 @@ def _home() -> Path:
 
 def managed_store_path() -> Path:
     """Where MCC keeps the credential it owns and may refresh."""
-    return config_dir_path() / MANAGED_STORE_FILENAME
+    return anthropic_oauth_managed_store_path()
 
 
 def claude_credentials_path() -> Path:

@@ -20,6 +20,7 @@ from collections.abc import AsyncIterator
 from loguru import logger
 
 from my_claude_code.application.errors import InvalidRequestError
+from my_claude_code.config.constants import ANTHROPIC_OAUTH_MANAGED_CREDENTIAL_REFERENCE
 from my_claude_code.core.anthropic.models import MessagesRequest
 from my_claude_code.core.reasoning import DEFAULT_REASONING_POLICY, ReasoningPolicy
 from my_claude_code.providers.anthropic import AnthropicProvider
@@ -51,7 +52,7 @@ def _auth_for(config: ProviderConfig) -> AnthropicOAuthAuth:
     value exists as an escape hatch and is logged as such.
     """
     raw = (config.api_key or "").strip()
-    if not raw:
+    if not raw or raw == ANTHROPIC_OAUTH_MANAGED_CREDENTIAL_REFERENCE:
         return AnthropicOAuthAuth()
     logger.warning(
         "Using a raw ANTHROPIC_OAUTH_ACCESS_TOKEN; it cannot be refreshed and "

@@ -9,6 +9,11 @@ ANTHROPIC_DEFAULT_MAX_OUTPUT_TOKENS = 81920
 # Non-secret marker stored in Settings when FCC owns renewable ChatGPT credentials.
 CHATGPT_OAUTH_MANAGED_CREDENTIAL_REFERENCE = "fcc-managed-oauth"
 
+# Non-secret marker stored in Settings when FCC owns a renewable Claude
+# subscription OAuth credential (imported from Claude Code, or from signing in
+# directly). See docs/ANTHROPIC-SUBSCRIPTION.md.
+ANTHROPIC_OAUTH_MANAGED_CREDENTIAL_REFERENCE = "fcc-managed-anthropic-oauth"
+
 # Fallback timing. These live here rather than beside the executor because
 # Settings needs them and the application layer already reads Settings.
 #
