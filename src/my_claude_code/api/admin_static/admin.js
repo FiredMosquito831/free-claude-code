@@ -141,7 +141,10 @@ const VIEW_GROUPS = [
     id: "limits",
     label: "Limits",
     title: "Limits",
-    sections: ["limits", "diagnostics"],
+    // "desktop" must be claimed by a view or its fields render nowhere: the
+    // manifest registers them and the API serves them, and nothing fails.
+    // That exact gap shipped once already, as a settings page with no page.
+    sections: ["limits", "desktop", "diagnostics"],
     containerId: "limitsSections",
   },
   {

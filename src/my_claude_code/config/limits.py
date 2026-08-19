@@ -80,6 +80,43 @@ LIMIT_RANGES: dict[str, LimitRange] = {
         600.0,
         "1s minimum drain before connections are force-closed; uvicorn treats 0 as immediate shutdown, not infinite",
     ),
+    # --- desktop tray/window process (mcc-desktop) --------------------------
+    # mcc-desktop is a separate process from the server; it reads these via
+    # get_settings() once, at launch, so a change here applies to the next
+    # tray start, not to one already running.
+    #
+    # The tight poll used while waiting for a spawned server to become
+    # healthy. Below the floor this becomes a busy loop; above a couple of
+    # seconds "tight" stops meaning anything.
+    "desktop_health_check_interval": LimitRange(
+        0.05, 5.0, "0.05s floor keeps this from becoming a busy loop"
+    ),
+    # How long to wait for a spawned mcc-server child to answer healthy before
+    # giving up and reporting a start failure.
+    "desktop_server_start_timeout": LimitRange(1.0, 300.0),
+    # Timeout for one loopback call to the server's admin API.
+    "desktop_admin_request_timeout": LimitRange(0.5, 60.0),
+    # How often the tray polls the activation file that a second launch
+    # writes to say "show my window". The floor keeps this from becoming a
+    # busy loop; the file-based doorbell design already tolerates a slow poll.
+    "desktop_activation_poll_seconds": LimitRange(
+        0.1, HOUR, "0.1s floor keeps this from becoming a busy loop"
+    ),
+    # How often the tray's background thread probes the server for the
+    # ongoing health monitor (distinct from the tight startup poll above).
+    "desktop_health_poll_seconds": LimitRange(
+        0.5, HOUR, "0.5s floor keeps this from becoming a busy loop"
+    ),
+    # Consecutive failed health probes before the tray reports an outage. The
+    # floor is 1 (report on the first failed probe); this is what keeps a
+    # self-update restart -- one or two missed probes while the server
+    # replaces its own process -- from being read as death.
+    "desktop_health_failure_threshold": LimitRange(1, 1_000),
+    # Desktop window size, in CSS pixels, for the app-mode/embedded window.
+    # The floor keeps the dashboard usable; the ceiling is an 8K edge, past
+    # which this stops being a window size and starts being a typo.
+    "desktop_window_width": LimitRange(640, 7680),
+    "desktop_window_height": LimitRange(480, 4320),
 }
 
 

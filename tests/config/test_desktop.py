@@ -457,6 +457,63 @@ class TestChromiumSearch:
         assert chromium_binary() is None
 
 
+class _FakeSettings:
+    def __init__(self, desktop_browser_path: str = "") -> None:
+        self.desktop_browser_path = desktop_browser_path
+
+
+class TestConfiguredBrowserPath:
+    """DESKTOP_BROWSER_PATH must win over the candidate search, and must
+    degrade -- not fail -- when it points at nothing."""
+
+    def test_configured_path_takes_precedence_over_search(self, monkeypatch):
+        monkeypatch.setattr(desktop_config.sys, "platform", "linux")
+        monkeypatch.setattr(
+            desktop_config,
+            "which",
+            lambda name: {"chromium": "/usr/bin/chromium"}.get(name),
+        )
+        monkeypatch.setattr(
+            desktop_config,
+            "get_settings",
+            lambda: _FakeSettings("/opt/my-browser/browser"),
+        )
+        monkeypatch.setattr(Path, "is_file", lambda self: True)
+
+        assert chromium_binary() == "/opt/my-browser/browser"
+
+    def test_missing_configured_path_falls_through_to_search(self, monkeypatch, caplog):
+        monkeypatch.setattr(desktop_config.sys, "platform", "linux")
+        monkeypatch.setattr(
+            desktop_config,
+            "which",
+            lambda name: {"chromium": "/usr/bin/chromium"}.get(name),
+        )
+        monkeypatch.setattr(
+            desktop_config,
+            "get_settings",
+            lambda: _FakeSettings("/does/not/exist"),
+        )
+        # Only the configured path is missing; the search targets resolve.
+        monkeypatch.setattr(
+            Path, "is_file", lambda self: self.as_posix() != "/does/not/exist"
+        )
+
+        assert chromium_binary() == "/usr/bin/chromium"
+
+    def test_blank_configured_path_does_not_shadow_the_search(self, monkeypatch):
+        monkeypatch.setattr(desktop_config.sys, "platform", "linux")
+        monkeypatch.setattr(
+            desktop_config,
+            "which",
+            lambda name: {"chromium": "/usr/bin/chromium"}.get(name),
+        )
+        monkeypatch.setattr(desktop_config, "get_settings", lambda: _FakeSettings(""))
+        monkeypatch.setattr(Path, "is_file", lambda self: False)
+
+        assert chromium_binary() == "/usr/bin/chromium"
+
+
 class TestResolveAutoWindow:
     def test_prefers_app_mode_when_chromium_found(self, monkeypatch):
         monkeypatch.setattr(
