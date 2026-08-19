@@ -40,8 +40,10 @@ from my_claude_code.config.constants import (
 from my_claude_code.config.credentials import parse_credential_keys
 from my_claude_code.config.desktop import (
     SERVER_MODES,
+    WINDOW_PREFERENCES,
     DesktopState,
     load_desktop_state,
+    resolve_auto_window,
     save_desktop_state,
 )
 from my_claude_code.config.model_refs import configured_chat_model_refs
@@ -151,6 +153,7 @@ class DesktopUpdatePayload(BaseModel):
     start_at_login: bool | None = None
     minimize_to_tray: bool | None = None
     server_mode: str | None = None
+    window: str | None = None
 
 
 class RtkUpdatePayload(BaseModel):
@@ -715,12 +718,24 @@ async def models(
 
 
 def _desktop_state_response(state: DesktopState) -> dict[str, Any]:
+    """Build the desktop payload, including what ``auto`` resolves to here.
+
+    Blocking: ``resolve_auto_window`` probes the filesystem for a Chromium
+    binary and measures 43 ms median / 75 ms max on a developer machine, and
+    it does not get cheaper on repeat because ``shutil.which`` is the cost.
+    Every caller therefore hands it to a thread -- running it inline on an
+    ``async def`` handler stalls the whole event loop for that long.
+    """
+
+    resolved_provider, resolved_reason = resolve_auto_window()
     return {
         "tray_enabled": state.tray_enabled,
         "start_at_login": state.start_at_login,
         "minimize_to_tray": state.minimize_to_tray,
         "server_mode": state.server_mode,
         "window": state.window,
+        "window_auto_provider": resolved_provider,
+        "window_auto_reason": resolved_reason,
     }
 
 
@@ -729,7 +744,7 @@ async def get_desktop(request: Request):
     """Return the persisted desktop.json state."""
     require_loopback_admin(request)
     state = await asyncio.to_thread(load_desktop_state)
-    return _desktop_state_response(state)
+    return await asyncio.to_thread(_desktop_state_response, state)
 
 
 @router.get("/admin/api/desktop/autostart-options")
@@ -766,6 +781,8 @@ async def update_desktop(payload: DesktopUpdatePayload, request: Request):
 
     if payload.server_mode is not None and payload.server_mode not in SERVER_MODES:
         raise HTTPException(status_code=422, detail="Invalid server mode")
+    if payload.window is not None and payload.window not in WINDOW_PREFERENCES:
+        raise HTTPException(status_code=400, detail="Invalid window preference")
 
     updates: dict[str, Any] = {}
     for name in (
@@ -773,22 +790,23 @@ async def update_desktop(payload: DesktopUpdatePayload, request: Request):
         "start_at_login",
         "minimize_to_tray",
         "server_mode",
+        "window",
     ):
         submitted = getattr(payload, name)
         if submitted is not None:
             updates[name] = submitted
     if not updates:
-        return _desktop_state_response(current)
+        return await asyncio.to_thread(_desktop_state_response, current)
 
     updated = DesktopState(
         tray_enabled=updates.get("tray_enabled", current.tray_enabled),
         start_at_login=updates.get("start_at_login", current.start_at_login),
         minimize_to_tray=updates.get("minimize_to_tray", current.minimize_to_tray),
         server_mode=updates.get("server_mode", current.server_mode),
-        window=current.window,
+        window=updates.get("window", current.window),
     )
     await asyncio.to_thread(save_desktop_state, updated)
-    return _desktop_state_response(updated)
+    return await asyncio.to_thread(_desktop_state_response, updated)
 
 
 # --------------------------------------------------------------------- rtk token optimizer

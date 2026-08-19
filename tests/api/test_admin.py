@@ -372,6 +372,49 @@ def test_admin_static_renders_and_binds_rtk_token_optimizer_card():
     assert ".rtk-status-line.error" in styles
 
 
+def test_admin_static_renders_and_binds_desktop_window_control():
+    """The Window select must be a real ``<select>`` in the Deployment section,
+    wired to the same POST/GET desktop endpoints as the existing controls --
+    not merely present as inert markup.
+
+    Asserted against the source rather than a rendered page: the suite has no
+    DOM harness (see ``test_admin_static_keeps_every_field_input_in_the_document``
+    for the established rationale), so this only proves the markup and script
+    reference each other by id, not that a browser renders or updates it.
+    """
+    html = Path("src/my_claude_code/api/admin_static/index.html").read_text(
+        encoding="utf-8"
+    )
+    script = Path("src/my_claude_code/api/admin_static/admin.js").read_text(
+        encoding="utf-8"
+    )
+
+    # The select and its two read-only helper lines live inside the existing
+    # Deployment section, not a new one.
+    deployment_start = html.index('aria-label="Deployment"')
+    deployment_end = html.index("</section>", deployment_start)
+    deployment_html = html[deployment_start:deployment_end]
+    assert 'id="desktopWindow"' in deployment_html
+    assert 'id="desktopWindowHint"' in deployment_html
+    assert 'id="desktopWindowResolved"' in deployment_html
+
+    for option_value in ("auto", "app-mode", "pywebview", "browser"):
+        assert f'value="{option_value}"' in deployment_html
+
+    # Wired: byId lookup, render function, and a change listener that posts
+    # through the same updateDesktop/api("/admin/api/desktop", ...) path the
+    # server mode select uses.
+    assert 'byId("desktopWindow")' in script
+    assert "renderDesktopWindow" in script
+    assert 'byId("desktopWindow").addEventListener("change", (event) => {' in script
+    assert (
+        'updateDesktop("window", event.currentTarget.value, event.currentTarget);'
+        in script
+    )
+    assert "window_auto_provider" in script
+    assert "window_auto_reason" in script
+
+
 def test_admin_page_no_longer_renders_global_status_header(monkeypatch, tmp_path):
     _set_home(monkeypatch, tmp_path)
     app = create_test_app()

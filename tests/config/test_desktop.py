@@ -16,6 +16,7 @@ from my_claude_code.config.desktop import (
     WINDOWS_RUN_VALUE,
     DesktopState,
     DesktopStateError,
+    chromium_binary,
     load_desktop_state,
     save_desktop_state,
 )
@@ -416,6 +417,72 @@ class TestServerModeHelpers:
             desktop_config.set_server_mode("bogus")
 
 
+class TestChromiumSearch:
+    def _which(self, monkeypatch, found: dict[str, str]):
+        monkeypatch.setattr(desktop_config, "which", lambda name: found.get(name))
+        monkeypatch.setattr(Path, "is_file", lambda self: False)
+
+    def test_windows_prefers_edge(self, monkeypatch):
+        monkeypatch.setattr(desktop_config.sys, "platform", "win32")
+        self._which(monkeypatch, {"msedge": "E:/msedge.exe", "chrome": "C:/chrome.exe"})
+
+        assert chromium_binary() == "E:/msedge.exe"
+
+    def test_windows_falls_back_to_chrome_then_brave(self, monkeypatch):
+        monkeypatch.setattr(desktop_config.sys, "platform", "win32")
+        self._which(monkeypatch, {"brave": "B:/brave.exe"})
+
+        assert chromium_binary() == "B:/brave.exe"
+
+    def test_macos_uses_known_application_paths(self, monkeypatch):
+        monkeypatch.setattr(desktop_config.sys, "platform", "darwin")
+        monkeypatch.setattr(desktop_config, "which", lambda name: None)
+        chrome = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+        monkeypatch.setattr(Path, "is_file", lambda self: self.as_posix() == chrome)
+
+        assert chromium_binary() == chrome
+
+    def test_linux_search_order(self, monkeypatch):
+        monkeypatch.setattr(desktop_config.sys, "platform", "linux")
+        self._which(
+            monkeypatch, {"chromium": "/usr/bin/chromium", "brave-browser": "/b"}
+        )
+
+        assert chromium_binary() == "/usr/bin/chromium"
+
+    def test_no_browser_found_returns_none(self, monkeypatch):
+        monkeypatch.setattr(desktop_config.sys, "platform", "linux")
+        self._which(monkeypatch, {})
+
+        assert chromium_binary() is None
+
+
+class TestResolveAutoWindow:
+    def test_prefers_app_mode_when_chromium_found(self, monkeypatch):
+        monkeypatch.setattr(
+            desktop_config,
+            "_chromium_binary_with_label",
+            lambda: ("C:/msedge.exe", "Microsoft Edge"),
+        )
+        provider, reason = desktop_config.resolve_auto_window()
+        assert provider == "app-mode"
+        assert reason == "Microsoft Edge"
+
+    def test_falls_back_to_pywebview_when_no_chromium(self, monkeypatch):
+        monkeypatch.setattr(desktop_config, "_chromium_binary_with_label", lambda: None)
+        monkeypatch.setattr(desktop_config, "pywebview_available", lambda: True)
+        provider, reason = desktop_config.resolve_auto_window()
+        assert provider == "pywebview"
+        assert "pywebview" in reason
+
+    def test_falls_back_to_browser_when_nothing_available(self, monkeypatch):
+        monkeypatch.setattr(desktop_config, "_chromium_binary_with_label", lambda: None)
+        monkeypatch.setattr(desktop_config, "pywebview_available", lambda: False)
+        provider, reason = desktop_config.resolve_auto_window()
+        assert provider == "browser"
+        assert reason == "no Chromium browser found"
+
+
 class TestAdminDesktopEndpoints:
     def _client(self, monkeypatch, tmp_path):
         _set_home(monkeypatch, tmp_path)
@@ -530,6 +597,57 @@ class TestAdminDesktopEndpoints:
         assert body["origin"] == "windows"
         assert body["targets"] == ["tray"]
         assert body["default_target"] == "tray"
+
+    def test_get_returns_window_and_resolved_auto_provider(self, monkeypatch, tmp_path):
+        with self._client(monkeypatch, tmp_path) as client:
+            response = client.get("/admin/api/desktop")
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["window"] == "auto"
+        assert body["window_auto_provider"] in {"app-mode", "pywebview", "browser"}
+        assert isinstance(body["window_auto_reason"], str)
+
+    @pytest.mark.parametrize("value", ["auto", "app-mode", "pywebview", "browser"])
+    def test_post_round_trips_each_window_value(self, monkeypatch, tmp_path, value):
+        with self._client(monkeypatch, tmp_path) as client:
+            response = client.post("/admin/api/desktop", json={"window": value})
+            assert response.status_code == 200
+            assert response.json()["window"] == value
+
+            follow_up = client.get("/admin/api/desktop")
+            assert follow_up.json()["window"] == value
+
+    def test_post_rejects_invalid_window(self, monkeypatch, tmp_path):
+        with self._client(monkeypatch, tmp_path) as client:
+            response = client.post(
+                "/admin/api/desktop",
+                json={"window": "bogus"},
+            )
+
+        assert response.status_code == 400
+
+    def test_post_unrelated_field_does_not_reset_window(self, monkeypatch, tmp_path):
+        """Regression guard: ``window=current.window`` must stay in place.
+
+        The endpoint used to hardcode ``window=current.window`` because it
+        could not accept the field at all. Now that it can, an unrelated save
+        (e.g. flipping the tray toggle) must still preserve whatever window
+        preference was already persisted -- that preservation is exactly what
+        stopped every unrelated save from silently resetting the preference.
+        """
+        with self._client(monkeypatch, tmp_path) as client:
+            client.post("/admin/api/desktop", json={"window": "browser"})
+
+            response = client.post("/admin/api/desktop", json={"tray_enabled": False})
+
+        assert response.status_code == 200
+        assert response.json()["window"] == "browser"
+        assert response.json()["tray_enabled"] is False
+
+        path = desktop_config.desktop_state_path()
+        persisted = json.loads(path.read_text(encoding="utf-8"))
+        assert persisted["window"] == "browser"
 
     def test_autostart_options_linux(self, monkeypatch, tmp_path):
         _set_home(monkeypatch, tmp_path)

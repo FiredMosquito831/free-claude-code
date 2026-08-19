@@ -1,7 +1,5 @@
 """Tests for the desktop window provider chain and the Chromium binary search."""
 
-from pathlib import Path
-
 import pytest
 
 from my_claude_code.cli import desktop_window
@@ -10,7 +8,6 @@ from my_claude_code.cli.desktop_window import (
     AppModeWindow,
     BrowserTabWindow,
     PywebviewWindow,
-    chromium_binary,
     create_window,
 )
 
@@ -80,46 +77,6 @@ class TestExplicitPin:
         providers["app-mode"] = True
 
         assert isinstance(create_window("browser"), BrowserTabWindow)
-
-
-class TestChromiumSearch:
-    def _which(self, monkeypatch, found: dict[str, str]):
-        monkeypatch.setattr(desktop_window, "which", lambda name: found.get(name))
-        monkeypatch.setattr(Path, "is_file", lambda self: False)
-
-    def test_windows_prefers_edge(self, monkeypatch):
-        monkeypatch.setattr(desktop_window.sys, "platform", "win32")
-        self._which(monkeypatch, {"msedge": "E:/msedge.exe", "chrome": "C:/chrome.exe"})
-
-        assert chromium_binary() == "E:/msedge.exe"
-
-    def test_windows_falls_back_to_chrome_then_brave(self, monkeypatch):
-        monkeypatch.setattr(desktop_window.sys, "platform", "win32")
-        self._which(monkeypatch, {"brave": "B:/brave.exe"})
-
-        assert chromium_binary() == "B:/brave.exe"
-
-    def test_macos_uses_known_application_paths(self, monkeypatch):
-        monkeypatch.setattr(desktop_window.sys, "platform", "darwin")
-        monkeypatch.setattr(desktop_window, "which", lambda name: None)
-        chrome = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
-        monkeypatch.setattr(Path, "is_file", lambda self: self.as_posix() == chrome)
-
-        assert chromium_binary() == chrome
-
-    def test_linux_search_order(self, monkeypatch):
-        monkeypatch.setattr(desktop_window.sys, "platform", "linux")
-        self._which(
-            monkeypatch, {"chromium": "/usr/bin/chromium", "brave-browser": "/b"}
-        )
-
-        assert chromium_binary() == "/usr/bin/chromium"
-
-    def test_no_browser_found_returns_none(self, monkeypatch):
-        monkeypatch.setattr(desktop_window.sys, "platform", "linux")
-        self._which(monkeypatch, {})
-
-        assert chromium_binary() is None
 
 
 class TestAppModeCommand:

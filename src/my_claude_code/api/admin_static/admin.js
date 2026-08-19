@@ -4661,6 +4661,20 @@ const SERVER_MODE_HINTS = {
   off: "The tray never touches the server.",
 };
 
+const WINDOW_HINTS = {
+  auto: "The default. Uses an app window if a Chromium-family browser is available, otherwise a browser tab.",
+  "app-mode": "A Chrome/Edge/Brave window with no tabs or URL bar, using its own profile.",
+  pywebview:
+    "An embedded webview. Not installed by default, and OAuth login, downloads and copy buttons may not work in it.",
+  browser: "A normal tab in your default browser.",
+};
+
+const WINDOW_PROVIDER_LABELS = {
+  "app-mode": "app-mode",
+  pywebview: "embedded webview",
+  browser: "browser tab",
+};
+
 function renderDesktopState() {
   const trayEnabled = byId("desktopTrayEnabled");
   const serverMode = byId("desktopServerMode");
@@ -4674,7 +4688,33 @@ function renderDesktopState() {
     serverMode.disabled = state.desktopBusy;
     hint.textContent = SERVER_MODE_HINTS[serverMode.value] || "";
   }
+  renderDesktopWindow();
   renderDesktopAutostartOptions();
+}
+
+function renderDesktopWindow() {
+  const windowSelect = byId("desktopWindow");
+  const hint = byId("desktopWindowHint");
+  const resolved = byId("desktopWindowResolved");
+  if (!windowSelect || !hint) return;
+
+  windowSelect.value = state.desktop?.window || "auto";
+  windowSelect.disabled = state.desktopBusy;
+  hint.textContent = WINDOW_HINTS[windowSelect.value] || "";
+
+  if (!resolved) return;
+  if (windowSelect.value !== "auto") {
+    resolved.textContent = "";
+    return;
+  }
+  const provider = state.desktop?.window_auto_provider;
+  const reason = state.desktop?.window_auto_reason;
+  if (!provider) {
+    resolved.textContent = "";
+    return;
+  }
+  const label = WINDOW_PROVIDER_LABELS[provider] || provider;
+  resolved.textContent = reason ? `auto → ${label} (${reason})` : `auto → ${label}`;
 }
 
 function autostartTargetLabel(target) {
@@ -4737,6 +4777,8 @@ async function updateDesktop(field, value, control) {
       );
     } else if (field === "server_mode") {
       showMessage(`Server mode set to ${value}.`, "ok");
+    } else if (field === "window") {
+      showMessage(`Window set to ${value}.`, "ok");
     } else {
       showMessage(`Tray ${value ? "enabled" : "disabled"} for the next tray launch`, "ok");
     }
@@ -4751,6 +4793,9 @@ async function updateDesktop(field, value, control) {
 
 byId("desktopServerMode").addEventListener("change", (event) => {
   updateDesktop("server_mode", event.currentTarget.value, event.currentTarget);
+});
+byId("desktopWindow").addEventListener("change", (event) => {
+  updateDesktop("window", event.currentTarget.value, event.currentTarget);
 });
 byId("desktopTrayEnabled").addEventListener("change", (event) => {
   updateDesktop("tray_enabled", event.currentTarget.checked, event.currentTarget);

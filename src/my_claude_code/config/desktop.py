@@ -9,6 +9,7 @@ import sys
 from contextlib import suppress
 from dataclasses import asdict, dataclass
 from pathlib import Path
+from shutil import which
 from typing import Literal, cast
 
 from .claude_discovery import native_origin
@@ -147,6 +148,161 @@ def set_window_preference(value: str) -> DesktopState:
 
 def set_tray_enabled(enabled: bool) -> DesktopState:
     return _update_state(tray_enabled=enabled)
+
+
+# ------------------------------------------------------ window provider resolution
+#
+# This lives in ``config`` (rather than ``cli.desktop_window``, which owns the
+# actual window providers) so the admin API can report what an ``auto``
+# preference resolves to without crossing the ``api -> cli`` boundary that
+# ``tests/contracts/test_import_boundaries.py`` forbids. ``cli.desktop_window``
+# imports :func:`chromium_binary` from here to avoid duplicating the lookup.
+
+
+class _ChromiumCandidate:
+    """One Chromium-family browser: PATH names first, then known install paths."""
+
+    __slots__ = ("label", "names", "paths")
+
+    def __init__(
+        self, label: str, names: tuple[str, ...], paths: tuple[str, ...] = ()
+    ) -> None:
+        self.label = label
+        self.names = names
+        self.paths = paths
+
+    def resolve(self) -> str | None:
+        for name in self.names:
+            found = which(name)
+            if found:
+                return found
+        for path in self.paths:
+            if Path(path).is_file():
+                return path
+        return None
+
+
+# Edge ships with every supported Windows build, so it is the reliable first hit.
+_WINDOWS_CHROMIUM_CANDIDATES = (
+    _ChromiumCandidate(
+        "Microsoft Edge",
+        ("msedge",),
+        (
+            r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
+            r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
+        ),
+    ),
+    _ChromiumCandidate(
+        "Google Chrome",
+        ("chrome",),
+        (
+            r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+            r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+        ),
+    ),
+    _ChromiumCandidate(
+        "Brave",
+        ("brave",),
+        (
+            r"C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe",
+            r"C:\Program Files (x86)\BraveSoftware\Brave-Browser\Application\brave.exe",
+        ),
+    ),
+)
+
+# Safari has no ``--app`` equivalent, so it is deliberately absent.
+_MACOS_CHROMIUM_CANDIDATES = (
+    _ChromiumCandidate(
+        "Google Chrome",
+        ("google-chrome",),
+        ("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",),
+    ),
+    _ChromiumCandidate(
+        "Microsoft Edge",
+        ("microsoft-edge",),
+        ("/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",),
+    ),
+    _ChromiumCandidate(
+        "Brave",
+        ("brave-browser",),
+        ("/Applications/Brave Browser.app/Contents/MacOS/Brave Browser",),
+    ),
+)
+
+_LINUX_CHROMIUM_CANDIDATES = (
+    _ChromiumCandidate("Google Chrome", ("google-chrome",)),
+    _ChromiumCandidate("Google Chrome", ("google-chrome-stable",)),
+    _ChromiumCandidate("Chromium", ("chromium",)),
+    _ChromiumCandidate("Chromium", ("chromium-browser",)),
+    _ChromiumCandidate("Brave", ("brave-browser",)),
+    _ChromiumCandidate("Microsoft Edge", ("microsoft-edge",)),
+)
+
+
+def _chromium_candidates() -> tuple[_ChromiumCandidate, ...]:
+    """Return the platform's Chromium candidates, read at call time.
+
+    ``sys.platform`` is read here rather than at import time so tests can
+    exercise every platform's search order on one machine.
+    """
+
+    if sys.platform == "win32":
+        return _WINDOWS_CHROMIUM_CANDIDATES
+    if sys.platform == "darwin":
+        return _MACOS_CHROMIUM_CANDIDATES
+    return _LINUX_CHROMIUM_CANDIDATES
+
+
+def chromium_binary() -> str | None:
+    """Return the first Chromium-family binary found, or ``None``."""
+
+    found = _chromium_binary_with_label()
+    return None if found is None else found[0]
+
+
+def _chromium_binary_with_label() -> tuple[str, str] | None:
+    """Return ``(path, display_name)`` for the first Chromium-family browser found."""
+
+    for candidate in _chromium_candidates():
+        resolved = candidate.resolve()
+        if resolved is not None:
+            return resolved, candidate.label
+    return None
+
+
+def pywebview_available() -> bool:
+    """Best-effort check for a usable ``pywebview`` install.
+
+    Mirrors ``cli.desktop_window.PywebviewWindow._module()``'s availability
+    check without importing ``cli`` from ``config`` -- this module reports
+    whether the provider *would* be usable, it does not construct a window.
+    """
+
+    if sys.platform == "darwin":
+        # pywebview's run loop requires the main thread, which pystray owns.
+        return False
+    try:
+        import webview
+    except ImportError, OSError:
+        return False
+    settings = getattr(webview, "settings", None)
+    return isinstance(settings, dict) and "ALLOW_DOWNLOADS" in settings
+
+
+def resolve_auto_window() -> tuple[str, str]:
+    """Return ``(provider, reason)`` describing what ``auto`` resolves to now.
+
+    Mirrors ``cli.desktop_window.PROVIDER_CHAIN`` / ``create_window``'s
+    fallback order (app-mode, then pywebview, then browser) so the admin UI's
+    "auto -> ..." readout matches what a real launch would actually pick.
+    """
+
+    chromium = _chromium_binary_with_label()
+    if chromium is not None:
+        return "app-mode", chromium[1]
+    if pywebview_available():
+        return "pywebview", "app-mode unavailable, pywebview installed"
+    return "browser", "no Chromium browser found"
 
 
 def default_autostart_target() -> AutostartTarget:
