@@ -23,10 +23,13 @@ import sys
 import webbrowser
 from collections.abc import Callable
 from pathlib import Path
-from shutil import which
 from typing import Any, Protocol, runtime_checkable
 
-from my_claude_code.config.desktop import WINDOW_PREFERENCES, WindowPreference
+from my_claude_code.config.desktop import (
+    WINDOW_PREFERENCES,
+    WindowPreference,
+    chromium_binary,
+)
 from my_claude_code.config.paths import config_dir_path
 
 logger = logging.getLogger(__name__)
@@ -57,105 +60,12 @@ class DesktopWindow(Protocol):
         """Whether a window is currently believed to be showing."""
 
 
-# --------------------------------------------------------------- chromium lookup
-
-
-class _Candidate:
-    """One Chromium-family browser: PATH names first, then known install paths."""
-
-    __slots__ = ("names", "paths")
-
-    def __init__(self, names: tuple[str, ...], paths: tuple[str, ...] = ()) -> None:
-        self.names = names
-        self.paths = paths
-
-    def resolve(self) -> str | None:
-        for name in self.names:
-            found = which(name)
-            if found:
-                return found
-        for path in self.paths:
-            if Path(path).is_file():
-                return path
-        return None
-
-
-# Edge ships with every supported Windows build, so it is the reliable first hit.
-_WINDOWS_CANDIDATES = (
-    _Candidate(
-        ("msedge",),
-        (
-            r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
-            r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
-        ),
-    ),
-    _Candidate(
-        ("chrome",),
-        (
-            r"C:\Program Files\Google\Chrome\Application\chrome.exe",
-            r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
-        ),
-    ),
-    _Candidate(
-        ("brave",),
-        (
-            r"C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe",
-            r"C:\Program Files (x86)\BraveSoftware\Brave-Browser\Application\brave.exe",
-        ),
-    ),
-)
-
-# Safari has no ``--app`` equivalent, so it is deliberately absent.
-_MACOS_CANDIDATES = (
-    _Candidate(
-        ("google-chrome",),
-        ("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",),
-    ),
-    _Candidate(
-        ("microsoft-edge",),
-        ("/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",),
-    ),
-    _Candidate(
-        ("brave-browser",),
-        ("/Applications/Brave Browser.app/Contents/MacOS/Brave Browser",),
-    ),
-)
-
-_LINUX_CANDIDATES = (
-    _Candidate(("google-chrome",)),
-    _Candidate(("google-chrome-stable",)),
-    _Candidate(("chromium",)),
-    _Candidate(("chromium-browser",)),
-    _Candidate(("brave-browser",)),
-    _Candidate(("microsoft-edge",)),
-)
-
-
-def _candidates() -> tuple[_Candidate, ...]:
-    """Return the platform's Chromium candidates, read at call time.
-
-    ``sys.platform`` is read here rather than at import time so tests can
-    exercise every platform's search order on one machine.
-    """
-
-    if sys.platform == "win32":
-        return _WINDOWS_CANDIDATES
-    if sys.platform == "darwin":
-        return _MACOS_CANDIDATES
-    return _LINUX_CANDIDATES
-
-
-def chromium_binary() -> str | None:
-    """Return the first Chromium-family binary found, or ``None``."""
-
-    for candidate in _candidates():
-        resolved = candidate.resolve()
-        if resolved is not None:
-            return resolved
-    return None
-
-
 # ------------------------------------------------------------------- providers
+#
+# Chromium-family binary discovery (``chromium_binary``) lives in
+# ``config.desktop`` -- it is also needed there to report what an ``auto``
+# preference resolves to, without ``config`` importing this module or ``api``
+# crossing into ``cli`` (see ``tests/contracts/test_import_boundaries.py``).
 
 
 class AppModeWindow:

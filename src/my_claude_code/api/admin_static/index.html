@@ -103,6 +103,19 @@
                 </select>
                 <p class="field-description" id="desktopServerModeHint"></p>
               </div>
+              <div class="field">
+                <label for="desktopWindow">
+                  <span>Window</span>
+                </label>
+                <select id="desktopWindow">
+                  <option value="auto">Auto (recommended)</option>
+                  <option value="app-mode">App-mode window</option>
+                  <option value="pywebview">Embedded webview</option>
+                  <option value="browser">Browser tab</option>
+                </select>
+                <p class="field-description" id="desktopWindowHint"></p>
+                <p class="field-description" id="desktopWindowResolved" aria-live="polite"></p>
+              </div>
               <div class="deployment-origin" id="desktopOrigin" aria-live="polite"></div>
               <div class="desktop-toggles" id="desktopAutostartOptions"></div>
               <div class="desktop-toggles">
