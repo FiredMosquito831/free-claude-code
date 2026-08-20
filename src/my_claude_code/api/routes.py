@@ -37,10 +37,13 @@ def _provider_resolver(lease: RequestRuntimeLease) -> ProviderResolver:
 
 
 def _model_router(services: ApiServices, lease: RequestRuntimeLease) -> ModelRouter:
-    """Build a router that can see which cached models accept images."""
+    """Build a router that can see what the cached models actually accept."""
+
     return ModelRouter(
         lease.settings,
         vision_lookup=services.requests.cached_model_supports_vision,
+        reasoning_capability_lookup=services.requests.model_reasoning_capability,
+        output_limit_lookup=services.requests.model_output_limit,
     )
 
 

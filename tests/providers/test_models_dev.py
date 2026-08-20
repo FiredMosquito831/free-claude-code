@@ -498,3 +498,83 @@ def test_reasoning_index_is_memoized_until_mtime_changes(
     model_reasoning_capability_from_models_dev("open_router", "acme/no-reasoning", path)
 
     assert calls == ["read", "read"]
+
+
+# --------------------------------------------------------------------------
+# Output-token limit lookup
+# --------------------------------------------------------------------------
+
+from my_claude_code.providers.runtime.models_dev import (  # noqa: E402
+    model_output_limit_from_models_dev,
+)
+
+_LIMIT_INDEX = {
+    "openrouter": {
+        "models": {
+            "acme/limited": {"limit": {"context": 200000, "output": 64000}},
+            "acme/no-limit-block": {"reasoning": True},
+            "acme/context-only": {"limit": {"context": 200000}},
+            "acme/zero-output": {"limit": {"output": 0}},
+        }
+    },
+    "not-a-provider-bucket": "oops",
+}
+
+
+def _write_limit_cache(path: Path) -> None:
+    write_models_dev_cache(_LIMIT_INDEX, path)
+
+
+def test_output_limit_is_read_from_models_dev(tmp_path: Path) -> None:
+    path = tmp_path / "models-dev.json"
+    _write_limit_cache(path)
+
+    assert model_output_limit_from_models_dev("open_router", "acme/limited", path) == (
+        64000
+    )
+    # The alias map is honored exactly as the capability lookup honors it.
+    assert model_output_limit_from_models_dev("openrouter", "limited", path) == 64000
+
+
+@pytest.mark.parametrize(
+    "model_id",
+    ["acme/no-limit-block", "acme/context-only", "acme/zero-output", "acme/absent"],
+)
+def test_missing_or_unusable_output_limit_is_unknown(
+    tmp_path: Path, model_id: str
+) -> None:
+    path = tmp_path / "models-dev.json"
+    _write_limit_cache(path)
+
+    assert model_output_limit_from_models_dev("open_router", model_id, path) is None
+
+
+def test_output_limit_without_a_cache_is_unknown(tmp_path: Path) -> None:
+    assert (
+        model_output_limit_from_models_dev(
+            "open_router", "acme/limited", tmp_path / "nope.json"
+        )
+        is None
+    )
+
+
+def test_output_limit_index_is_memoized_until_mtime_changes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "models-dev.json"
+    _write_limit_cache(path)
+
+    calls: list[str] = []
+    real_read = models_dev.read_models_dev_cache
+
+    def _counting_read(cache_path: Path | None = None) -> object:
+        calls.append("read")
+        return real_read(cache_path)
+
+    monkeypatch.setattr(models_dev, "read_models_dev_cache", _counting_read)
+    models_dev._output_limit_index_cache.clear()
+
+    for _ in range(3):
+        model_output_limit_from_models_dev("open_router", "acme/limited", path)
+
+    assert calls == ["read"]
