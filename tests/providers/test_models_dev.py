@@ -691,6 +691,38 @@ def test_exact_match_wins_over_tag_stripped_match(tmp_path: Path) -> None:
     assert exact.supports_toggle_control is not True
 
 
+@pytest.mark.parametrize(
+    "tag", ["free", "nitro", "floor", "online", "extended", "discounted"]
+)
+def test_every_allow_listed_tag_strips(tmp_path: Path, tag: str) -> None:
+    """Pricing/routing/capability tags never change thinking, so they strip."""
+    path = tmp_path / "models-dev.json"
+    _write_matching_cache(path)
+
+    capability = model_reasoning_capability_from_models_dev(
+        "open_router", f"vendor/thinker:{tag}", path
+    )
+
+    assert capability is not None, f"':{tag}' should have been stripped"
+    assert capability.can_reason is False
+
+
+@pytest.mark.parametrize(
+    "tag", ["thinking", "32000", "1024", "low", "medium", "high", "max"]
+)
+def test_reasoning_tags_are_never_stripped(tmp_path: Path, tag: str) -> None:
+    """For these the tag IS the reasoning difference; stay unknown instead."""
+    path = tmp_path / "models-dev.json"
+    _write_matching_cache(path)
+
+    assert (
+        model_reasoning_capability_from_models_dev(
+            "open_router", f"vendor/thinker:{tag}", path
+        )
+        is None
+    ), f"':{tag}' must never be stripped"
+
+
 def test_thinking_and_numeric_tags_are_not_stripped(tmp_path: Path) -> None:
     path = tmp_path / "models-dev.json"
     _write_matching_cache(path)

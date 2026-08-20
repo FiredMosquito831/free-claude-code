@@ -372,9 +372,21 @@ PROVIDER_ID_ALIASES: dict[str, str] = {
 #   nararoute       -> orcarouter     unrelated service; name-distance artifact.
 #   tokenrouter     -> openrouter     different company.
 #   qwencloud       -> ebcloud        unrelated.
-#   mistral_codestral -> mistral      different endpoint whose deployment
-#                                     capability may differ (deferred, not
-#                                     refused).
+#   mistral_codestral -> mistral      investigated and refused, not deferred:
+#                                     https://codestral.mistral.ai/v1/models
+#                                     answers HTTP 404 ("no Route matched with
+#                                     those values"), so the endpoint publishes
+#                                     no model list and what it serves cannot
+#                                     be verified. models.dev's "mistral" entry
+#                                     holds exactly one codestral model,
+#                                     "codestral-latest", reporting
+#                                     reasoning=False. The alias would
+#                                     therefore cover a single model, and the
+#                                     only thing it would assert is a
+#                                     SUPPRESSING claim (turn reasoning off)
+#                                     about a deployment we cannot inspect.
+#                                     Wrong in that direction is worse than
+#                                     unknown, which behaves exactly as today.
 # These six have no models.dev entry at all and correctly stay unknown:
 # agnes, commandcode, featherless, nous_portal, qwencloud_coding, sambanova.
 #
@@ -383,13 +395,23 @@ PROVIDER_ID_ALIASES: dict[str, str] = {
 # entries with 16 distinct effort vocabularies and contradictory can_reason
 # values), so lookups never leave their provider bucket.
 
-# Pricing/routing tags some providers accept in a model ref but models.dev
-# does not list (e.g. "deepseek/deepseek-r1:free"). Strictly allow-listed:
-# ":thinking" and numeric tags (models.dev ships
+# Pricing/routing/capability tags some providers accept in a model ref but
+# models.dev does not list (e.g. "deepseek/deepseek-r1:free"). Every tag here
+# alters price, routing, or a non-reasoning capability and leaves thinking
+# behaviour untouched, so stripping it is safe by the same logic as ":free".
+# ":online" and ":extended" are OpenRouter request suffixes a user may type;
+# ":discounted" appears in the upstream index itself.
+#
+# Strictly allow-listed, because the excluded tags ARE the reasoning
+# difference: ":thinking" (69 occurrences upstream), numeric budget tags
+# (":32000", ":32768", ":8192", ":1024", ":64000") and effort tags (":low",
+# ":medium", ":high", ":max") are NEVER stripped -- models.dev ships
 # "nano-gpt/claude-opus-4-thinking:32000" and ":32768", and
-# "gemini-2.5-flash-preview:thinking") encode the reasoning difference itself,
-# so stripping those would be wrong in exactly the dimension configured here.
-_STRIPPABLE_MODEL_ID_TAGS: frozenset[str] = frozenset({"free", "nitro", "floor"})
+# "gemini-2.5-flash-preview:thinking" -- so stripping those would be wrong in
+# exactly the dimension configured here.
+_STRIPPABLE_MODEL_ID_TAGS: frozenset[str] = frozenset(
+    {"free", "nitro", "floor", "online", "extended", "discounted"}
+)
 
 
 def _tag_stripped_candidates(model_id: str) -> set[str]:
