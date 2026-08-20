@@ -9,6 +9,7 @@ discovery never fails because models.dev is unreachable.
 
 import asyncio
 import json
+import threading
 import uuid
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
@@ -19,8 +20,12 @@ from typing import Any
 import httpx
 from loguru import logger
 
-from my_claude_code.application.model_metadata import ProviderModelInfo
+from my_claude_code.application.model_metadata import (
+    ModelReasoningCapability,
+    ProviderModelInfo,
+)
 from my_claude_code.config.paths import config_dir_path
+from my_claude_code.core.reasoning import ReasoningEffort
 
 MODELS_DEV_URL = "https://models.dev/api.json"
 MODELS_DEV_CACHE_TTL_SECONDS = 24 * 60 * 60
@@ -314,3 +319,194 @@ async def enrich_provider_model_infos(
     if cache is None:
         return infos
     return enrich_model_infos(infos, cache.index)
+
+
+# --------------------------------------------------------------------------
+# Reasoning capability lookup (data + lookup only; no request-building code
+# reads this yet — that is a later PR).
+# --------------------------------------------------------------------------
+
+# This project's provider ids don't always match models.dev's provider ids.
+# This is the single place that maps one onto the other; extend it here, not
+# with a parallel matcher elsewhere. Providers absent from this map are
+# assumed to share their id with models.dev (checked first, so an alias entry
+# is only needed when the ids genuinely differ).
+PROVIDER_ID_ALIASES: dict[str, str] = {
+    "open_router": "openrouter",
+    "nvidia_nim": "nvidia",
+    "fireworks": "fireworks-ai",
+    "together": "togetherai",
+    "novita": "novita-ai",
+    "bedrock": "amazon-bedrock",
+    "gemini": "google",
+    "vertex": "google-vertex",
+    "azure_openai": "azure",
+    "cline": "cline-pass",
+    "kimi_coding": "kimi-for-coding",
+    "alibaba_cn": "alibaba-cn",
+    "alibaba_coding": "alibaba-coding-plan",
+    "alibaba_coding_cn": "alibaba-coding-plan-cn",
+    "ollama_cloud": "ollama-cloud",
+    "chatgpt_oauth": "openai",
+    "anthropic_oauth": "anthropic",
+    "github_models": "github-copilot",
+}
+
+_EFFORT_BY_VALUE: dict[str, ReasoningEffort] = {
+    member.value: member for member in ReasoningEffort
+}
+
+
+def _parse_reasoning_capability(
+    metadata: Mapping[str, Any],
+) -> ModelReasoningCapability:
+    """Parse ``reasoning``/``reasoning_options`` off one models.dev model entry."""
+    raw_can_reason = metadata.get("reasoning")
+    can_reason = raw_can_reason if isinstance(raw_can_reason, bool) else None
+
+    options = metadata.get("reasoning_options")
+    if not isinstance(options, list):
+        # No (or malformed) options list: control styles are unknown, not
+        # known-false. ``can_reason`` may still be known from the flag above.
+        return ModelReasoningCapability(can_reason=can_reason)
+
+    supports_effort = False
+    supports_toggle = False
+    supports_budget = False
+    supported_efforts: frozenset[ReasoningEffort] | None = None
+    for option in options:
+        if not isinstance(option, Mapping):
+            continue
+        option_type = option.get("type")
+        if option_type == "effort":
+            supports_effort = True
+            values = option.get("values")
+            supported_efforts = (
+                frozenset(
+                    _EFFORT_BY_VALUE[value]
+                    for value in values
+                    if isinstance(value, str) and value in _EFFORT_BY_VALUE
+                )
+                if isinstance(values, list)
+                else frozenset()
+            )
+        elif option_type == "toggle":
+            supports_toggle = True
+        elif option_type == "budget_tokens":
+            supports_budget = True
+
+    return ModelReasoningCapability(
+        can_reason=can_reason,
+        supports_effort_control=supports_effort,
+        supports_toggle_control=supports_toggle,
+        supports_budget_control=supports_budget,
+        supported_efforts=supported_efforts,
+    )
+
+
+def _build_reasoning_index(
+    index: Mapping[str, Any],
+) -> dict[str, dict[str, ModelReasoningCapability]]:
+    """Build ``{models.dev provider id: {normalized model id: capability}}``."""
+    built: dict[str, dict[str, ModelReasoningCapability]] = {}
+    for provider_id, bucket in index.items():
+        if not isinstance(provider_id, str) or not isinstance(bucket, Mapping):
+            continue
+        models = bucket.get("models")
+        if not isinstance(models, Mapping):
+            continue
+        per_model: dict[str, ModelReasoningCapability] = {}
+        for model_id, metadata in models.items():
+            if not isinstance(model_id, str) or not isinstance(metadata, Mapping):
+                continue
+            capability = _parse_reasoning_capability(metadata)
+            for candidate in _normalize_candidates(model_id):
+                per_model.setdefault(candidate, capability)
+        if per_model:
+            built[provider_id] = per_model
+    return built
+
+
+_reasoning_index_lock = threading.Lock()
+# Path -> (source mtime, built index) so a 4MB parse happens at most once per
+# on-disk cache generation, not once per lookup/request.
+_reasoning_index_cache: dict[Path, tuple[float, dict[str, dict[str, Any]]]] = {}
+
+
+def _cached_reasoning_index(
+    path: Path | None,
+) -> dict[str, dict[str, ModelReasoningCapability]]:
+    cache_path = path if path is not None else models_dev_cache_path()
+    try:
+        mtime = cache_path.stat().st_mtime
+    except OSError:
+        # No on-disk cache yet (fresh install, offline): unknown, not an
+        # error. A background refresh (elsewhere) will populate it later.
+        return {}
+    with _reasoning_index_lock:
+        cached = _reasoning_index_cache.get(cache_path)
+        if cached is not None and cached[0] == mtime:
+            return cached[1]
+    cache = read_models_dev_cache(cache_path)
+    built = _build_reasoning_index(cache.index) if cache is not None else {}
+    with _reasoning_index_lock:
+        _reasoning_index_cache[cache_path] = (mtime, built)
+    return built
+
+
+def model_reasoning_capability_from_models_dev(
+    provider_id: str, model_id: str, path: Path | None = None
+) -> ModelReasoningCapability | None:
+    """Return the models.dev-reported reasoning capability, or None if unknown.
+
+    None means "no data at all" (provider or model absent from the index),
+    which is distinct from a returned :class:`ModelReasoningCapability` whose
+    fields are individually ``None``/``False``. Reads the disk-cached index
+    only (never the in-memory :class:`ProviderModelCache`), so this works
+    before any admin refresh has ever run, and it is a pure, cheap, memoized
+    lookup: safe to call per request.
+    """
+    reasoning_index = _cached_reasoning_index(path)
+    bucket = reasoning_index.get(provider_id)
+    if bucket is None:
+        alias = PROVIDER_ID_ALIASES.get(provider_id)
+        if alias is not None:
+            bucket = reasoning_index.get(alias)
+    if bucket is None:
+        return None
+    for candidate in sorted(_normalize_candidates(model_id), key=len, reverse=True):
+        found = bucket.get(candidate)
+        if found is not None:
+            return found
+    return None
+
+
+def resolve_model_reasoning_capability(
+    provider_id: str,
+    model_id: str,
+    provider_supports_thinking: bool | None,
+    path: Path | None = None,
+) -> ModelReasoningCapability | None:
+    """Layer provider-reported capability over the models.dev fallback.
+
+    ``provider_supports_thinking`` (typically
+    ``ProviderModelInfo.supports_thinking``) wins for ``can_reason`` whenever
+    it is not ``None``; control-style detail (effort/toggle/budget support,
+    and the effort vocabulary) always comes from models.dev, since providers
+    in this project only ever report the single thinking-supported boolean.
+    Returns ``None`` only when neither layer has any data at all.
+    """
+    models_dev_capability = model_reasoning_capability_from_models_dev(
+        provider_id, model_id, path
+    )
+    if provider_supports_thinking is None:
+        return models_dev_capability
+    if models_dev_capability is None:
+        return ModelReasoningCapability(can_reason=provider_supports_thinking)
+    return ModelReasoningCapability(
+        can_reason=provider_supports_thinking,
+        supports_effort_control=models_dev_capability.supports_effort_control,
+        supports_toggle_control=models_dev_capability.supports_toggle_control,
+        supports_budget_control=models_dev_capability.supports_budget_control,
+        supported_efforts=models_dev_capability.supported_efforts,
+    )

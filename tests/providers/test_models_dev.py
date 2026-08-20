@@ -206,3 +206,295 @@ def test_normalize_candidates() -> None:
 
     assert "acme/llama-3.3-70b" in candidates
     assert "llama-3.3-70b" in candidates
+
+
+# --------------------------------------------------------------------------
+# Reasoning capability lookup
+# --------------------------------------------------------------------------
+
+from my_claude_code.core.reasoning import ReasoningEffort  # noqa: E402
+from my_claude_code.providers.runtime.models_dev import (  # noqa: E402
+    PROVIDER_ID_ALIASES,
+    model_reasoning_capability_from_models_dev,
+    resolve_model_reasoning_capability,
+)
+
+_REASONING_INDEX = {
+    "openrouter": {
+        "models": {
+            "acme/all-controls": {
+                "reasoning": True,
+                "reasoning_options": [
+                    {"type": "toggle"},
+                    {
+                        "type": "effort",
+                        "values": [
+                            "none",
+                            "minimal",
+                            "low",
+                            "medium",
+                            "high",
+                            "xhigh",
+                            "max",
+                            "default",
+                        ],
+                    },
+                    {"type": "budget_tokens"},
+                ],
+            },
+            "acme/no-reasoning": {"reasoning": False},
+            "acme/malformed-options": {
+                "reasoning": True,
+                "reasoning_options": "not-a-list",
+            },
+            "acme/malformed-effort": {
+                "reasoning": True,
+                "reasoning_options": [{"type": "effort", "values": "not-a-list"}],
+            },
+        }
+    },
+    "anthropic": {
+        "models": {
+            "claude-x": {"reasoning": True, "reasoning_options": [{"type": "toggle"}]}
+        }
+    },
+    "not-a-provider-bucket": "oops",
+}
+
+
+def _write_reasoning_cache(path: Path) -> None:
+    write_models_dev_cache(_REASONING_INDEX, path)
+
+
+def test_parses_effort_toggle_and_budget_together(tmp_path: Path) -> None:
+    path = tmp_path / "models-dev.json"
+    _write_reasoning_cache(path)
+
+    capability = model_reasoning_capability_from_models_dev(
+        "open_router", "acme/all-controls", path
+    )
+
+    assert capability is not None
+    assert capability.can_reason is True
+    assert capability.supports_effort_control is True
+    assert capability.supports_toggle_control is True
+    assert capability.supports_budget_control is True
+
+
+def test_effort_values_map_onto_reasoning_effort_ignoring_unknown(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "models-dev.json"
+    _write_reasoning_cache(path)
+
+    capability = model_reasoning_capability_from_models_dev(
+        "open_router", "acme/all-controls", path
+    )
+
+    assert capability is not None
+    assert capability.supported_efforts == frozenset(
+        {
+            ReasoningEffort.MINIMAL,
+            ReasoningEffort.LOW,
+            ReasoningEffort.MEDIUM,
+            ReasoningEffort.HIGH,
+            ReasoningEffort.XHIGH,
+            ReasoningEffort.MAX,
+        }
+    )
+    # "none" and "default" are not ReasoningEffort members and must not raise.
+    assert capability.supported_efforts is not None
+    assert "none" not in [effort.value for effort in capability.supported_efforts]
+
+
+def test_known_not_reasoning_is_distinct_from_unknown_model(tmp_path: Path) -> None:
+    path = tmp_path / "models-dev.json"
+    _write_reasoning_cache(path)
+
+    known_false = model_reasoning_capability_from_models_dev(
+        "open_router", "acme/no-reasoning", path
+    )
+    unknown = model_reasoning_capability_from_models_dev(
+        "open_router", "acme/does-not-exist", path
+    )
+
+    assert known_false is not None
+    assert known_false.can_reason is False
+    assert unknown is None
+
+
+@pytest.mark.parametrize(
+    "provider_id,models_dev_id",
+    [
+        ("open_router", "openrouter"),
+        ("azure_openai", "azure"),
+        ("bedrock", "amazon-bedrock"),
+        ("gemini", "google"),
+        ("vertex", "google-vertex"),
+        ("fireworks", "fireworks-ai"),
+        ("together", "togetherai"),
+        ("novita", "novita-ai"),
+        ("cline", "cline-pass"),
+        ("kimi_coding", "kimi-for-coding"),
+        ("alibaba_cn", "alibaba-cn"),
+        ("alibaba_coding", "alibaba-coding-plan"),
+        ("alibaba_coding_cn", "alibaba-coding-plan-cn"),
+        ("ollama_cloud", "ollama-cloud"),
+        ("chatgpt_oauth", "openai"),
+        ("anthropic_oauth", "anthropic"),
+        ("github_models", "github-copilot"),
+    ],
+)
+def test_all_declared_aliases_resolve(provider_id: str, models_dev_id: str) -> None:
+    assert PROVIDER_ID_ALIASES[provider_id] == models_dev_id
+
+
+def test_alias_resolution_actually_reaches_the_model(tmp_path: Path) -> None:
+    path = tmp_path / "models-dev.json"
+    _write_reasoning_cache(path)
+
+    # "open_router" is our provider id; the fixture only has "openrouter".
+    capability = model_reasoning_capability_from_models_dev(
+        "open_router", "acme/no-reasoning", path
+    )
+    # "anthropic_oauth" aliases onto "anthropic", which does exist directly
+    # here too, exercising both the alias path and a same-named provider.
+    aliased = model_reasoning_capability_from_models_dev(
+        "anthropic_oauth", "claude-x", path
+    )
+
+    assert capability is not None
+    assert aliased is not None
+    assert aliased.supports_toggle_control is True
+
+
+def test_provider_absent_from_index_is_unknown_not_an_error(tmp_path: Path) -> None:
+    path = tmp_path / "models-dev.json"
+    _write_reasoning_cache(path)
+
+    # "ollama" is a real project provider id with no models.dev entry at all.
+    result = model_reasoning_capability_from_models_dev("ollama", "any-model", path)
+
+    assert result is None
+
+
+def test_layering_provider_reported_wins_when_known(tmp_path: Path) -> None:
+    path = tmp_path / "models-dev.json"
+    _write_reasoning_cache(path)
+
+    # models.dev says False, provider says True: provider wins for can_reason.
+    resolved = resolve_model_reasoning_capability(
+        "open_router", "acme/no-reasoning", True, path
+    )
+
+    assert resolved is not None
+    assert resolved.can_reason is True
+
+
+def test_layering_falls_back_to_models_dev_when_provider_unknown(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "models-dev.json"
+    _write_reasoning_cache(path)
+
+    resolved = resolve_model_reasoning_capability(
+        "open_router", "acme/all-controls", None, path
+    )
+
+    assert resolved is not None
+    assert resolved.can_reason is True
+    assert resolved.supports_budget_control is True
+
+
+def test_layering_unknown_when_neither_layer_has_data(tmp_path: Path) -> None:
+    path = tmp_path / "models-dev.json"
+    _write_reasoning_cache(path)
+
+    resolved = resolve_model_reasoning_capability("ollama", "any-model", None, path)
+
+    assert resolved is None
+
+
+def test_lookup_works_with_empty_in_memory_provider_model_cache(
+    tmp_path: Path,
+) -> None:
+    """Anti-'gate that never opens' test.
+
+    ProviderModelCache is populated only by an admin refresh and is empty on
+    a fresh server. The reasoning lookup must read the disk-cached models.dev
+    index directly and must not depend on ProviderModelCache at all.
+    """
+    from my_claude_code.providers.runtime.model_cache import ProviderModelCache
+
+    path = tmp_path / "models-dev.json"
+    _write_reasoning_cache(path)
+
+    empty_cache = ProviderModelCache(available_provider_ids=["open_router"])
+    assert empty_cache.has_provider("open_router") is False
+
+    capability = model_reasoning_capability_from_models_dev(
+        "open_router", "acme/all-controls", path
+    )
+
+    assert capability is not None
+    assert capability.can_reason is True
+
+
+def test_malformed_reasoning_options_degrade_to_unknown_not_raise(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "models-dev.json"
+    _write_reasoning_cache(path)
+
+    not_a_list = model_reasoning_capability_from_models_dev(
+        "open_router", "acme/malformed-options", path
+    )
+    bad_values = model_reasoning_capability_from_models_dev(
+        "open_router", "acme/malformed-effort", path
+    )
+
+    assert not_a_list is not None
+    assert not_a_list.can_reason is True
+    assert not_a_list.supports_effort_control is None
+    assert not_a_list.supports_toggle_control is None
+    assert not_a_list.supports_budget_control is None
+
+    assert bad_values is not None
+    assert bad_values.supports_effort_control is True
+    assert bad_values.supported_efforts == frozenset()
+
+
+def test_missing_index_returns_unknown_not_raise(tmp_path: Path) -> None:
+    result = model_reasoning_capability_from_models_dev(
+        "open_router", "acme/all-controls", tmp_path / "nope.json"
+    )
+
+    assert result is None
+
+
+def test_reasoning_index_is_memoized_until_mtime_changes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "models-dev.json"
+    _write_reasoning_cache(path)
+
+    calls: list[str] = []
+    real_read = models_dev.read_models_dev_cache
+
+    def _counting_read(cache_path: Path | None = None) -> object:
+        calls.append("read")
+        return real_read(cache_path)
+
+    monkeypatch.setattr(models_dev, "read_models_dev_cache", _counting_read)
+    models_dev._reasoning_index_cache.clear()
+
+    model_reasoning_capability_from_models_dev("open_router", "acme/no-reasoning", path)
+    model_reasoning_capability_from_models_dev("open_router", "acme/no-reasoning", path)
+    model_reasoning_capability_from_models_dev("open_router", "acme/no-reasoning", path)
+
+    assert calls == ["read"]
+
+    _write_reasoning_cache(path)  # bumps mtime
+    model_reasoning_capability_from_models_dev("open_router", "acme/no-reasoning", path)
+
+    assert calls == ["read", "read"]
