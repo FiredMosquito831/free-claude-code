@@ -1,7 +1,7 @@
 """Claude Messages API product flow."""
 
 import asyncio
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Callable, Mapping
 from dataclasses import dataclass, replace
 
 from fastapi.responses import JSONResponse, Response
@@ -107,7 +107,11 @@ class MessagesHandler:
         )
 
     async def create(
-        self, request_data: MessagesRequest, *, request_id: str | None = None
+        self,
+        request_data: MessagesRequest,
+        *,
+        request_id: str | None = None,
+        headers: Mapping[str, str] | None = None,
     ) -> object:
         """Create an Anthropic-compatible message response."""
         request_id = request_id or new_request_id()
@@ -117,6 +121,7 @@ class MessagesHandler:
             request_id=request_id,
             endpoint="/v1/messages",
             protocol="anthropic",
+            headers=headers,
         )
         try:
             require_non_empty_messages(request_data.messages)

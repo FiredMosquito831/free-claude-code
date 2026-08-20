@@ -10,7 +10,7 @@ import asyncio
 import hashlib
 import json
 import time
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Mapping
 from dataclasses import dataclass
 from typing import Any, Literal
 
@@ -30,6 +30,7 @@ from my_claude_code.core.credential_attribution import install_attribution
 from my_claude_code.core.diagnostics import safe_exception_message
 from my_claude_code.core.failures import find_execution_failure
 from my_claude_code.core.reasoning import ReasoningPolicy
+from my_claude_code.core.request_headers import capture_headers
 from my_claude_code.core.request_images import capture_images
 from my_claude_code.core.request_log import (
     MAX_TEXT_CHARS,
@@ -58,6 +59,7 @@ class RequestCapture:
         capture_bodies: bool = True,
         images: tuple[ImageInput, ...] = (),
         capture_images_pixels: int = 0,
+        headers: dict[str, str] | None = None,
     ) -> None:
         self._store = store
         self._capture_bodies = capture_bodies
@@ -101,6 +103,7 @@ class RequestCapture:
             ),
             input_chars=input_chars,
             params=params,
+            headers=headers,
         )
 
     @property
@@ -411,6 +414,7 @@ def build_capture(
     request_id: str,
     endpoint: str,
     protocol: WireProtocol,
+    headers: Mapping[str, str] | None = None,
 ) -> RequestCapture:
     """Create the capture for one request; inert when logging is disabled."""
     store = store_from_settings(settings)
@@ -426,6 +430,7 @@ def build_capture(
         capture_bodies=bool(getattr(settings, "request_log_capture_bodies", True)),
         images=request_image_inputs(request),
         capture_images_pixels=_image_pixels(settings),
+        headers=capture_headers(headers),
     )
 
 
