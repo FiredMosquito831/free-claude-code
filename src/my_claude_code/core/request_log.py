@@ -116,6 +116,7 @@ CREATE TABLE IF NOT EXISTS requests (
     input_chars INTEGER,
     output_chars INTEGER,
     reasoning TEXT,
+    requested_reasoning TEXT,
     params TEXT,
     tokens_in INTEGER,
     tokens_out INTEGER,
@@ -335,6 +336,17 @@ _ADDED_COLUMNS = (
         "input_image_count",
         "ALTER TABLE requests ADD COLUMN input_image_count INTEGER",
     ),
+    # The reasoning intent as asked for, before per-model capability gating.
+    # ``reasoning`` holds the *applied* policy: since per-model gating landed it
+    # records what was actually sent, and rewriting that history would be worse
+    # than the ambiguity it fixes. Rows written before this column existed keep
+    # NULL here forever -- deliberately NOT backfilled, because "we do not know
+    # what was requested" is a different fact from "the request was sent
+    # unchanged", and only NULL can say the first one.
+    (
+        "requested_reasoning",
+        "ALTER TABLE requests ADD COLUMN requested_reasoning TEXT",
+    ),
 )
 
 # Indexes over post-release columns, created only once those columns exist.
@@ -461,6 +473,10 @@ class RequestRecord:
     input_chars: int | None = None
     output_chars: int | None = None
     reasoning: str | None = None
+    # The reasoning policy actually applied (post per-model gating) and the one
+    # originally requested. ``requested_reasoning`` stays None on a row whose
+    # writer did not know it; that is distinct from "requested == applied".
+    requested_reasoning: str | None = None
     params: dict[str, Any] | None = None
     tokens_in: int | None = None
     tokens_out: int | None = None
@@ -1374,14 +1390,15 @@ class RequestLogStore:
                         id, ts_epoch, ts_iso, endpoint, protocol, requested_model,
                         provider, resolved_model, stream, input_text, output_text,
                         input_sha256, output_sha256, input_chars, output_chars,
-                        reasoning, params, tokens_in, tokens_out,
+                        reasoning, requested_reasoning, params,
+                        tokens_in, tokens_out,
                         cache_read_tokens, cache_write_tokens, ttft_ms,
                         duration_ms, status, error_kind, error_message, headers,
                         key_index, key_label, thinking_text, thinking_chars,
                         tool_calls, tool_call_count, route_attempt,
                         route_primary_model, route_chain, route_diverted_from,
                         route_diversion, input_image_count
-                    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                     """,
                     rows,
                 )
@@ -1428,6 +1445,7 @@ class RequestLogStore:
             record.input_chars,
             record.output_chars,
             record.reasoning,
+            record.requested_reasoning,
             json.dumps(record.params) if record.params is not None else None,
             record.tokens_in,
             record.tokens_out,

@@ -107,6 +107,7 @@ def _routed_request(
             reasoning_preference=ReasoningPreference.CLIENT,
         ),
         reasoning=ReasoningPolicy.on(),
+        requested_reasoning=ReasoningPolicy.on(),
     )
 
 

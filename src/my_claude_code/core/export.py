@@ -236,7 +236,17 @@ _REQUEST_FIELD_COLUMNS: dict[str, tuple[str, ...]] = {
     "input": ("input_text", "input_chars"),
     "output": ("output_text", "output_chars"),
     "tool_calls": ("tool_calls", "tool_call_count"),
-    "thinking": ("thinking_text", "thinking_chars"),
+    # ``reasoning``/``requested_reasoning`` are the *policies* (what was asked
+    # for and what was sent), not the thinking transcript, but they belong to
+    # the same question and had no gating field of their own -- they were named
+    # in the display order and labels while no field selected them, so they
+    # could never actually be exported.
+    "thinking": (
+        "thinking_text",
+        "thinking_chars",
+        "reasoning",
+        "requested_reasoning",
+    ),
 }
 
 # Derived detail columns computed per row (not raw SQL columns).
@@ -285,6 +295,7 @@ _REQUEST_COLUMN_ORDER: tuple[str, ...] = (
     "thinking_text",
     "tool_calls",
     "reasoning",
+    "requested_reasoning",
     "params",
     "headers",
     "input_sha256",
@@ -326,7 +337,8 @@ _REQUEST_COLUMN_LABELS: dict[str, str] = {
     "output_text": "Output",
     "thinking_text": "Reasoning",
     "tool_calls": "Tool calls",
-    "reasoning": "Reasoning policy",
+    "reasoning": "Reasoning policy (applied)",
+    "requested_reasoning": "Reasoning policy (requested)",
     "params": "Params",
     "headers": "Headers",
     "input_sha256": "Input SHA-256",

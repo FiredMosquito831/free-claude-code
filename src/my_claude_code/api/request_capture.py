@@ -29,6 +29,7 @@ from my_claude_code.core.async_iterators import try_close_async_iterator
 from my_claude_code.core.credential_attribution import install_attribution
 from my_claude_code.core.diagnostics import safe_exception_message
 from my_claude_code.core.failures import find_execution_failure
+from my_claude_code.core.reasoning import ReasoningPolicy
 from my_claude_code.core.request_images import capture_images
 from my_claude_code.core.request_log import (
     MAX_TEXT_CHARS,
@@ -141,7 +142,14 @@ class RequestCapture:
         )
         self._record.provider = routed.resolved.provider_id
         self._record.resolved_model = routed.resolved.provider_model
-        self._record.reasoning = _describe_reasoning(routed)
+        # ``reasoning`` is the applied policy (post per-model gating);
+        # ``requested_reasoning`` is what was asked for before it. They are
+        # equal on an ungated request and differ exactly when the model's
+        # capability changed what we sent.
+        self._record.reasoning = _describe_reasoning(routed.reasoning)
+        self._record.requested_reasoning = _describe_reasoning(
+            routed.requested_reasoning
+        )
 
     def finish_error(self, exc: BaseException) -> None:
         """Finalize for an error raised before the stream wrapper takes over."""
@@ -470,8 +478,7 @@ def extract_request_params(request: MessagesRequest) -> dict[str, Any]:
     return {key: value for key, value in params.items() if value is not None}
 
 
-def _describe_reasoning(routed: RoutedMessagesRequest) -> str | None:
-    policy = routed.reasoning
+def _describe_reasoning(policy: ReasoningPolicy) -> str | None:
     parts = [f"control={policy.control.value}"]
     if policy.effort is not None:
         parts.append(f"effort={policy.effort.value}")
