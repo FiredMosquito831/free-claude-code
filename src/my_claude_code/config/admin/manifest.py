@@ -33,6 +33,7 @@ def _reasoning_options(
         ReasoningPreference.INHERIT: "Inherit",
         ReasoningPreference.OFF: "Off",
         ReasoningPreference.CLIENT: "From client",
+        ReasoningPreference.ADAPTIVE: "Adaptive",
         ReasoningPreference.LOW: "Low",
         ReasoningPreference.MEDIUM: "Medium",
         ReasoningPreference.HIGH: "High",

@@ -22,6 +22,8 @@ def resolve_reasoning_policy(
         raise ValueError("Reasoning preference must be resolved before application.")
     if preference is ReasoningPreference.OFF:
         return ReasoningPolicy.off()
+    if preference is ReasoningPreference.ADAPTIVE:
+        return ReasoningPolicy.adaptive()
     if preference is not ReasoningPreference.CLIENT:
         return ReasoningPolicy.on(effort=ReasoningEffort(preference.value))
     return client_reasoning_policy(request)

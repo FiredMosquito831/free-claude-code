@@ -131,6 +131,22 @@ def test_an_unknown_model_records_both_policies_equal(store) -> None:
     assert row["requested_reasoning"] == "control=on,effort=max"
 
 
+def test_an_adaptive_tier_is_recorded_legibly(store) -> None:
+    row = _recorded(store, ReasoningPreference.ADAPTIVE, None)
+
+    assert row["requested_reasoning"] == "control=adaptive"
+    assert row["reasoning"] == "control=adaptive"
+
+
+def test_an_adaptive_tier_on_a_non_reasoning_model_records_the_suppression(
+    store,
+) -> None:
+    row = _recorded(store, ReasoningPreference.ADAPTIVE, CANNOT_REASON)
+
+    assert row["requested_reasoning"] == "control=adaptive"
+    assert row["reasoning"] == "control=default"
+
+
 def _record(request_id: str, **overrides) -> RequestRecord:
     defaults: dict[str, Any] = {
         "id": request_id,

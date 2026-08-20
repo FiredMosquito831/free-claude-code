@@ -74,6 +74,10 @@ def _apply_reasoning(
     if policy.control is ReasoningControl.OFF:
         body.pop("thinking", None)
         return
+    if policy.control is ReasoningControl.ADAPTIVE:
+        # An explicit adaptive tier overrides whatever the client asked for.
+        body["thinking"] = {"type": "adaptive"}
+        return
     if not policy.requests_reasoning:
         return
 

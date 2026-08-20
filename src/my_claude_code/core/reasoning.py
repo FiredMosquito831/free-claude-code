@@ -10,6 +10,15 @@ class ReasoningControl(StrEnum):
     DEFAULT = "default"
     OFF = "off"
     ON = "on"
+    ADAPTIVE = "adaptive"
+    """Let the upstream model decide how much to think, per request.
+
+    This is a distinct intent from ``DEFAULT`` (no opinion was expressed) and
+    from ``ON`` (reasoning was demanded, optionally at a named effort). Only a
+    provider that publishes an adaptive channel of its own can encode it; every
+    other encoder sees a policy that asks for no representable control and
+    therefore sends the provider's own default, exactly as ``DEFAULT`` does.
+    """
 
 
 class ReasoningEffort(StrEnum):
@@ -75,6 +84,12 @@ class ReasoningPolicy:
         return cls(control=ReasoningControl.OFF)
 
     @classmethod
+    def adaptive(cls) -> ReasoningPolicy:
+        """Ask the model itself to choose how much to think."""
+
+        return cls(control=ReasoningControl.ADAPTIVE)
+
+    @classmethod
     def on(
         cls,
         *,
@@ -97,7 +112,12 @@ class ReasoningPolicy:
 
     @property
     def requests_reasoning(self) -> bool:
-        """Return whether the request explicitly asks the provider to reason."""
+        """Return whether the request explicitly asks the provider to reason.
+
+        ``ADAPTIVE`` deliberately answers ``False``: it names no effort and no
+        budget, so there is nothing for a generic encoder to send. Encoders
+        that understand adaptive check ``control`` directly.
+        """
 
         return self.control is not ReasoningControl.OFF and (
             self.control is ReasoningControl.ON

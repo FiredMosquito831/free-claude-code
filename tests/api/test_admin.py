@@ -568,6 +568,7 @@ def test_admin_config_masks_secrets_and_exposes_manifest(monkeypatch, tmp_path):
     assert reasoning_policy["options"] == [
         {"value": "off", "label": "Off"},
         {"value": "client", "label": "From client"},
+        {"value": "adaptive", "label": "Adaptive"},
         {"value": "low", "label": "Low"},
         {"value": "medium", "label": "Medium"},
         {"value": "high", "label": "High"},
