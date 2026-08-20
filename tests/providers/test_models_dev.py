@@ -578,3 +578,139 @@ def test_output_limit_index_is_memoized_until_mtime_changes(
         model_output_limit_from_models_dev("open_router", "acme/limited", path)
 
     assert calls == ["read"]
+
+
+# --------------------------------------------------------------------------
+# Provider alias coverage, drift guard, and tag-stripped model matching
+# --------------------------------------------------------------------------
+
+from my_claude_code.config.provider_catalog import PROVIDER_CATALOG  # noqa: E402
+
+_MATCHING_INDEX = {
+    "opencode-go": {"models": {"opencode-go/gpt-5": {"reasoning": True}}},
+    "wafer.ai": {"models": {"wafer-1": {"reasoning": True}}},
+    "moonshotai": {"models": {"kimi-k3": {"reasoning": True}}},
+    "cloudflare-workers-ai": {"models": {"@cf/nvidia/nemotron": {"reasoning": True}}},
+    # A "llama" provider exists here on purpose: our llamacpp provider must
+    # still resolve to None (rejected pairing, see PROVIDER_ID_ALIASES).
+    "llama": {"models": {"llama-4": {"reasoning": True}}},
+    "openrouter": {
+        "models": {
+            "deepseek/deepseek-r1:free": {"reasoning": False},
+            "vendor/tagged-only:free": {"reasoning": True},
+            "vendor/both": {
+                "reasoning": True,
+                "reasoning_options": [{"type": "toggle"}],
+            },
+            "vendor/both:free": {"reasoning": False},
+            "vendor/thinker": {"reasoning": False},
+            "vendor/numeric": {"reasoning": False},
+        }
+    },
+}
+
+
+def _write_matching_cache(path: Path) -> None:
+    write_models_dev_cache(_MATCHING_INDEX, path)
+
+
+@pytest.mark.parametrize(
+    ("provider_id", "model_id"),
+    [
+        ("opencode_go", "opencode-go/gpt-5"),
+        ("wafer", "wafer-1"),
+        ("kimi", "kimi-k3"),
+        ("cloudflare", "@cf/nvidia/nemotron"),
+    ],
+)
+def test_new_aliases_reach_their_models_dev_bucket(
+    tmp_path: Path, provider_id: str, model_id: str
+) -> None:
+    path = tmp_path / "models-dev.json"
+    _write_matching_cache(path)
+
+    capability = model_reasoning_capability_from_models_dev(provider_id, model_id, path)
+
+    assert capability is not None
+    assert capability.can_reason is True
+
+
+def test_every_alias_key_is_a_real_provider_id() -> None:
+    unknown = sorted(set(PROVIDER_ID_ALIASES) - set(PROVIDER_CATALOG))
+
+    assert unknown == []
+
+
+def test_no_alias_maps_a_provider_id_onto_itself() -> None:
+    self_mapped = sorted(
+        key for key, value in PROVIDER_ID_ALIASES.items() if key == value
+    )
+
+    assert self_mapped == []
+
+
+def test_alias_map_has_no_duplicate_keys() -> None:
+    source = Path(models_dev.__file__).read_text(encoding="utf-8")
+    block = source.split("PROVIDER_ID_ALIASES: dict[str, str] = {", 1)[1]
+    block = block.split("\n}", 1)[0]
+    keys = [
+        line.split('"')[1]
+        for line in block.splitlines()
+        if line.strip().startswith('"')
+    ]
+
+    assert sorted(keys) == sorted(set(keys))
+
+
+def test_free_tag_falls_back_to_the_untagged_entry(tmp_path: Path) -> None:
+    path = tmp_path / "models-dev.json"
+    _write_matching_cache(path)
+
+    tagged = model_reasoning_capability_from_models_dev(
+        "open_router", "vendor/thinker:free", path
+    )
+
+    # "vendor/thinker:free" is not listed; the tag is stripped and it resolves
+    # to the untagged "vendor/thinker" entry in the same provider bucket.
+    assert tagged is not None
+    assert tagged.can_reason is False
+
+
+def test_exact_match_wins_over_tag_stripped_match(tmp_path: Path) -> None:
+    path = tmp_path / "models-dev.json"
+    _write_matching_cache(path)
+
+    exact = model_reasoning_capability_from_models_dev(
+        "open_router", "vendor/both:free", path
+    )
+
+    assert exact is not None
+    assert exact.can_reason is False
+    # The untagged "vendor/both" carries a toggle; the exact ":free" row does
+    # not, so getting the toggle here would mean the wrong row was returned.
+    assert exact.supports_toggle_control is not True
+
+
+def test_thinking_and_numeric_tags_are_not_stripped(tmp_path: Path) -> None:
+    path = tmp_path / "models-dev.json"
+    _write_matching_cache(path)
+
+    thinking = model_reasoning_capability_from_models_dev(
+        "open_router", "vendor/thinker:thinking", path
+    )
+    numeric = model_reasoning_capability_from_models_dev(
+        "open_router", "vendor/numeric:32000", path
+    )
+
+    assert thinking is None
+    assert numeric is None
+
+
+def test_rejected_llamacpp_pairing_stays_unknown(tmp_path: Path) -> None:
+    path = tmp_path / "models-dev.json"
+    _write_matching_cache(path)
+
+    # A "llama" provider is present in the fixture; llamacpp must NOT match it.
+    assert (
+        model_reasoning_capability_from_models_dev("llamacpp", "llama-4", path) is None
+    )
