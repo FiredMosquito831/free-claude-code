@@ -9,6 +9,7 @@ class ReasoningPreference(StrEnum):
     INHERIT = "inherit"
     OFF = "off"
     CLIENT = "client"
+    ADAPTIVE = "adaptive"
     LOW = "low"
     MEDIUM = "medium"
     HIGH = "high"
