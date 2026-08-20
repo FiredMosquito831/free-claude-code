@@ -23,7 +23,9 @@ from my_claude_code.core.anthropic import (
 from my_claude_code.core.gateway_model_ids import decode_gateway_model_id
 from my_claude_code.core.reasoning import ReasoningPolicy
 
+from .model_metadata import ModelReasoningCapability
 from .reasoning import resolve_reasoning_policy
+from .reasoning_gating import adapt_reasoning_policy
 
 _ROUTE_SETTINGS = (
     ("fable", "model_fable", "reasoning_fable", "model_fable_fallbacks"),
@@ -103,6 +105,13 @@ class RoutedMessagesPlan:
 
 
 VisionCapabilityLookup = Callable[[str, str], bool | None]
+# What one resolved model is known to accept for reasoning, and how many output
+# tokens it can produce. Both are injected rather than looked up here so the
+# application layer stays free of disk IO and provider imports, exactly as
+# ``vision_lookup`` already is. Both default to absent, and an absent lookup
+# means every model is unknown -- which by design changes nothing at all.
+ReasoningCapabilityLookup = Callable[[str, str], ModelReasoningCapability | None]
+OutputLimitLookup = Callable[[str, str], int | None]
 
 
 class ModelRouter:
@@ -113,9 +122,13 @@ class ModelRouter:
         settings: Settings,
         *,
         vision_lookup: VisionCapabilityLookup | None = None,
+        reasoning_capability_lookup: ReasoningCapabilityLookup | None = None,
+        output_limit_lookup: OutputLimitLookup | None = None,
     ):
         self._settings = settings
         self._vision_lookup = vision_lookup
+        self._reasoning_capability_lookup = reasoning_capability_lookup
+        self._output_limit_lookup = output_limit_lookup
 
     def resolve(self, claude_model_name: str) -> ResolvedModel:
         (
@@ -418,19 +431,42 @@ class ModelRouter:
             return None
         return self._vision_lookup(resolved.provider_id, resolved.provider_model)
 
-    @staticmethod
     def _route_for(
-        request: MessagesRequest, resolved: ResolvedModel
+        self, request: MessagesRequest, resolved: ResolvedModel
     ) -> RoutedMessagesRequest:
         routed = request.model_copy(deep=True)
         routed.model = resolved.provider_model
+        policy = resolve_reasoning_policy(routed, resolved.reasoning_preference)
         return RoutedMessagesRequest(
             request=routed,
             resolved=resolved,
-            reasoning=resolve_reasoning_policy(
-                routed,
-                resolved.reasoning_preference,
-            ),
+            reasoning=self._gate_reasoning(policy, routed, resolved),
+        )
+
+    def _gate_reasoning(
+        self,
+        policy: ReasoningPolicy,
+        request: MessagesRequest,
+        resolved: ResolvedModel,
+    ) -> ReasoningPolicy:
+        """Narrow one resolved policy to what the resolved model accepts."""
+
+        if self._reasoning_capability_lookup is None:
+            return policy
+        capability = self._reasoning_capability_lookup(
+            resolved.provider_id, resolved.provider_model
+        )
+        output_limit = (
+            self._output_limit_lookup(resolved.provider_id, resolved.provider_model)
+            if self._output_limit_lookup is not None
+            else None
+        )
+        return adapt_reasoning_policy(
+            policy,
+            capability,
+            max_tokens=request.max_tokens,
+            output_limit=output_limit,
+            model_ref=resolved.provider_model_ref,
         )
 
     def resolve_token_count_request(

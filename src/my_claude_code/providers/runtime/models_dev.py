@@ -481,6 +481,83 @@ def model_reasoning_capability_from_models_dev(
     return None
 
 
+def _build_output_limit_index(
+    index: Mapping[str, Any],
+) -> dict[str, dict[str, int]]:
+    """Build ``{models.dev provider id: {normalized model id: limit.output}}``.
+
+    models.dev publishes ``limit.output`` for the overwhelming majority of its
+    rows; a model without one is simply absent here, which callers must read
+    as "unknown limit", never as "no limit".
+    """
+    built: dict[str, dict[str, int]] = {}
+    for provider_id, bucket in index.items():
+        if not isinstance(provider_id, str) or not isinstance(bucket, Mapping):
+            continue
+        models = bucket.get("models")
+        if not isinstance(models, Mapping):
+            continue
+        per_model: dict[str, int] = {}
+        for model_id, metadata in models.items():
+            if not isinstance(model_id, str) or not isinstance(metadata, Mapping):
+                continue
+            limit = metadata.get("limit")
+            if not isinstance(limit, Mapping):
+                continue
+            output = _int_or_none(limit.get("output"))
+            if output is None or output <= 0:
+                continue
+            for candidate in _normalize_candidates(model_id):
+                per_model.setdefault(candidate, output)
+        if per_model:
+            built[provider_id] = per_model
+    return built
+
+
+_output_limit_index_lock = threading.Lock()
+_output_limit_index_cache: dict[Path, tuple[float, dict[str, dict[str, int]]]] = {}
+
+
+def _cached_output_limit_index(path: Path | None) -> dict[str, dict[str, int]]:
+    cache_path = path if path is not None else models_dev_cache_path()
+    try:
+        mtime = cache_path.stat().st_mtime
+    except OSError:
+        return {}
+    with _output_limit_index_lock:
+        cached = _output_limit_index_cache.get(cache_path)
+        if cached is not None and cached[0] == mtime:
+            return cached[1]
+    cache = read_models_dev_cache(cache_path)
+    built = _build_output_limit_index(cache.index) if cache is not None else {}
+    with _output_limit_index_lock:
+        _output_limit_index_cache[cache_path] = (mtime, built)
+    return built
+
+
+def model_output_limit_from_models_dev(
+    provider_id: str, model_id: str, path: Path | None = None
+) -> int | None:
+    """Return the model's published output-token limit, or None when unknown.
+
+    Same disk-cache-only, memoized lookup contract as
+    :func:`model_reasoning_capability_from_models_dev`; safe per request.
+    """
+    limit_index = _cached_output_limit_index(path)
+    bucket = limit_index.get(provider_id)
+    if bucket is None:
+        alias = PROVIDER_ID_ALIASES.get(provider_id)
+        if alias is not None:
+            bucket = limit_index.get(alias)
+    if bucket is None:
+        return None
+    for candidate in sorted(_normalize_candidates(model_id), key=len, reverse=True):
+        found = bucket.get(candidate)
+        if found is not None:
+            return found
+    return None
+
+
 def resolve_model_reasoning_capability(
     provider_id: str,
     model_id: str,

@@ -9,6 +9,7 @@ from loguru import logger
 
 from my_claude_code.application.errors import ApplicationUnavailableError
 from my_claude_code.application.model_metadata import (
+    ModelReasoningCapability,
     ProviderModelInfo,
     ProviderModelRefreshResult,
 )
@@ -22,6 +23,10 @@ from my_claude_code.providers.runtime.discovery import (
     model_cache_provider_ids_for_settings,
 )
 from my_claude_code.providers.runtime.model_cache import ProviderModelCache
+from my_claude_code.providers.runtime.models_dev import (
+    model_output_limit_from_models_dev,
+    resolve_model_reasoning_capability,
+)
 from my_claude_code.providers.runtime.validation import ConfiguredModelValidator
 
 ProviderRuntimeFactory = Callable[[Settings], ProviderRuntime]
@@ -150,6 +155,20 @@ class ProviderRuntimeManager:
         self, provider_id: str, model_id: str
     ) -> bool | None:
         return self._model_cache.cached_model_supports_vision(provider_id, model_id)
+
+    def model_reasoning_capability(
+        self, provider_id: str, model_id: str
+    ) -> ModelReasoningCapability | None:
+        """Layer this provider's own thinking flag over models.dev metadata."""
+        return resolve_model_reasoning_capability(
+            provider_id,
+            model_id,
+            self._model_cache.cached_model_supports_thinking(provider_id, model_id),
+        )
+
+    def model_output_limit(self, provider_id: str, model_id: str) -> int | None:
+        """Return the model's published output-token limit, if models.dev has one."""
+        return model_output_limit_from_models_dev(provider_id, model_id)
 
     def cached_prefixed_model_infos(self) -> tuple[ProviderModelInfo, ...]:
         return self._model_cache.cached_prefixed_model_infos()

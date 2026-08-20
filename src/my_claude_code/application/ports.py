@@ -8,7 +8,7 @@ from my_claude_code.config.settings import Settings
 from my_claude_code.core.anthropic import MessagesRequest
 from my_claude_code.core.reasoning import ReasoningPolicy
 
-from .model_metadata import ProviderModelInfo
+from .model_metadata import ModelReasoningCapability, ProviderModelInfo
 
 
 class ProviderPort(Protocol):
@@ -73,6 +73,12 @@ class RequestRuntimePort(Protocol):
     def cached_model_supports_vision(
         self, provider_id: str, model_id: str
     ) -> bool | None: ...
+
+    def model_reasoning_capability(
+        self, provider_id: str, model_id: str
+    ) -> ModelReasoningCapability | None: ...
+
+    def model_output_limit(self, provider_id: str, model_id: str) -> int | None: ...
 
     def cached_prefixed_model_infos(self) -> tuple[ProviderModelInfo, ...]: ...
 
