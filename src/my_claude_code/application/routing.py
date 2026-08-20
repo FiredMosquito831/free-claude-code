@@ -46,9 +46,21 @@ class ResolvedModel:
 
 @dataclass(frozen=True, slots=True)
 class RoutedMessagesRequest:
+    """One request bound to one resolved model, with both reasoning policies.
+
+    ``reasoning`` is the *applied* policy -- what is actually sent to the
+    provider, after per-model capability gating. Every downstream consumer
+    reads it for exactly that, and that meaning must not be flipped again.
+    ``requested_reasoning`` is the same policy *before* gating: what the client
+    and the tier configuration asked for. The two are equal whenever the model
+    could accept the request unchanged, and differ exactly when the model's
+    published capability forced a clamp, a substitution, or a suppression.
+    """
+
     request: MessagesRequest
     resolved: ResolvedModel
     reasoning: ReasoningPolicy
+    requested_reasoning: ReasoningPolicy
 
 
 @dataclass(frozen=True, slots=True)
@@ -441,6 +453,7 @@ class ModelRouter:
             request=routed,
             resolved=resolved,
             reasoning=self._gate_reasoning(policy, routed, resolved),
+            requested_reasoning=policy,
         )
 
     def _gate_reasoning(

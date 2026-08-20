@@ -114,6 +114,7 @@ class FixedProviderModelRouter(ModelRouter):
             request=routed,
             resolved=resolved,
             reasoning=ReasoningPolicy.off(),
+            requested_reasoning=ReasoningPolicy.off(),
         )
 
 

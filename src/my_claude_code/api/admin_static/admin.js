@@ -7276,6 +7276,7 @@ async function openRequestDetail(requestId) {
     ["Turn", formatTurnSummary(row)],
     ["Image input", formatImageSummary(row)],
     ["Reasoning policy", row.reasoning],
+    ["Requested reasoning", formatRequestedReasoning(row)],
     ["Params", row.params ? JSON.stringify(row.params) : ""],
     ["Input SHA-256", row.input_sha256],
     ["Output SHA-256", row.output_sha256],
@@ -7293,6 +7294,18 @@ async function openRequestDetail(requestId) {
   renderTurnTranscript(row);
   byId("reqDetailModal").hidden = false;
   byId("reqDetailClose").focus();
+}
+
+// The applied policy lives in row.reasoning; row.requested_reasoning is what
+// was asked for before per-model gating. Showing both on every request would
+// repeat the same string twice, so the requested row appears only when gating
+// actually changed something. Null means the row predates the column: nothing
+// is known about the request, so nothing is claimed.
+function formatRequestedReasoning(row) {
+  const requested = row.requested_reasoning;
+  if (requested == null || requested === "") return "";
+  if (requested === row.reasoning) return "";
+  return requested;
 }
 
 function formatChars(count) {
