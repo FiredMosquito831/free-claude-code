@@ -284,3 +284,60 @@ def test_every_exportable_request_column_exists_in_the_schema(tmp_path) -> None:
     derived = set(request_detail_derived_columns(REQUEST_FIELD_IDS))
     assert columns - derived <= schema
     assert "requested_reasoning" in columns
+
+
+def test_client_adaptive_is_recorded_without_changing_the_wire() -> None:
+    """A client asking for adaptive is legible in the log, and only in the log.
+
+    ``adaptive`` is not representable on providers with no adaptive channel, so
+    the resolved control stays ``on`` and every encoder keeps sending its
+    thinking request. Only the recorded *requested* string carries the client's
+    own wording.
+    """
+    from my_claude_code.api.request_capture import (
+        _client_thinking_type,
+        _describe_reasoning,
+    )
+    from my_claude_code.application.reasoning import resolve_reasoning_policy
+    from my_claude_code.config.reasoning import ReasoningPreference
+    from my_claude_code.core.anthropic.models import MessagesRequest, ThinkingConfig
+    from my_claude_code.core.reasoning import ReasoningControl
+    from my_claude_code.providers.openai_chat.profiles import OPENAI_CHAT_PROFILES
+
+    adaptive = MessagesRequest(
+        model="m",
+        max_tokens=4096,
+        messages=[],
+        thinking=ThinkingConfig(type="adaptive"),
+    )
+    enabled = MessagesRequest(
+        model="m", max_tokens=4096, messages=[], thinking=ThinkingConfig(type="enabled")
+    )
+
+    policy = resolve_reasoning_policy(adaptive, ReasoningPreference.CLIENT)
+    # The resolved control must NOT move: that is what keeps the wire stable.
+    assert policy.control is ReasoningControl.ON
+    assert policy.requests_reasoning is True
+
+    described = _describe_reasoning(
+        policy, client_thinking_type=_client_thinking_type(adaptive)
+    )
+    assert described is not None and "client=adaptive" in described
+
+    enabled_policy = resolve_reasoning_policy(enabled, ReasoningPreference.CLIENT)
+    enabled_described = _describe_reasoning(
+        enabled_policy, client_thinking_type=_client_thinking_type(enabled)
+    )
+    assert enabled_described is not None and "client=adaptive" not in enabled_described
+
+    # And the emitted body is identical for both, on every representative
+    # encoder family -- the recording note cannot reach a provider.
+    for name in ("groq", "fireworks", "zai", "featherless", "gemini"):
+        profile = OPENAI_CHAT_PROFILES.get(name)
+        if profile is None:
+            continue
+        body_a: dict[str, object] = {"model": "m", "messages": []}
+        body_b: dict[str, object] = {"model": "m", "messages": []}
+        profile.apply_reasoning(body_a, adaptive, policy)
+        profile.apply_reasoning(body_b, enabled, enabled_policy)
+        assert body_a == body_b, name

@@ -746,3 +746,97 @@ def test_rejected_llamacpp_pairing_stays_unknown(tmp_path: Path) -> None:
     assert (
         model_reasoning_capability_from_models_dev("llamacpp", "llama-4", path) is None
     )
+
+
+# --------------------------------------------------------------------------
+# Reverse tag matching: an untagged query against a tagged-only index entry
+# --------------------------------------------------------------------------
+
+_REVERSE_INDEX = {
+    "openrouter": {
+        "models": {
+            # Exactly one tagged variant: usable.
+            "vendor/one:free": {"reasoning": True},
+            # Two tagged variants: ambiguous, so unknown.
+            "vendor/two:free": {"reasoning": True},
+            "vendor/two:nitro": {"reasoning": False},
+            # An untagged row must always win over its tagged sibling.
+            "vendor/exact": {
+                "reasoning": True,
+                "reasoning_options": [{"type": "toggle"}],
+            },
+            "vendor/exact:free": {"reasoning": False},
+            # ":thinking" is not allow-listed in either direction.
+            "vendor/thinky:thinking": {"reasoning": True},
+        }
+    },
+    # Same model id, different provider bucket: never reachable from
+    # "open_router".
+    "anthropic": {"models": {"vendor/elsewhere:free": {"reasoning": True}}},
+}
+
+
+def _write_reverse_cache(path: Path) -> None:
+    write_models_dev_cache(_REVERSE_INDEX, path)
+
+
+def test_untagged_query_finds_a_single_tagged_variant(tmp_path: Path) -> None:
+    path = tmp_path / "models-dev.json"
+    _write_reverse_cache(path)
+
+    capability = model_reasoning_capability_from_models_dev(
+        "open_router", "vendor/one", path
+    )
+
+    assert capability is not None
+    assert capability.can_reason is True
+
+
+def test_untagged_query_with_two_tagged_variants_stays_unknown(
+    tmp_path: Path,
+) -> None:
+    """Picking one would assert a variant the user never wrote."""
+    path = tmp_path / "models-dev.json"
+    _write_reverse_cache(path)
+
+    assert (
+        model_reasoning_capability_from_models_dev("open_router", "vendor/two", path)
+        is None
+    )
+
+
+def test_exact_untagged_entry_wins_over_its_tagged_variant(tmp_path: Path) -> None:
+    path = tmp_path / "models-dev.json"
+    _write_reverse_cache(path)
+
+    capability = model_reasoning_capability_from_models_dev(
+        "open_router", "vendor/exact", path
+    )
+
+    assert capability is not None
+    # Only the untagged row carries a toggle; the ":free" row does not.
+    assert capability.supports_toggle_control is True
+
+
+def test_reverse_tag_match_never_crosses_provider_buckets(tmp_path: Path) -> None:
+    path = tmp_path / "models-dev.json"
+    _write_reverse_cache(path)
+
+    assert (
+        model_reasoning_capability_from_models_dev(
+            "open_router", "vendor/elsewhere", path
+        )
+        is None
+    )
+
+
+def test_reverse_tag_match_ignores_tags_outside_the_allow_list(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "models-dev.json"
+    _write_reverse_cache(path)
+
+    assert (
+        model_reasoning_capability_from_models_dev("open_router", "vendor/thinky", path)
+        is None
+    )

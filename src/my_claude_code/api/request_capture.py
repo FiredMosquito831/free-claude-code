@@ -148,7 +148,8 @@ class RequestCapture:
         # capability changed what we sent.
         self._record.reasoning = _describe_reasoning(routed.reasoning)
         self._record.requested_reasoning = _describe_reasoning(
-            routed.requested_reasoning
+            routed.requested_reasoning,
+            client_thinking_type=_client_thinking_type(routed.request),
         )
 
     def finish_error(self, exc: BaseException) -> None:
@@ -478,13 +479,33 @@ def extract_request_params(request: MessagesRequest) -> dict[str, Any]:
     return {key: value for key, value in params.items() if value is not None}
 
 
-def _describe_reasoning(policy: ReasoningPolicy) -> str | None:
+def _describe_reasoning(
+    policy: ReasoningPolicy, *, client_thinking_type: str | None = None
+) -> str | None:
     parts = [f"control={policy.control.value}"]
+    # A client asking for Anthropic's adaptive thinking resolves to control=on,
+    # because "adaptive" is not representable on providers without an adaptive
+    # channel and they must keep receiving a thinking request. That makes the
+    # control alone unable to tell "the client asked for adaptive" from "the
+    # client asked for enabled", so the client's own wording is recorded beside
+    # it. This is a recording-only note: the resolved policy, and therefore
+    # every outgoing request, is untouched by it.
+    if client_thinking_type == "adaptive":
+        parts.append("client=adaptive")
     if policy.effort is not None:
         parts.append(f"effort={policy.effort.value}")
     if policy.budget_tokens is not None:
         parts.append(f"budget={policy.budget_tokens}")
     return ",".join(parts)
+
+
+def _client_thinking_type(request: MessagesRequest) -> str | None:
+    """Return the ``thinking.type`` the client itself sent, if any."""
+
+    thinking = request.thinking
+    if thinking is None or not isinstance(thinking.type, str):
+        return None
+    return thinking.type.strip().lower() or None
 
 
 def _sha256(text: str) -> str:
