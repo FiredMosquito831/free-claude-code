@@ -427,11 +427,41 @@ def _tag_stripped_candidates(model_id: str) -> set[str]:
     return _normalize_candidates(head)
 
 
-def _lookup_in_bucket[T](bucket: Mapping[str, T], model_id: str) -> T | None:
-    """Find ``model_id`` in one provider bucket: exact first, then tag-stripped.
+def _single_tagged_variant[T](bucket: Mapping[str, T], model_id: str) -> T | None:
+    """Find the one allow-list-tagged variant of an untagged ``model_id``.
 
-    Never looks outside ``bucket``; an exact hit always beats a tag-stripped
-    one, so "x" and "x:free" coexisting keep their own distinct entries.
+    The reverse of :func:`_tag_stripped_candidates`: a user who configures
+    ``foo`` should still match an index that only lists ``foo:free``. Used ONLY
+    when exactly one such variant exists in this bucket -- with both
+    ``foo:free`` and ``foo:nitro`` present, picking either would assert a
+    variant the user did not write, so the answer stays unknown.
+
+    Costs at most one dict lookup per allow-listed tag per candidate, so no
+    side index is needed: this stays cheap enough to run per request.
+    """
+    for candidate in sorted(_normalize_candidates(model_id), key=len, reverse=True):
+        if ":" in candidate:
+            # A query that already carries a tag is the forward case.
+            continue
+        matches = [
+            bucket[key]
+            for tag in sorted(_STRIPPABLE_MODEL_ID_TAGS)
+            if (key := f"{candidate}:{tag}") in bucket
+        ]
+        if len(matches) > 1:
+            return None
+        if matches:
+            return matches[0]
+    return None
+
+
+def _lookup_in_bucket[T](bucket: Mapping[str, T], model_id: str) -> T | None:
+    """Find ``model_id`` in one provider bucket.
+
+    Exact first, then tag-stripped, then the single allow-list-tagged variant
+    of an untagged query. Never looks outside ``bucket``; an exact hit always
+    beats either fallback, so "x" and "x:free" coexisting keep their own
+    distinct entries.
     """
     for candidates in (
         _normalize_candidates(model_id),
@@ -441,7 +471,7 @@ def _lookup_in_bucket[T](bucket: Mapping[str, T], model_id: str) -> T | None:
             found = bucket.get(candidate)
             if found is not None:
                 return found
-    return None
+    return _single_tagged_variant(bucket, model_id)
 
 
 _EFFORT_BY_VALUE: dict[str, ReasoningEffort] = {
