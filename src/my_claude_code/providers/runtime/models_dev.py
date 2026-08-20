@@ -350,7 +350,77 @@ PROVIDER_ID_ALIASES: dict[str, str] = {
     "chatgpt_oauth": "openai",
     "anthropic_oauth": "anthropic",
     "github_models": "github-copilot",
+    "opencode_go": "opencode-go",
+    "wafer": "wafer.ai",
+    # Our KIMI_DEFAULT_BASE is https://api.moonshot.ai/v1, which is exactly
+    # what models.dev files under "moonshotai" (name "Moonshot AI").
+    "kimi": "moonshotai",
+    # Our CLOUDFLARE_AI_REST_ROOT is https://api.cloudflare.com/client/v4 --
+    # the Workers AI REST root, not the AI Gateway host
+    # (gateway.ai.cloudflare.com) -- so "cloudflare-workers-ai" is the match.
+    "cloudflare": "cloudflare-workers-ai",
 }
+
+# Deliberately NOT aliased. These were audited against the live models.dev
+# index and rejected as different products. An unknown provider means "behave
+# exactly as today", so a wrong match is strictly worse than no match: it
+# would inject another product's reasoning capability data.
+#   llamacpp        -> llama          models.dev "llama" is Meta's hosted API;
+#                                     llamacpp is a local server.
+#   ollama          -> ollama-cloud   local Ollama serves whatever the user
+#                                     pulled, not the cloud catalogue.
+#   nararoute       -> orcarouter     unrelated service; name-distance artifact.
+#   tokenrouter     -> openrouter     different company.
+#   qwencloud       -> ebcloud        unrelated.
+#   mistral_codestral -> mistral      different endpoint whose deployment
+#                                     capability may differ (deferred, not
+#                                     refused).
+# These six have no models.dev entry at all and correctly stay unknown:
+# agnes, commandcode, featherless, nous_portal, qwencloud_coding, sambanova.
+#
+# Cross-provider matching is also deliberately not built: the same model id
+# under different providers disagrees (deepseek/deepseek-v4-flash has 81
+# entries with 16 distinct effort vocabularies and contradictory can_reason
+# values), so lookups never leave their provider bucket.
+
+# Pricing/routing tags some providers accept in a model ref but models.dev
+# does not list (e.g. "deepseek/deepseek-r1:free"). Strictly allow-listed:
+# ":thinking" and numeric tags (models.dev ships
+# "nano-gpt/claude-opus-4-thinking:32000" and ":32768", and
+# "gemini-2.5-flash-preview:thinking") encode the reasoning difference itself,
+# so stripping those would be wrong in exactly the dimension configured here.
+_STRIPPABLE_MODEL_ID_TAGS: frozenset[str] = frozenset({"free", "nitro", "floor"})
+
+
+def _tag_stripped_candidates(model_id: str) -> set[str]:
+    """Return match keys for ``model_id`` minus a trailing pricing/routing tag.
+
+    Empty when the id carries no tag, or carries a tag outside the allow-list.
+    """
+    head, separator, tag = model_id.strip().lower().rpartition(":")
+    if not separator or "/" in tag:
+        return set()
+    if tag not in _STRIPPABLE_MODEL_ID_TAGS or not head:
+        return set()
+    return _normalize_candidates(head)
+
+
+def _lookup_in_bucket[T](bucket: Mapping[str, T], model_id: str) -> T | None:
+    """Find ``model_id`` in one provider bucket: exact first, then tag-stripped.
+
+    Never looks outside ``bucket``; an exact hit always beats a tag-stripped
+    one, so "x" and "x:free" coexisting keep their own distinct entries.
+    """
+    for candidates in (
+        _normalize_candidates(model_id),
+        _tag_stripped_candidates(model_id),
+    ):
+        for candidate in sorted(candidates, key=len, reverse=True):
+            found = bucket.get(candidate)
+            if found is not None:
+                return found
+    return None
+
 
 _EFFORT_BY_VALUE: dict[str, ReasoningEffort] = {
     member.value: member for member in ReasoningEffort
@@ -474,11 +544,7 @@ def model_reasoning_capability_from_models_dev(
             bucket = reasoning_index.get(alias)
     if bucket is None:
         return None
-    for candidate in sorted(_normalize_candidates(model_id), key=len, reverse=True):
-        found = bucket.get(candidate)
-        if found is not None:
-            return found
-    return None
+    return _lookup_in_bucket(bucket, model_id)
 
 
 def _build_output_limit_index(
@@ -551,11 +617,7 @@ def model_output_limit_from_models_dev(
             bucket = limit_index.get(alias)
     if bucket is None:
         return None
-    for candidate in sorted(_normalize_candidates(model_id), key=len, reverse=True):
-        found = bucket.get(candidate)
-        if found is not None:
-            return found
-    return None
+    return _lookup_in_bucket(bucket, model_id)
 
 
 def resolve_model_reasoning_capability(
