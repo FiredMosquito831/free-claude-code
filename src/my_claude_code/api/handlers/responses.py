@@ -1,5 +1,7 @@
 """OpenAI Responses API product flow for Codex clients."""
 
+from collections.abc import Mapping
+
 from fastapi.responses import JSONResponse
 
 from my_claude_code.api.request_capture import RequestCapture, build_capture
@@ -59,7 +61,11 @@ class ResponsesHandler:
         )
 
     async def create(
-        self, request_data: OpenAIResponsesRequest, *, request_id: str | None = None
+        self,
+        request_data: OpenAIResponsesRequest,
+        *,
+        request_id: str | None = None,
+        headers: Mapping[str, str] | None = None,
     ) -> object:
         """Create a streaming OpenAI Responses-compatible response."""
         request_id = request_id or new_request_id()
@@ -81,6 +87,7 @@ class ResponsesHandler:
                 request_id=request_id,
                 endpoint="/v1/responses",
                 protocol="openai_responses",
+                headers=headers,
             )
             require_non_empty_messages(response_request.messages)
             plan = self._model_router.resolve_messages_plan(response_request)

@@ -1,5 +1,7 @@
 """FastAPI route handlers."""
 
+from collections.abc import Mapping
+
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from loguru import logger
 
@@ -52,6 +54,7 @@ async def _create_messages_response(
     request_data: MessagesRequest,
     *,
     request_id: str,
+    headers: Mapping[str, str] | None = None,
 ) -> object:
     lease: RequestRuntimeLease | None = None
     try:
@@ -63,7 +66,9 @@ async def _create_messages_response(
             token_counter=get_token_count,
             generation_id=lease.generation_id,
         )
-        response = await handler.create(request_data, request_id=request_id)
+        response = await handler.create(
+            request_data, request_id=request_id, headers=headers
+        )
     except ApplicationError as exc:
         if lease is not None:
             await lease.release()
@@ -85,6 +90,7 @@ async def _create_responses_response(
     request_data: OpenAIResponsesRequest,
     *,
     request_id: str,
+    headers: Mapping[str, str] | None = None,
 ) -> object:
     lease: RequestRuntimeLease | None = None
     try:
@@ -95,7 +101,9 @@ async def _create_responses_response(
             model_router=_model_router(services, lease),
             generation_id=lease.generation_id,
         )
-        response = await handler.create(request_data, request_id=request_id)
+        response = await handler.create(
+            request_data, request_id=request_id, headers=headers
+        )
     except ApplicationError as exc:
         if lease is not None:
             await lease.release()
@@ -128,6 +136,7 @@ async def create_message(
         services,
         request_data,
         request_id=get_request_id(request),
+        headers=request.headers,
     )
 
 
@@ -148,6 +157,7 @@ async def create_response(
         services,
         request_data,
         request_id=get_request_id(request),
+        headers=request.headers,
     )
 
 
