@@ -24,6 +24,7 @@ from .constants import (
     FALLBACK_EJECT_SECONDS_DEFAULT,
     FALLBACK_FIRST_TOKEN_TIMEOUT_DEFAULT,
     FALLBACK_SKIP_KINDS_DEFAULT,
+    FALLBACK_STALL_TIMEOUT_DEFAULT,
     FALLBACK_TOTAL_TIMEOUT_DEFAULT,
     HTTP_CONNECT_TIMEOUT_DEFAULT,
     PROVIDER_RETRY_ATTEMPTS_DEFAULT,
@@ -392,6 +393,11 @@ class Settings(BaseSettings):
     # Consecutive failures before a provider/model is skipped by routing, and
     # how long it stays skipped. Without this every request re-pays a dead
     # model's timeout on its way to a healthy fallback. 0 disables ejection.
+    fallback_stall_timeout: float = Field(
+        default=FALLBACK_STALL_TIMEOUT_DEFAULT,
+        validation_alias="FALLBACK_STALL_TIMEOUT",
+    )
+
     # Comma-separated FailureKind values. Empty means "fall back on every
     # failure", which is the literal reading of what a chain is for; the
     # default excludes only a malformed request, which no model can serve.

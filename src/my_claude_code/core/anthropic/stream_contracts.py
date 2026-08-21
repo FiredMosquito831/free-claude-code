@@ -255,3 +255,19 @@ def sse_is_scaffolding(text: str) -> bool:
         (event.data.get("type") or event.event) in _SCAFFOLDING_EVENT_TYPES
         for event in events
     )
+
+
+def sse_carries_content(text: str) -> bool:
+    """Whether an SSE fragment moves the answer forward.
+
+    The inverse question to :func:`sse_is_scaffolding`, asked per chunk for the
+    whole length of a stream rather than once at its start, so it is answered
+    by a substring scan instead of a JSON parse. That is exact rather than
+    approximate here: in the Anthropic stream protocol only a
+    ``content_block_delta`` can carry text, reasoning or tool arguments, and
+    every other frame type is envelope.
+
+    A chunk whose *text* happens to contain the phrase is a content chunk
+    anyway, so the one way this can be wrong is a way that cannot matter.
+    """
+    return "content_block_delta" in text

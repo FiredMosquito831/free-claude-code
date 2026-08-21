@@ -44,6 +44,9 @@ LIMIT_RANGES: dict[str, LimitRange] = {
         0.0, HOUR, "0 waits indefinitely for the first token"
     ),
     "fallback_total_timeout": LimitRange(0.0, DAY, "0 disables the budget"),
+    "fallback_stall_timeout": LimitRange(
+        0.0, HOUR, "0 allows an unlimited pause mid-answer"
+    ),
     "fallback_eject_after_failures": LimitRange(0, 1_000, "0 never benches a model"),
     "fallback_eject_seconds": LimitRange(0.0, DAY),
     # A provider has to be allowed to try once, so the floor is 1 attempt.

@@ -638,6 +638,21 @@ _NON_PROVIDER_FIELDS: tuple[ConfigFieldSpec, ...] = (
         ),
     ),
     ConfigFieldSpec(
+        "FALLBACK_STALL_TIMEOUT",
+        "Stall deadline",
+        "limits",
+        "number",
+        settings_attr="fallback_stall_timeout",
+        default="120",
+        description=(
+            "Seconds a model that has already produced output may then say "
+            "nothing before the request is given up on. Measured from the last "
+            "chunk that moved the answer forward, so a long answer is never "
+            "cut and a keepalive never counts as progress. 0 disables it and "
+            "leaves only the total budget."
+        ),
+    ),
+    ConfigFieldSpec(
         "SERVER_GRACEFUL_SHUTDOWN_SECONDS",
         "Graceful shutdown budget",
         "limits",

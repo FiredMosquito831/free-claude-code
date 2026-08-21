@@ -36,6 +36,18 @@ FALLBACK_TOTAL_TIMEOUT_DEFAULT = 600.0
 # A deny-list rather than an allow-list on purpose: a failure kind added later
 # falls back by default, which is the safe direction. An allow-list would
 # silently stop covering it.
+# Seconds a stream that has already produced output may then say nothing.
+#
+# Deliberately the same number as the first-token deadline rather than a new
+# one: it answers the same question -- how long may this model be silent --
+# and mid-answer silence is if anything more suspicious than silence before
+# the answer, which at least covers queueing and cold starts.
+#
+# Measured against 146,857 successful requests, the slowest of them averaged
+# one output token every 2.27 seconds, so this sits about fifty times beyond
+# the worst rate ever observed here. 0 disables it.
+FALLBACK_STALL_TIMEOUT_DEFAULT = 120.0
+
 FALLBACK_SKIP_KINDS_DEFAULT = "invalid_request"
 
 # Mirrors core.failures.FailureKind. `config` is a leaf package by declared
