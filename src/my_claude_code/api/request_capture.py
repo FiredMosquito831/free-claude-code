@@ -29,7 +29,7 @@ from my_claude_code.core.anthropic import (
 from my_claude_code.core.async_iterators import try_close_async_iterator
 from my_claude_code.core.credential_attribution import install_attribution
 from my_claude_code.core.diagnostics import safe_exception_message
-from my_claude_code.core.failures import find_execution_failure
+from my_claude_code.core.failures import failure_kind_name, find_execution_failure
 from my_claude_code.core.reasoning import ReasoningPolicy
 from my_claude_code.core.request_headers import capture_headers
 from my_claude_code.core.request_images import capture_images
@@ -187,10 +187,10 @@ class RequestCapture:
     def finish_error(self, exc: BaseException) -> None:
         """Finalize for an error raised before the stream wrapper takes over."""
         failure = find_execution_failure(exc)
-        if failure is not None:
-            self._error = (failure.kind.value, failure.message)
-        else:
-            self._error = (type(exc).__name__, safe_exception_message(exc))
+        message = (
+            failure.message if failure is not None else safe_exception_message(exc)
+        )
+        self._error = (failure_kind_name(exc), message)
         self._finalize("error")
 
     def finish_success(self, output_text: str | None = None) -> None:
@@ -247,10 +247,10 @@ class RequestCapture:
             raise
         except BaseException as exc:
             failure = find_execution_failure(exc)
-            if failure is not None:
-                self._error = (failure.kind.value, failure.message)
-            else:
-                self._error = (type(exc).__name__, safe_exception_message(exc))
+            self._error = (
+                failure_kind_name(exc),
+                failure.message if failure is not None else safe_exception_message(exc),
+            )
             status = "error"
             raise
         finally:

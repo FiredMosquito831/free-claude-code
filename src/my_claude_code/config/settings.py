@@ -19,9 +19,11 @@ from .constants import (
     DESKTOP_SERVER_START_TIMEOUT_DEFAULT,
     DESKTOP_WINDOW_HEIGHT_DEFAULT,
     DESKTOP_WINDOW_WIDTH_DEFAULT,
+    FAILURE_KIND_NAMES,
     FALLBACK_EJECT_AFTER_FAILURES_DEFAULT,
     FALLBACK_EJECT_SECONDS_DEFAULT,
     FALLBACK_FIRST_TOKEN_TIMEOUT_DEFAULT,
+    FALLBACK_SKIP_KINDS_DEFAULT,
     FALLBACK_TOTAL_TIMEOUT_DEFAULT,
     HTTP_CONNECT_TIMEOUT_DEFAULT,
     PROVIDER_RETRY_ATTEMPTS_DEFAULT,
@@ -390,6 +392,14 @@ class Settings(BaseSettings):
     # Consecutive failures before a provider/model is skipped by routing, and
     # how long it stays skipped. Without this every request re-pays a dead
     # model's timeout on its way to a healthy fallback. 0 disables ejection.
+    # Comma-separated FailureKind values. Empty means "fall back on every
+    # failure", which is the literal reading of what a chain is for; the
+    # default excludes only a malformed request, which no model can serve.
+    fallback_skip_kinds: str = Field(
+        default=FALLBACK_SKIP_KINDS_DEFAULT,
+        validation_alias="FALLBACK_SKIP_KINDS",
+    )
+
     fallback_eject_after_failures: int = Field(
         default=FALLBACK_EJECT_AFTER_FAILURES_DEFAULT,
         validation_alias="FALLBACK_EJECT_AFTER_FAILURES",
@@ -962,6 +972,27 @@ class Settings(BaseSettings):
                     f"Invalid URL scheme in web_fetch_allowed_schemes: {scheme!r}"
                 )
         return ",".join(schemes)
+
+    @field_validator("fallback_skip_kinds")
+    @classmethod
+    def validate_fallback_skip_kinds(cls, v: str) -> str:
+        """Reject an unknown kind at load rather than ignoring it at runtime.
+
+        A typo here fails open -- the kind never matches, so the route falls
+        back on everything and the setting silently does nothing. Refusing the
+        value is the difference between a config error and a setting that looks
+        applied for months.
+        """
+        kinds = [part.strip().lower() for part in (v or "").split(",")]
+        kept = [kind for kind in kinds if kind]
+        known = FAILURE_KIND_NAMES
+        unknown = [kind for kind in kept if kind not in known]
+        if unknown:
+            raise ValueError(
+                f"Unknown fallback_skip_kinds: {', '.join(unknown)}. "
+                f"Known kinds: {', '.join(sorted(known))}"
+            )
+        return ",".join(dict.fromkeys(kept))
 
     @field_validator(
         "model",

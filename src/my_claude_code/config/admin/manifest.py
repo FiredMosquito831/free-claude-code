@@ -199,6 +199,22 @@ _NON_PROVIDER_FIELDS: tuple[ConfigFieldSpec, ...] = (
         settings_attr="model_vision_fallbacks",
     ),
     ConfigFieldSpec(
+        "FALLBACK_SKIP_KINDS",
+        "Do not fall back on",
+        "models",
+        "text",
+        settings_attr="fallback_skip_kinds",
+        default="invalid_request",
+        description=(
+            "Failure kinds that end a route instead of trying the next model. "
+            "A malformed request fails identically everywhere, so retrying it "
+            "costs a round trip per model to reach the same error. Leave empty "
+            "to fall back on every failure. Known kinds: invalid_request, "
+            "authentication, permission, rate_limit, overloaded, timeout, "
+            "upstream, unavailable."
+        ),
+    ),
+    ConfigFieldSpec(
         "REASONING_POLICY",
         "Reasoning Policy",
         "reasoning",
@@ -615,8 +631,10 @@ _NON_PROVIDER_FIELDS: tuple[ConfigFieldSpec, ...] = (
         default="600",
         description=(
             "Seconds one request may run across every attempt, retry and "
-            "recovery. Once output has started no fallback can replace it, "
-            "but it can still stop. 0 disables the budget."
+            "recovery. Each attempt gets an equal share of what is left until "
+            "it produces output, so a silent model cannot spend the whole "
+            "budget. Once output has started no fallback can replace it, but "
+            "it can still stop. 0 disables the budget."
         ),
     ),
     ConfigFieldSpec(

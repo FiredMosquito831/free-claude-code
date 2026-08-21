@@ -25,6 +25,37 @@ FALLBACK_FIRST_TOKEN_TIMEOUT_DEFAULT = 120.0
 # budget cuts 0.03% of healthy requests short and caps the rest.
 FALLBACK_TOTAL_TIMEOUT_DEFAULT = 600.0
 # Consecutive failures before routing skips a provider/model, and for how long.
+# Failure kinds that end a route instead of moving to the next model.
+#
+# A malformed request is the caller's, not the model's: the same body fails
+# identically on every model, so walking a three-model chain costs three round
+# trips to arrive at the same 400. Everything else -- timeout, upstream,
+# rate_limit, overloaded, authentication, unavailable -- is a property of the
+# model or the moment, and is exactly what a chain exists for.
+#
+# A deny-list rather than an allow-list on purpose: a failure kind added later
+# falls back by default, which is the safe direction. An allow-list would
+# silently stop covering it.
+FALLBACK_SKIP_KINDS_DEFAULT = "invalid_request"
+
+# Mirrors core.failures.FailureKind. `config` is a leaf package by declared
+# policy -- it imports nothing, not even core -- so the names are repeated
+# here rather than imported. A list that mirrors another file drifts, so
+# tests/contracts/test_import_boundaries.py pins the two equal in both
+# directions: a test, not discipline.
+FAILURE_KIND_NAMES: frozenset[str] = frozenset(
+    {
+        "invalid_request",
+        "authentication",
+        "permission",
+        "rate_limit",
+        "overloaded",
+        "timeout",
+        "upstream",
+        "unavailable",
+    }
+)
+
 FALLBACK_EJECT_AFTER_FAILURES_DEFAULT = 3
 FALLBACK_EJECT_SECONDS_DEFAULT = 30.0
 
