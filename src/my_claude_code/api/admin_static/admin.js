@@ -647,6 +647,61 @@ function routeNode(marker, control, modifier) {
   return node;
 }
 
+/** Fill a route rail with its primary model and the chain under it.
+ *
+ * The primary and the fallbacks are two settings drawn as one ordered path,
+ * and until they reordered as one the arrows on every fallback stopped short
+ * of the entry that actually serves the traffic: promoting a fallback meant
+ * retyping two fields and hoping they matched. The primary gets the same two
+ * buttons every row below it has, wired to the chain editor, which is what
+ * owns the ordering rules.
+ *
+ * Shared by the tier cards and the vision adapter so the six rails on the page
+ * cannot drift apart -- a rail that reorders differently from the one beside
+ * it reads as a bug, not as a distinction.
+ */
+function appendRouteRail(rail, modelField, chainField) {
+  const { control, input } = buildFieldControl(modelField);
+  const node = routeNode("", control, "is-primary");
+  rail.appendChild(node);
+  if (!chainField) return;
+
+  const { control: chainControl, editor } = buildFieldControl(chainField);
+  rail.appendChild(chainControl);
+  if (!editor) return;
+
+  const moves = document.createElement("div");
+  moves.className = "route-node-move";
+
+  const upButton = document.createElement("button");
+  upButton.type = "button";
+  upButton.className = "ghost-button model-chain-move";
+  upButton.textContent = "↑";
+
+  const downButton = document.createElement("button");
+  downButton.type = "button";
+  downButton.className = "ghost-button model-chain-move";
+  downButton.textContent = "↓";
+
+  // The primary cannot be removed -- a route without one is not a route -- but
+  // its buttons still have to line up with the buttons on every row below.
+  // A hidden copy of the remove button is the only spacer guaranteed to stay
+  // the same width as the thing it stands in for; a hardcoded margin would be
+  // correct until someone changed that button's padding.
+  const spacer = document.createElement("button");
+  spacer.type = "button";
+  spacer.className = "ghost-button model-chain-remove route-node-move-spacer";
+  spacer.textContent = "×";
+  spacer.disabled = true;
+  spacer.tabIndex = -1;
+  spacer.setAttribute("aria-hidden", "true");
+
+  moves.append(upButton, downButton, spacer);
+  node.appendChild(moves);
+  node.classList.add("has-move");
+  editor.setPrimary({ input, label: modelField.label, upButton, downButton });
+}
+
 function renderRouteCard(tier, fieldByKey) {
   const modelField = fieldByKey.get(tier.modelKey);
   const chainField = fieldByKey.get(tier.chainKey);
@@ -688,13 +743,7 @@ function renderRouteCard(tier, fieldByKey) {
   const rail = document.createElement("div");
   rail.className = "field route-rail";
 
-  const { control: modelControl } = buildFieldControl(modelField);
-  rail.appendChild(routeNode("", modelControl, "is-primary"));
-
-  if (chainField) {
-    const { control: chainControl } = buildFieldControl(chainField);
-    rail.appendChild(chainControl);
-  }
+  appendRouteRail(rail, modelField, chainField);
 
   card.appendChild(rail);
   return card;
@@ -826,13 +875,7 @@ function renderModelRouting(fields) {
     // tier rather than a second way to express the same idea.
     const rail = document.createElement("div");
     rail.className = "field route-rail route-vision-control";
-    const { control } = buildFieldControl(visionField);
-    rail.appendChild(routeNode("", control, "is-primary"));
-    const visionChainField = fieldByKey.get("MODEL_VISION_FALLBACKS");
-    if (visionChainField) {
-      const { control: chainControl } = buildFieldControl(visionChainField);
-      rail.appendChild(chainControl);
-    }
+    appendRouteRail(rail, visionField, fieldByKey.get("MODEL_VISION_FALLBACKS"));
     vision.appendChild(rail);
 
     // Which tiers this actually covers today. "It fires when a model cannot
@@ -1307,11 +1350,15 @@ function buildFieldControl(field) {
     }
   }
 
+  // The chain editor is returned as well as rendered: a route's primary model
+  // is a separate setting sitting on the same rail, and the editor is what
+  // owns the ordering rules that let the two trade places.
+  const editor = field.type === "model_chain" ? new ModelChainEditor(input, field) : null;
   const control =
     field.type === "model" || field.type === "optional_model"
       ? new ModelCombobox(input, field).element
-      : field.type === "model_chain"
-        ? new ModelChainEditor(input, field).element
+      : editor
+        ? editor.element
         : input;
   // A control that wraps its input must still place it in the document.
   // `changedValues()` collects fields by walking [data-key] over the page, so
@@ -1320,7 +1367,7 @@ function buildFieldControl(field) {
   // here rather than trusted to each wrapper: it is one line, and the failure
   // is invisible until someone tries to save.
   if (!control.contains(input)) control.appendChild(input);
-  return { input, control };
+  return { input, control, editor };
 }
 
 function renderField(field) {
@@ -1908,6 +1955,9 @@ class ModelChainEditor {
     this.field = field;
     this.rows = [];
     this.rowSeq = 0;
+    // Set by setPrimary() when this chain sits on a route rail. Null for a
+    // chain rendered on its own, which then has nothing to trade places with.
+    this.primary = null;
 
     this.element = document.createElement("div");
     this.element.className = "model-chain-editor";
@@ -2017,7 +2067,13 @@ class ModelChainEditor {
   move(row, offset) {
     const index = this.rows.indexOf(row);
     const target = index + offset;
-    if (index === -1 || target < 0 || target >= this.rows.length) return;
+    if (index === -1) return;
+    // Above fallback 1 is the route's primary model, not the top of the list.
+    if (target < 0) {
+      if (this.canPromoteFirst()) this.swapPrimaryAndFirst();
+      return;
+    }
+    if (target >= this.rows.length) return;
     this.rows.splice(index, 1);
     this.rows.splice(target, 0, row);
     // Re-append in the new order; appendChild moves existing nodes rather
@@ -2030,8 +2086,16 @@ class ModelChainEditor {
   renumber() {
     this.rows.forEach((row, index) => {
       row.numberEl.textContent = String(index + 1);
-      row.upButton.disabled = index === 0;
-      row.upButton.setAttribute("aria-label", `Move fallback ${index + 1} up`);
+      // Fallback 1's "up" is a promotion into the primary slot, so it stays
+      // live whenever a primary is attached -- it is only the top of the list
+      // for a chain rendered without one.
+      row.upButton.disabled = index === 0 && !this.canPromoteFirst();
+      row.upButton.setAttribute(
+        "aria-label",
+        index === 0 && this.canPromoteFirst()
+          ? `Promote fallback 1 to ${this.primaryLabel()}`
+          : `Move fallback ${index + 1} up`,
+      );
       row.downButton.disabled = index === this.rows.length - 1;
       row.downButton.setAttribute("aria-label", `Move fallback ${index + 1} down`);
       row.removeButton.setAttribute("aria-label", `Remove fallback ${index + 1}`);
@@ -2040,6 +2104,99 @@ class ModelChainEditor {
         `${this.field.label} fallback ${index + 1}`,
       );
     });
+    this.renumberPrimary();
+  }
+
+  // ------------------------------------------------------------------ rail --
+  // A route is one ordered path, but it is stored as two settings: the primary
+  // model (MODEL, MODEL_OPUS, ...) and the comma-joined chain beside it. The
+  // buttons below let the two trade places so the rail reorders as the single
+  // list it looks like, and both hidden inputs go dirty so Apply writes them
+  // together.
+
+  /** Adopt a route's primary model field as position 0 of this rail. */
+  setPrimary({ input, label, upButton, downButton }) {
+    this.primary = { input, label, upButton, downButton };
+    // upButton carries no handler: nothing sits above the primary. It is
+    // rendered, permanently disabled, so the primary reads as position 1 of
+    // the list rather than as a field that happens to sit above one.
+    downButton.addEventListener("click", () => {
+      if (this.canDemotePrimary()) this.swapPrimaryAndFirst();
+    });
+    // Whether the primary can be demoted depends on its own value, so the
+    // enable pass has to run again when the user edits it -- not only when
+    // the chain changes.
+    input.addEventListener("input", () => this.renumberPrimary());
+    input.addEventListener("change", () => this.renumberPrimary());
+    this.renumberPrimary();
+  }
+
+  primaryLabel() {
+    return this.primary ? this.primary.label : "the primary model";
+  }
+
+  /** The primary's value, with an optional route's "None" read as unset. */
+  primaryValue() {
+    return this.primary ? readFieldValue(this.primary.input).trim() : "";
+  }
+
+  /** Whether the primary may move down into the chain.
+   *
+   * Only a swap is offered, never an insert, so the primary can never be left
+   * empty by a button press. That is not cosmetic: an empty MODEL fails
+   * validation and the server refuses to start, and an empty tier override
+   * silently orphans the chain sitting next to it, because routing only reads
+   * a route's own fallbacks when that route has its own primary.
+   */
+  canDemotePrimary() {
+    return Boolean(this.primary) && this.rows.length > 0 && this.primaryValue() !== "";
+  }
+
+  /** Whether fallback 1 may move up into the primary slot.
+   *
+   * Unlike demotion this needs no value on the primary: promoting into an
+   * unset override is exactly how a route stops inheriting the default.
+   */
+  canPromoteFirst() {
+    return Boolean(this.primary) && this.rows.length > 0;
+  }
+
+  setPrimaryValue(value) {
+    const input = this.primary.input;
+    input.value =
+      value || (input.dataset.fieldType === "optional_model" ? "None" : "");
+    updateDirtyState();
+  }
+
+  /** Trade the primary model with fallback 1. */
+  swapPrimaryAndFirst() {
+    if (!this.primary || !this.rows.length) return;
+    const row = this.rows[0];
+    const promoted = readFieldValue(row.combobox.input).trim();
+    const demoted = this.primaryValue();
+    this.setPrimaryValue(promoted);
+    if (demoted) {
+      row.combobox.input.value = demoted;
+      this.syncValue();
+      this.renumber();
+    } else {
+      // The primary was unset, so this was a promotion rather than a swap and
+      // there is nothing to leave in the row it came from.
+      this.removeRow(row);
+      this.primary.input.focus();
+    }
+  }
+
+  renumberPrimary() {
+    if (!this.primary) return;
+    const { upButton, downButton } = this.primary;
+    upButton.disabled = true;
+    upButton.setAttribute("aria-label", "Already first in this route");
+    downButton.disabled = !this.canDemotePrimary();
+    downButton.setAttribute(
+      "aria-label",
+      `Move ${this.primaryLabel()} down to fallback 1`,
+    );
   }
 }
 

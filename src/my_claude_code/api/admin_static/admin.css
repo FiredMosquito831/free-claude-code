@@ -1173,6 +1173,27 @@ textarea:focus-visible,
   min-height: 40px;
 }
 
+/* The primary model is position 1 of the rail, not a field sitting above one,
+   so it carries the same move buttons every fallback under it carries. The
+   third column is that button cluster. */
+.route-node.has-move {
+  grid-template-columns: 26px minmax(0, 1fr) auto;
+}
+
+.route-node-move {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Stands in for the remove button the primary does not get -- a route without
+   a primary is not a route -- so its arrows line up with the arrows on every
+   row below. A copy of the real button is the only spacer that stays the right
+   width when that button's padding changes. */
+.route-node-move-spacer {
+  visibility: hidden;
+}
+
 .route-marker {
   position: relative;
   z-index: 1;

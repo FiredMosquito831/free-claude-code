@@ -78,6 +78,29 @@ def test_a_route_with_an_override_uses_its_own_chain_only(settings):
     )
 
 
+def test_a_route_chain_is_orphaned_when_its_override_is_cleared(settings):
+    """An override and the chain beside it stand or fall together.
+
+    A route reads its own fallbacks only when it has its own primary, so
+    clearing MODEL_OPUS silently retires MODEL_OPUS_FALLBACKS: the tier goes
+    back to the root model *and* the root chain, with no error and nothing in
+    the log to say the chain sitting next to it stopped being consulted.
+
+    Pinned rather than fixed, because it is the behaviour the routing page's
+    reorder arrows are built around -- the primary can only ever swap with
+    fallback 1, never move down into an empty slot, so no button press can put
+    a route into this state. Anyone who changes this should change that too.
+    """
+    settings.model_fallbacks = "cerebras/root-fallback"
+    settings.model_opus = None
+    settings.model_opus_fallbacks = "groq/opus-second"
+
+    assert _refs(ModelRouter(settings), _request(model="claude-opus-4")) == (
+        "nvidia_nim/fallback-model",
+        "cerebras/root-fallback",
+    )
+
+
 def test_an_explicit_provider_model_request_is_never_overridden(settings):
     settings.model_fallbacks = "cerebras/one"
 

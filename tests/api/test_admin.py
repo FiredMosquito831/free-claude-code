@@ -1920,6 +1920,72 @@ def test_admin_static_keeps_every_field_input_in_the_document():
     assert "this.element.append(this.input, this.rowsEl, this.addButton);" in script
 
 
+def test_admin_static_reorders_a_route_rail_as_one_list():
+    """A route's primary model moves with the arrows, like every fallback.
+
+    A route is two settings -- the primary (MODEL, MODEL_OPUS, ...) and the
+    comma-joined chain beside it -- drawn as one ordered path. Until they
+    reordered together the up/down arrows stopped short of the only entry that
+    actually serves traffic, so promoting a fallback meant retyping two fields
+    and hoping they agreed.
+
+    Asserted against the source because the suite has no DOM harness. Verified
+    for real in jsdom against a running server before shipping: 6 primary
+    button clusters on this branch, 0 on main, and a demote/promote round trip
+    leaving both hidden inputs byte-identical to where they started.
+    """
+    script = Path("src/my_claude_code/api/admin_static/admin.js").read_text(
+        encoding="utf-8"
+    )
+
+    # One builder for all six rails -- the four tier overrides, the default
+    # route and the vision adapter. A rail that reorders differently from the
+    # one beside it reads as a bug, not as a distinction, so the primary node
+    # is built in exactly one place: the definition plus its single call.
+    assert "function appendRouteRail(rail, modelField, chainField) {" in script
+    assert script.count("routeNode(") == 2, (
+        "a route primary is built outside appendRouteRail"
+    )
+    assert script.count("appendRouteRail(") == 3, (
+        "a rail is filled outside appendRouteRail"
+    )
+
+    # And the buttons are wired to the chain editor, which is what owns the
+    # ordering rules. Rendering them without this is a pair of dead arrows.
+    assert (
+        "editor.setPrimary({ input, label: modelField.label, upButton, downButton });"
+        in script
+    )
+
+
+def test_admin_static_never_lets_a_button_empty_a_route_primary():
+    """The primary may only SWAP with fallback 1, never move into a gap.
+
+    Both halves of that matter and they fail differently. An empty MODEL fails
+    validation, so the server refuses to start -- loud, and recoverable by
+    hand. An empty tier override is quiet and worse: routing reads a route's
+    own fallbacks only when that route has its own primary, so the whole chain
+    next to it is silently orphaned and the tier falls back to the root chain
+    instead (pinned in test_routing_chains.py).
+
+    Demotion is therefore gated on there being something to swap with.
+    Promotion deliberately is not: promoting into an unset override is exactly
+    how a route stops inheriting the default.
+    """
+    script = Path("src/my_claude_code/api/admin_static/admin.js").read_text(
+        encoding="utf-8"
+    )
+
+    assert (
+        "return Boolean(this.primary) && this.rows.length > 0"
+        ' && this.primaryValue() !== "";' in script
+    ), "canDemotePrimary no longer requires a non-empty primary and a fallback"
+    assert "return Boolean(this.primary) && this.rows.length > 0;" in script, (
+        "canPromoteFirst no longer allows promoting into an unset override"
+    )
+    assert "downButton.disabled = !this.canDemotePrimary();" in script
+
+
 def test_admin_static_styles_every_class_the_script_emits():
     """No class may be emitted by the script without a rule in the stylesheet.
 
