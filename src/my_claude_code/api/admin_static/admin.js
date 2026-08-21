@@ -1792,8 +1792,18 @@ class ModelCombobox {
       control.setAttribute("aria-expanded", "false");
     }
 
+    // A `provider/model` ref is routinely longer than the field it sits in --
+    // the longest on a default install needs 360px and the routing rail can
+    // spare 335 -- and an input clips silently, with no ellipsis to say so.
+    // The title makes the whole value recoverable by hovering, whatever the
+    // window width, instead of only by clicking in and scrolling.
+    this.syncTitle();
     input.addEventListener("click", () => this.open());
-    input.addEventListener("input", () => this.open(input.value));
+    input.addEventListener("input", () => {
+      this.syncTitle();
+      this.open(input.value);
+    });
+    input.addEventListener("change", () => this.syncTitle());
     input.addEventListener("keydown", (event) => this.handleKeydown(event));
     this.toggle.addEventListener("mousedown", (event) => event.preventDefault());
     this.toggle.addEventListener("click", () => {
@@ -1908,8 +1918,16 @@ class ModelCombobox {
     if (count) this.setActive((this.activeIndex + offset + count) % count);
   }
 
+  /** Keep the hover text equal to the value, and absent when there is none. */
+  syncTitle() {
+    const value = this.input.value.trim();
+    if (value) this.input.title = value;
+    else this.input.removeAttribute("title");
+  }
+
   select(value) {
     this.input.value = value;
+    this.syncTitle();
     this.input.dispatchEvent(new Event("change", { bubbles: true }));
     this.close();
     this.input.focus();
@@ -2165,6 +2183,10 @@ class ModelChainEditor {
     const input = this.primary.input;
     input.value =
       value || (input.dataset.fieldType === "optional_model" ? "None" : "");
+    // Assigning .value fires nothing, so anything listening for a change --
+    // the hover title, the dirty state -- would go stale after a reorder.
+    // Dispatching is cheaper and safer than re-implementing each listener.
+    input.dispatchEvent(new Event("change", { bubbles: true }));
     updateDirtyState();
   }
 
@@ -2177,6 +2199,7 @@ class ModelChainEditor {
     this.setPrimaryValue(promoted);
     if (demoted) {
       row.combobox.input.value = demoted;
+      row.combobox.input.dispatchEvent(new Event("change", { bubbles: true }));
       this.syncValue();
       this.renumber();
     } else {

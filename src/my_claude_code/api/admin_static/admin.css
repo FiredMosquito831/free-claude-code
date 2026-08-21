@@ -1057,9 +1057,13 @@ textarea:focus-visible,
   line-height: 1.5;
 }
 
+/* 460px, not 360px, because a card exists to show a `provider/model` ref and
+   the ref is the point. At 360 four rails fit a 1500px window and left 169px
+   for the text, clipping 16 of 18 refs mid-name; at 460 three rails fit and
+   the field gets 335px, which reads all 18. */
 .route-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(460px, 1fr));
   gap: 16px;
 }
 
@@ -1067,7 +1071,7 @@ textarea:focus-visible,
   display: flex;
   flex-direction: column;
   gap: 12px;
-  padding: 18px 20px 20px;
+  padding: 18px 14px 20px;
   border: 1px solid var(--line);
   border-radius: var(--radius-lg);
   background: var(--card);
@@ -1167,7 +1171,7 @@ textarea:focus-visible,
 .route-node {
   position: relative;
   display: grid;
-  grid-template-columns: 26px minmax(0, 1fr);
+  grid-template-columns: 24px minmax(0, 1fr);
   align-items: center;
   gap: 12px;
   min-height: 40px;
@@ -1177,13 +1181,14 @@ textarea:focus-visible,
    so it carries the same move buttons every fallback under it carries. The
    third column is that button cluster. */
 .route-node.has-move {
-  grid-template-columns: 26px minmax(0, 1fr) auto;
+  grid-template-columns: 24px minmax(0, 1fr) auto;
+  column-gap: 6px;
 }
 
 .route-node-move {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
 }
 
 /* Stands in for the remove button the primary does not get -- a route without
@@ -1194,13 +1199,26 @@ textarea:focus-visible,
   visibility: hidden;
 }
 
+/* A rail row spends its width on a `provider/model` ref, so the chrome around
+   that text is trimmed to what it needs: the chevron's reserved gutter drops
+   from 44px to 28px and the field's own inset from 14px to 10px. Scoped to the
+   rail, so the combobox keeps its roomier default everywhere else. */
+.route-rail .model-combobox input[type="text"] {
+  padding-right: 28px;
+  padding-left: 10px;
+}
+
+.route-rail .model-combobox-toggle {
+  width: 26px;
+}
+
 .route-marker {
   position: relative;
   z-index: 1;
   display: grid;
   place-items: center;
-  width: 26px;
-  height: 26px;
+  width: 24px;
+  height: 24px;
   border-radius: var(--radius-full);
   background: var(--panel-strong);
   border: 1px solid var(--line-strong);
@@ -1232,17 +1250,17 @@ textarea:focus-visible,
 .route-rail .model-chain-row {
   position: relative;
   display: grid;
-  grid-template-columns: 26px minmax(0, 1fr) auto auto auto;
+  grid-template-columns: 24px minmax(0, 1fr) auto auto auto;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
   min-height: 40px;
 }
 
 .route-rail .model-chain-index {
   position: relative;
   z-index: 1;
-  width: 26px;
-  height: 26px;
+  width: 24px;
+  height: 24px;
   border: 1px solid var(--line-strong);
   background: var(--panel-strong);
   color: var(--text);
@@ -1252,7 +1270,7 @@ textarea:focus-visible,
 
 .route-rail .model-chain-move,
 .route-rail .model-chain-remove {
-  width: 30px;
+  width: 26px;
   min-height: 30px;
   height: 30px;
   padding: 0;
@@ -1275,7 +1293,7 @@ textarea:focus-visible,
 /* The rail terminates in the affordance rather than trailing past it. */
 .route-rail .model-chain-add {
   display: grid;
-  grid-template-columns: 26px auto;
+  grid-template-columns: 24px auto;
   align-items: center;
   gap: 12px;
   min-height: 40px;
@@ -1293,8 +1311,8 @@ textarea:focus-visible,
   z-index: 1;
   display: grid;
   place-items: center;
-  width: 26px;
-  height: 26px;
+  width: 24px;
+  height: 24px;
   border-radius: var(--radius-full);
   border: 1px dashed var(--line-strong);
   background: var(--panel);
