@@ -45,6 +45,21 @@ def _isolate_request_log(monkeypatch, tmp_path):
 
 
 @pytest.fixture(autouse=True)
+def _isolate_route_health():
+    """Benches must not survive from one test into the next.
+
+    The registry is deliberately shared across requests -- three consecutive
+    failures cannot be observed by three registries that each start empty --
+    which makes it process state, and process state leaks between tests.
+    """
+    from my_claude_code.application import execution
+
+    execution.reset_route_health_registries()
+    yield
+    execution.reset_route_health_registries()
+
+
+@pytest.fixture(autouse=True)
 def _isolate_provider_registry(monkeypatch, tmp_path):
     """Keep custom provider registry state out of the real ~/.fcc directory."""
     from my_claude_code.config import provider_registry
