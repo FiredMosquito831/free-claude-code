@@ -1153,3 +1153,239 @@ async def test_an_empty_skip_list_falls_back_on_absolutely_everything() -> None:
 
     assert [chunk async for chunk in stream] == ["event: message_stop\ndata: {}\n\n"]
     assert healthy.stream_calls
+
+
+# ------------------------------------------------------------ stall guard --
+#
+# A stream that produced real output and then went quiet cannot fall back --
+# the reader has already seen part of an answer, and switching models would
+# splice two of them together. It can still stop. Measured on 21 days of real
+# traffic, 106 requests held one open for the full 600s budget after producing
+# output; nothing bounded them except that budget.
+
+_TEXT = (
+    'event: content_block_delta\ndata: {"type":"content_block_delta","index":0,'
+    '"delta":{"type":"text_delta","text":"hi"}}\n\n'
+)
+_PING = 'event: ping\ndata: {"type":"ping"}\n\n'
+
+
+class _ThenSilentProvider(FakeProvider):
+    """Produces some output, then stops -- the shape of the 106."""
+
+    def __init__(self, *, before: tuple[str, ...]) -> None:
+        super().__init__()
+        self._before = before
+
+    async def stream_response(
+        self,
+        request: MessagesRequest,
+        input_tokens: int = 0,
+        *,
+        request_id: str | None = None,
+        reasoning: ReasoningPolicy,
+    ) -> AsyncIterator[str]:
+        self.stream_calls.append({"request": request, "request_id": request_id})
+        try:
+            for chunk in self._before:
+                yield chunk
+            await asyncio.sleep(3600)
+            yield "event: never\n\n"
+        finally:
+            self.stream_close_calls += 1
+
+
+def _stall_executor(providers, *, stall_timeout: float, total_timeout: float = 0.0):
+    return ProviderExecutor(
+        lambda provider_id: providers[provider_id],
+        token_counter=lambda _m, _s, _t: 1,
+        policy=RouteExecutionPolicy(
+            first_token_timeout=0.0,
+            total_timeout=total_timeout,
+            stall_timeout=stall_timeout,
+        ),
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_stream_that_goes_quiet_after_producing_is_stopped() -> None:
+    """The whole point: output started, then silence, and it still ends.
+
+    The total budget is disabled here so the stall limit is provably the only
+    thing that can end this attempt -- without it the request would wait for
+    the transport read timeout, minutes later, or forever.
+    """
+    provider = _ThenSilentProvider(before=(_TEXT,))
+    stream = _stall_executor({"primary": provider}, stall_timeout=0.05).stream(
+        _plan(_routed_request(provider_id="primary")),
+        wire_api="messages",
+        raw_log_label="FULL_PAYLOAD",
+        raw_log_payload={},
+        request_id="req_stall",
+    )
+
+    seen: list[str] = []
+    with pytest.raises(ExecutionFailure) as caught:
+        async for chunk in stream:
+            # Appended as it arrives, deliberately. A comprehension builds the
+            # list only on success, so it would discard the partial output --
+            # which is the exact thing this test asserts survives.
+            seen.append(chunk)  # noqa: PERF401
+
+    # What the reader already saw is still delivered; only the silence ends.
+    assert seen == [_TEXT]
+    assert caught.value.kind is FailureKind.TIMEOUT
+    assert "stopped producing output" in caught.value.message
+
+
+@pytest.mark.asyncio
+async def test_a_keepalive_does_not_count_as_progress() -> None:
+    """A ping resetting the clock is how a dead stream holds a request forever.
+
+    The pings here keep coming, spaced well inside the stall limit, which is
+    exactly the shape that defeats a guard measuring "time since any frame".
+    If they counted as progress this stream would run to completion; the guard
+    has to end it while they are still arriving.
+    """
+
+    class _PingsForever(FakeProvider):
+        def __init__(self) -> None:
+            super().__init__()
+            self.pings_sent = 0
+
+        async def stream_response(
+            self,
+            request: MessagesRequest,
+            input_tokens: int = 0,
+            *,
+            request_id: str | None = None,
+            reasoning: ReasoningPolicy,
+        ) -> AsyncIterator[str]:
+            self.stream_calls.append({"request": request})
+            yield _TEXT
+            for _ in range(200):
+                await asyncio.sleep(0.005)
+                self.pings_sent += 1
+                yield _PING
+            yield "event: message_stop\ndata: {}\n\n"
+
+    provider = _PingsForever()
+    stream = _stall_executor({"primary": provider}, stall_timeout=0.1).stream(
+        _plan(_routed_request(provider_id="primary")),
+        wire_api="messages",
+        raw_log_label="FULL_PAYLOAD",
+        raw_log_payload={},
+        request_id="req_keepalive",
+    )
+
+    with pytest.raises(ExecutionFailure) as caught:
+        async for _chunk in stream:
+            pass
+    assert "stopped producing output" in caught.value.message
+    # It gave up while the connection was still visibly alive, which is the
+    # whole distinction: liveness is not progress.
+    assert 0 < provider.pings_sent < 200
+
+
+@pytest.mark.asyncio
+async def test_a_stream_that_keeps_producing_is_never_cut() -> None:
+    """The clock resets on every chunk that moves the answer forward.
+
+    A guard that fired on total elapsed time rather than time-since-progress
+    would truncate exactly the long answers it must not touch: on the measured
+    traffic 104 successful requests ran more than 300 seconds.
+    """
+
+    class _SlowButSteady(FakeProvider):
+        async def stream_response(
+            self,
+            request: MessagesRequest,
+            input_tokens: int = 0,
+            *,
+            request_id: str | None = None,
+            reasoning: ReasoningPolicy,
+        ) -> AsyncIterator[str]:
+            self.stream_calls.append({"request": request})
+            # Ten gaps, each most of the stall limit: far longer in total than
+            # the limit, never once silent for the length of it.
+            for _ in range(10):
+                await asyncio.sleep(0.03)
+                yield _TEXT
+            yield "event: message_stop\ndata: {}\n\n"
+
+    stream = _stall_executor({"primary": _SlowButSteady()}, stall_timeout=0.1).stream(
+        _plan(_routed_request(provider_id="primary")),
+        wire_api="messages",
+        raw_log_label="FULL_PAYLOAD",
+        raw_log_payload={},
+        request_id="req_steady",
+    )
+
+    chunks = [chunk async for chunk in stream]
+    assert chunks.count(_TEXT) == 10, "a producing stream must not be truncated"
+    assert chunks[-1] == "event: message_stop\ndata: {}\n\n"
+
+
+@pytest.mark.asyncio
+async def test_a_buffered_request_that_stalls_falls_back_instead() -> None:
+    """A non-streaming client has seen nothing, so a stall can still hand over.
+
+    Nothing has been forwarded, so replacing the model is invisible -- the
+    stall guard becomes a fallback trigger rather than a way to end a request.
+    """
+    stalled = _ThenSilentProvider(before=(_TEXT,))
+    healthy = FakeProvider()
+    stream = _stall_executor(
+        {"primary": stalled, "secondary": healthy}, stall_timeout=0.05
+    ).stream(
+        _plan(
+            _routed_request(provider_id="primary", stream=False),
+            _routed_request(provider_id="secondary", stream=False),
+        ),
+        wire_api="messages",
+        raw_log_label="FULL_PAYLOAD",
+        raw_log_payload={},
+        request_id="req_buffered_stall",
+    )
+
+    assert [chunk async for chunk in stream] == ["event: message_stop\ndata: {}\n\n"]
+    assert healthy.stream_calls, "the fallback must answer"
+
+
+@pytest.mark.asyncio
+async def test_disabling_the_stall_guard_tolerates_a_long_pause() -> None:
+    """0 means off, and off has to mean a long silence is allowed again.
+
+    This is the escape hatch for a provider whose streams legitimately pause
+    longer than the limit, so it is asserted as behaviour -- the pause is
+    survived and the answer completes -- rather than as a message.
+    """
+
+    class _PausesThenFinishes(FakeProvider):
+        async def stream_response(
+            self,
+            request: MessagesRequest,
+            input_tokens: int = 0,
+            *,
+            request_id: str | None = None,
+            reasoning: ReasoningPolicy,
+        ) -> AsyncIterator[str]:
+            self.stream_calls.append({"request": request})
+            yield _TEXT
+            await asyncio.sleep(0.15)
+            yield _TEXT
+            yield "event: message_stop\ndata: {}\n\n"
+
+    stream = _stall_executor(
+        {"primary": _PausesThenFinishes()}, stall_timeout=0.0, total_timeout=5.0
+    ).stream(
+        _plan(_routed_request(provider_id="primary")),
+        wire_api="messages",
+        raw_log_label="FULL_PAYLOAD",
+        raw_log_payload={},
+        request_id="req_stall_off",
+    )
+
+    chunks = [chunk async for chunk in stream]
+    assert chunks.count(_TEXT) == 2
+    assert chunks[-1] == "event: message_stop\ndata: {}\n\n"

@@ -11,6 +11,7 @@ from loguru import logger
 
 from my_claude_code.config.constants import (
     FALLBACK_FIRST_TOKEN_TIMEOUT_DEFAULT,
+    FALLBACK_STALL_TIMEOUT_DEFAULT,
     FALLBACK_TOTAL_TIMEOUT_DEFAULT,
 )
 from my_claude_code.config.settings import Settings
@@ -21,6 +22,7 @@ from my_claude_code.core.anthropic import (
     anthropic_request_snapshot,
     get_token_count,
 )
+from my_claude_code.core.anthropic.stream_contracts import sse_carries_content
 from my_claude_code.core.credential_attribution import record_credential
 from my_claude_code.core.diagnostics import safe_exception_message
 from my_claude_code.core.failures import (
@@ -99,11 +101,23 @@ class RouteExecutionPolicy:
 
     first_token_timeout: float = FALLBACK_FIRST_TOKEN_TIMEOUT_DEFAULT
     total_timeout: float = FALLBACK_TOTAL_TIMEOUT_DEFAULT
+    # How long a stream that has already produced output may then say nothing.
+    # The first-token deadline stops applying the moment content appears, so
+    # without this the only thing left bounding a stalled stream is the whole
+    # request budget: 106 requests held one for the full 600s after producing
+    # real output, on 21 days of measured traffic.
+    stall_timeout: float = FALLBACK_STALL_TIMEOUT_DEFAULT
     # Failure kinds that end the route rather than moving to the next model.
     # A malformed request is the caller's, not the model's: the same body
     # fails identically everywhere, so walking a three-model chain buys three
     # round trips to the same 400. Empty means fall back on everything.
     skip_kinds: frozenset[FailureKind] = frozenset({FailureKind.INVALID_REQUEST})
+
+
+# The wait is scheduled for exactly the remaining stall budget, so by the time
+# it elapses the measured gap lands a hair under the limit. Without a tolerance
+# the decision below would attribute every stall to the request budget instead.
+_STALL_DECISION_TOLERANCE = 0.05
 
 
 class _DeadlineExceeded(Exception):
@@ -133,13 +147,17 @@ async def _next_chunk(chunks: AsyncIterator[str], timeout: float | None) -> str:
 
 
 def _timeout_failure(
-    model_ref: str, *, seconds: float, first_token: bool
+    model_ref: str, *, seconds: float, first_token: bool, stalled: bool = False
 ) -> ExecutionFailure:
-    reason = (
-        f"produced no output within {seconds:g}s"
-        if first_token
-        else f"exceeded the {seconds:g}s request budget"
-    )
+    if first_token:
+        reason = f"produced no output within {seconds:g}s"
+    elif stalled:
+        # Distinct from the budget message on purpose: "exceeded the 600s
+        # request budget" on a stream abandoned after 120s of silence sends
+        # the reader to the wrong setting entirely.
+        reason = f"stopped producing output for {seconds:g}s"
+    else:
+        reason = f"exceeded the {seconds:g}s request budget"
     return ExecutionFailure(
         kind=FailureKind.TIMEOUT,
         status_code=504,
@@ -424,12 +442,16 @@ class ProviderExecutor:
                     )
                     chunks = provider_stream.__aiter__()
                     seen_chunk = False
+                    last_progress = time.monotonic()
                     while True:
                         try:
                             chunk = await _next_chunk(
                                 chunks,
                                 self._chunk_timeout(
-                                    seen_chunk, deadline, attempt_deadline
+                                    seen_chunk,
+                                    deadline,
+                                    attempt_deadline,
+                                    last_progress,
                                 ),
                             )
                         except StopAsyncIteration:
@@ -440,8 +462,15 @@ class ProviderExecutor:
                                 seen_chunk=seen_chunk,
                                 request_id=request_id,
                                 attempt_budget=attempt_budget,
+                                last_progress=last_progress,
                             ) from exc
                         seen_chunk = True
+                        # Only a chunk that moves the answer forward counts as
+                        # progress. A keepalive resetting this clock is exactly
+                        # how a dead stream would hold a request forever, which
+                        # is the failure this guard exists to end.
+                        if sse_carries_content(chunk):
+                            last_progress = time.monotonic()
                         if buffer_until_complete:
                             held.append(chunk)
                             continue
@@ -568,15 +597,22 @@ class ProviderExecutor:
         seen_chunk: bool,
         deadline: float | None,
         attempt_deadline: float | None = None,
+        last_progress: float | None = None,
     ) -> float | None:
         """Seconds to wait for the next chunk, or ``None`` to wait indefinitely.
 
-        Three limits, and which apply depends on whether the stream has started
-        producing. Before the first content chunk the first-token limit and this
-        attempt's share both apply, because the attempt is still costing the
-        chain its turn. After it, only the total budget does -- the attempt has
-        shown the reader something, so truncating it to preserve a fallback
-        that can no longer run cleanly would trade a working answer for nothing.
+        Which limits apply depends on whether the stream has started producing.
+
+        Before the first chunk the first-token limit and this attempt's share
+        of the budget both apply, because the attempt is still costing the
+        chain its turn.
+
+        After it, the attempt owns the rest of the budget -- truncating a
+        working answer to preserve a fallback that can no longer run cleanly
+        trades something for nothing -- but it must still be *producing*. The
+        stall limit is measured from the last chunk that moved the answer
+        forward, so it never shortens a stream that is working and never
+        lengthens for one that is only emitting keepalives.
         """
         limits: list[float] = []
         now = time.monotonic()
@@ -585,6 +621,8 @@ class ProviderExecutor:
                 limits.append(self._policy.first_token_timeout)
             if attempt_deadline is not None:
                 limits.append(max(0.0, attempt_deadline - now))
+        elif self._policy.stall_timeout > 0 and last_progress is not None:
+            limits.append(max(0.0, last_progress + self._policy.stall_timeout - now))
         if deadline is not None:
             limits.append(max(0.0, deadline - now))
         return min(limits) if limits else None
@@ -596,13 +634,26 @@ class ProviderExecutor:
         seen_chunk: bool,
         request_id: str,
         attempt_budget: float | None = None,
+        last_progress: float | None = None,
     ) -> ExecutionFailure:
         first_token = not seen_chunk
-        seconds = (
-            self._policy.first_token_timeout
-            if first_token
-            else self._policy.total_timeout
+        # A producing stream can be ended by either the stall limit or the
+        # whole-request budget. Which one it was is the difference between
+        # "this model went quiet" and "this request ran too long", so decide
+        # it from the clocks rather than assuming the budget.
+        stalled = (
+            not first_token
+            and self._policy.stall_timeout > 0
+            and last_progress is not None
+            and time.monotonic() - last_progress
+            >= self._policy.stall_timeout - _STALL_DECISION_TOLERANCE
         )
+        if first_token:
+            seconds = self._policy.first_token_timeout
+        elif stalled:
+            seconds = self._policy.stall_timeout
+        else:
+            seconds = self._policy.total_timeout
         # Report the limit that actually ended it. "produced no output within
         # 120s" on a request abandoned at 40s, because it was one of three
         # models sharing a budget, sends the reader to the wrong setting.
@@ -611,7 +662,9 @@ class ProviderExecutor:
         logger.warning(
             "MODEL DEADLINE: '{}' {} after {:g}s",
             model_ref,
-            "produced no first token" if first_token else "exceeded the request budget",
+            "produced no first token"
+            if first_token
+            else ("stalled" if stalled else "exceeded the request budget"),
             seconds,
         )
         trace_event(
@@ -623,7 +676,9 @@ class ProviderExecutor:
             first_token=first_token,
             timeout_seconds=seconds,
         )
-        return _timeout_failure(model_ref, seconds=seconds, first_token=first_token)
+        return _timeout_failure(
+            model_ref, seconds=seconds, first_token=first_token, stalled=stalled
+        )
 
     def _prepare_from(
         self,
@@ -763,6 +818,7 @@ def route_execution_policy(settings: Settings) -> RouteExecutionPolicy:
     return RouteExecutionPolicy(
         first_token_timeout=settings.fallback_first_token_timeout,
         total_timeout=settings.fallback_total_timeout,
+        stall_timeout=settings.fallback_stall_timeout,
         skip_kinds=parse_failure_kinds(settings.fallback_skip_kinds),
     )
 
