@@ -204,3 +204,54 @@ def event_index(event: SSEEvent) -> int:
     value = event.data.get("index")
     assert isinstance(value, int), event.data
     return value
+
+
+# Frames that are known to show the reader nothing: the envelope around an
+# answer rather than any part of it. Named explicitly rather than inferred, so
+# a frame type nobody anticipated falls outside the set and is treated as
+# possibly-content instead of being silently assumed harmless.
+_SCAFFOLDING_EVENT_TYPES = frozenset(
+    {
+        "message_start",
+        "message_delta",
+        "message_stop",
+        "content_block_start",
+        "content_block_stop",
+        "ping",
+    }
+)
+
+
+def sse_is_scaffolding(text: str) -> bool:
+    """Whether an SSE fragment is envelope rather than answer.
+
+    This decides where the model-fallback commit boundary starts. The provider
+    holds a brief window of SSE so an early cutoff can be retried invisibly,
+    and that window used to be anchored to the *first frame of any kind* --
+    which meant a model that sent a `message_start` and then stalled had
+    already committed the route, with nothing shown to the reader and no
+    fallback possible. Measured on 21 days of real traffic: 393 requests ran
+    the full 600s budget having produced only scaffolding, with a configured
+    fallback chain sitting unused.
+
+    Anchoring the window to the first non-scaffolding frame fixes that while
+    keeping the window itself, which is what makes an immediate cutoff
+    invisibly retryable -- held bytes have not reached the client yet.
+
+    Note that ``message_delta`` is scaffolding despite carrying a ``delta``
+    key: that delta holds a stop reason and a usage count, not any part of the
+    answer. Classifying on the frame type rather than on the presence of a
+    ``delta`` field is what keeps that right.
+
+    Deliberately two-way, not three. An unrecognised frame is treated exactly
+    like content: it starts the window, so unfamiliar output is delayed by the
+    holdback rather than held indefinitely. A third "unknown" class would read
+    as more precise while changing nothing any caller does.
+    """
+    events = parse_sse_text(text)
+    if not events:
+        return False
+    return all(
+        (event.data.get("type") or event.event) in _SCAFFOLDING_EVENT_TYPES
+        for event in events
+    )

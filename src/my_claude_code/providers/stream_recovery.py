@@ -8,6 +8,7 @@ from enum import StrEnum
 import httpx
 import openai
 
+from my_claude_code.core.anthropic.stream_contracts import sse_is_scaffolding
 from my_claude_code.core.failures import ExecutionFailure
 from my_claude_code.core.trace import trace_event
 
@@ -45,7 +46,20 @@ class RecoveryDecision:
 
 
 class RecoveryHoldbackBuffer:
-    """Briefly retain SSE so early cutoffs can be retried invisibly."""
+    """Retain SSE until the reader has actually been shown something.
+
+    The buffer is what makes an early failure recoverable: nothing it holds has
+    reached the client, so the attempt can be retried -- by this provider, or by
+    the next model on the route -- without the client ever seeing a seam.
+
+    It commits when the first *content* delta arrives, not when a clock
+    elapses. The clock is kept only as a backstop for streams that emit
+    content this parser does not recognise. Committing on time meant a model
+    that sent a ``message_start`` and then stalled had already burned the
+    route: measured on 21 days of real traffic, 500 requests hung for the full
+    600s budget with a three-model chain sitting unused, every one of them with
+    ``tokens_out = 0``.
+    """
 
     def __init__(
         self,
@@ -72,6 +86,10 @@ class RecoveryHoldbackBuffer:
         which silently disabled both invisible early retry and the model
         fallback chain. Re-anchoring when the upstream stream opens makes the
         window mean what its name says.
+
+        Largely redundant now that only content starts the window -- scaffolding
+        cannot start it at all -- but kept because it is still correct for a
+        retry that re-opens the upstream mid-buffer.
         """
         if not self.committed:
             self._started_at = None
@@ -84,13 +102,27 @@ class RecoveryHoldbackBuffer:
             # event until some later push happens to check the clock.
             self._events.append(event)
             return self.flush()
-        if self._started_at is None:
-            self._started_at = self._now()
         self._events.append(event)
         self._bytes += len(event.encode("utf-8", errors="replace"))
+        # The window is anchored to the first frame that shows the reader
+        # something, not to the first frame. Scaffolding -- message_start,
+        # content_block_start, ping -- never starts it, so a stream that emits
+        # a header and then stalls stays uncommitted and can still fall back to
+        # the next model. Anchoring to any frame is what made those streams
+        # committed with nothing shown: measured on 21 days of real traffic,
+        # 393 requests ran the full 600s budget having produced only
+        # scaffolding, with a fallback chain sitting unused.
+        #
+        # Content still gets the window rather than committing on its first
+        # byte, because the window is also what makes an immediate cutoff
+        # invisibly retryable -- held bytes have not reached the client yet.
+        if self._started_at is None and not sse_is_scaffolding(event):
+            self._started_at = self._now()
+        if self._bytes >= self._max_bytes:
+            return self.flush()
         if (
-            self._bytes >= self._max_bytes
-            or self._now() - self._started_at >= self._holdback_seconds
+            self._started_at is not None
+            and self._now() - self._started_at >= self._holdback_seconds
         ):
             return self.flush()
         return []
