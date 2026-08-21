@@ -47,3 +47,45 @@ def find_execution_failure(exc: BaseException) -> ExecutionFailure | None:
         if isinstance(current, BaseExceptionGroup):
             pending.extend(reversed(current.exceptions))
     return None
+
+
+def failure_kind(exc: BaseException) -> FailureKind | None:
+    """Return the canonical kind of a failure, whatever raised it.
+
+    Three shapes carry a kind and only one of them was ever read. An
+    ``ExecutionFailure`` (or one nested in a group) is a provider's classified
+    failure; an ``ApplicationError`` -- ``InvalidRequestError``,
+    ``ApplicationUnavailableError`` -- carries a ``kind`` class attribute; and
+    anything else has none.
+
+    Reading only the first is why the request log's ``error_kind`` column mixes
+    vocabularies: ``timeout`` and ``rate_limit`` sit alongside
+    ``InvalidRequestError`` and ``ApplicationUnavailableError``, so grouping by
+    it splits the same failure across two spellings.
+    """
+    failure = find_execution_failure(exc)
+    if failure is not None:
+        return failure.kind
+    kind = getattr(exc, "kind", None)
+    return kind if isinstance(kind, FailureKind) else None
+
+
+def failure_kind_name(exc: BaseException) -> str:
+    """Name a failure by its kind where it has one, else by its class."""
+    kind = failure_kind(exc)
+    return kind.value if kind is not None else type(exc).__name__
+
+
+def parse_failure_kinds(value: str | None) -> frozenset[FailureKind]:
+    """Parse a comma-separated list of kind names, ignoring blanks.
+
+    Unknown names are dropped rather than raised on: settings validation
+    already rejects them at load, and this is also reached by callers holding
+    a value that predates a renamed kind.
+    """
+    known = {kind.value: kind for kind in FailureKind}
+    return frozenset(
+        known[name]
+        for name in (part.strip().lower() for part in (value or "").split(","))
+        if name in known
+    )

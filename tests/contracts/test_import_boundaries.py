@@ -797,3 +797,17 @@ def _cyclic_components(graph: dict[str, set[str]]) -> list[tuple[str, ...]]:
 def _write_module(path: Path, text: str = "") -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
+
+
+def test_config_mirrors_the_failure_kinds_it_cannot_import():
+    """`config` is a leaf package, so it repeats the kind names by hand.
+
+    A hand-maintained list that mirrors another file drifts -- a kind added to
+    FailureKind would be rejected by settings validation as "unknown", and a
+    kind removed would stay quietly accepted. Pinned in both directions,
+    because only one of those two failures is loud.
+    """
+    from my_claude_code.config.constants import FAILURE_KIND_NAMES
+    from my_claude_code.core.failures import FailureKind
+
+    assert {kind.value for kind in FailureKind} == FAILURE_KIND_NAMES

@@ -4,10 +4,18 @@ from dataclasses import FrozenInstanceError, fields, is_dataclass
 
 import pytest
 
+from my_claude_code.application.errors import (
+    ApplicationUnavailableError,
+    InvalidRequestError,
+    UnknownProviderError,
+)
 from my_claude_code.core.failures import (
     ExecutionFailure,
     FailureKind,
+    failure_kind,
+    failure_kind_name,
     find_execution_failure,
+    parse_failure_kinds,
 )
 
 
@@ -110,3 +118,48 @@ def test_find_execution_failure_leaves_unrelated_groups_unclassified() -> None:
     )
 
     assert find_execution_failure(grouped) is None
+
+
+# ---------------------------------------------------------- one vocabulary --
+
+
+def test_an_application_error_is_named_by_its_kind_not_its_class():
+    """`error_kind` mixed two vocabularies for the same failure.
+
+    An ApplicationError carries a FailureKind as a class attribute, but only
+    ExecutionFailure was ever read -- so the request log recorded `timeout` and
+    `rate_limit` alongside `InvalidRequestError` and
+    `ApplicationUnavailableError`, and grouping by the column split the same
+    failure across two spellings.
+    """
+    assert failure_kind_name(InvalidRequestError("bad body")) == "invalid_request"
+    assert failure_kind_name(ApplicationUnavailableError("no runtime")) == "unavailable"
+    assert (
+        failure_kind_name(UnknownProviderError.for_provider("nope", ["groq"]))
+        == "invalid_request"
+    )
+
+
+def test_an_execution_failure_still_wins_and_is_found_inside_a_group():
+    """The provider's own classification remains the most specific answer."""
+    failure = ExecutionFailure(
+        kind=FailureKind.RATE_LIMIT, status_code=429, message="slow", retryable=True
+    )
+    assert failure_kind_name(failure) == "rate_limit"
+    assert failure_kind_name(BaseExceptionGroup("group", [failure])) == "rate_limit"
+
+
+def test_an_unclassified_exception_falls_back_to_its_class_name():
+    """Nothing is invented: a plain exception has no kind and says so."""
+    assert failure_kind_name(ValueError("just wrong")) == "ValueError"
+    assert failure_kind(ValueError("just wrong")) is None
+
+
+def test_parsing_kind_lists_is_forgiving_about_shape_only():
+    """Whitespace and blanks are noise; an unknown name is not silently kept."""
+    assert parse_failure_kinds(" invalid_request , timeout ,, ") == frozenset(
+        {FailureKind.INVALID_REQUEST, FailureKind.TIMEOUT}
+    )
+    assert parse_failure_kinds("") == frozenset()
+    assert parse_failure_kinds(None) == frozenset()
+    assert parse_failure_kinds("not_a_kind") == frozenset()

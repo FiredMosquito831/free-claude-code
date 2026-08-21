@@ -1033,3 +1033,123 @@ def test_changing_the_ejection_policy_starts_a_clean_registry() -> None:
 
     assert route_health_registry(strict).usable_indexes(route) == (1,)
     assert route_health_registry(lenient).usable_indexes(route) == (0, 1)
+
+
+# --------------------------------------------------------------- taxonomy --
+
+
+class _MalformedRequestProvider(FakeProvider):
+    def preflight_stream(
+        self, request: MessagesRequest, *, reasoning: ReasoningPolicy
+    ) -> None:
+        raise ExecutionFailure(
+            kind=FailureKind.INVALID_REQUEST,
+            status_code=400,
+            message="messages: field required",
+            retryable=False,
+        )
+
+
+def _taxonomy_executor(providers, *, skip_kinds):
+    return ProviderExecutor(
+        lambda provider_id: providers[provider_id],
+        token_counter=lambda _m, _s, _t: 1,
+        policy=RouteExecutionPolicy(skip_kinds=skip_kinds),
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_malformed_request_does_not_walk_the_whole_chain() -> None:
+    """The same body fails identically on every model.
+
+    Retrying it buys three round trips to the same 400, and three entries in
+    the request log that all say the caller sent something invalid.
+    """
+    broken = _MalformedRequestProvider()
+    healthy = FakeProvider()
+    attempts, observer = _attempt_log()
+
+    with pytest.raises(ExecutionFailure):
+        _taxonomy_executor(
+            {"first": broken, "second": healthy},
+            skip_kinds=frozenset({FailureKind.INVALID_REQUEST}),
+        ).stream(
+            _plan(
+                _routed_request(provider_id="first"),
+                _routed_request(provider_id="second"),
+            ),
+            wire_api="messages",
+            raw_log_label="FULL_PAYLOAD",
+            raw_log_payload={},
+            request_id="req_malformed",
+            on_attempt_result=observer,
+        )
+
+    assert healthy.preflight_calls == [], "the second model must never be tried"
+    # And the log says *why* it was not tried, which is the difference between
+    # "your chain did not help" and "your chain was correctly not used".
+    assert [(a.attempt, a.outcome, a.error_kind) for a in attempts] == [
+        (0, "failed", "invalid_request"),
+        (1, "skipped", "route_ended"),
+    ]
+    assert "invalid_request failure ends the route" in (attempts[1].error_message or "")
+
+
+@pytest.mark.asyncio
+async def test_every_other_failure_still_walks_the_chain() -> None:
+    """Timeout, upstream, rate limit and the rest are what a chain is for."""
+    for kind in (
+        FailureKind.TIMEOUT,
+        FailureKind.UPSTREAM,
+        FailureKind.RATE_LIMIT,
+        FailureKind.OVERLOADED,
+        FailureKind.AUTHENTICATION,
+        FailureKind.UNAVAILABLE,
+    ):
+
+        class _Failing(FakeProvider):
+            def preflight_stream(self, request, *, reasoning, _kind=kind):
+                raise ExecutionFailure(
+                    kind=_kind, status_code=500, message="nope", retryable=True
+                )
+
+        healthy = FakeProvider()
+        stream = _taxonomy_executor(
+            {"first": _Failing(), "second": healthy},
+            skip_kinds=frozenset({FailureKind.INVALID_REQUEST}),
+        ).stream(
+            _plan(
+                _routed_request(provider_id="first"),
+                _routed_request(provider_id="second"),
+            ),
+            wire_api="messages",
+            raw_log_label="FULL_PAYLOAD",
+            raw_log_payload={},
+            request_id=f"req_{kind.value}",
+        )
+        assert [chunk async for chunk in stream] == [
+            "event: message_stop\ndata: {}\n\n"
+        ], kind
+        assert healthy.stream_calls, kind
+
+
+@pytest.mark.asyncio
+async def test_an_empty_skip_list_falls_back_on_absolutely_everything() -> None:
+    """The literal reading of "a chain is for every error", if you want it."""
+    healthy = FakeProvider()
+    stream = _taxonomy_executor(
+        {"first": _MalformedRequestProvider(), "second": healthy},
+        skip_kinds=frozenset(),
+    ).stream(
+        _plan(
+            _routed_request(provider_id="first"),
+            _routed_request(provider_id="second"),
+        ),
+        wire_api="messages",
+        raw_log_label="FULL_PAYLOAD",
+        raw_log_payload={},
+        request_id="req_everything",
+    )
+
+    assert [chunk async for chunk in stream] == ["event: message_stop\ndata: {}\n\n"]
+    assert healthy.stream_calls

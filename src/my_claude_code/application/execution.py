@@ -23,7 +23,13 @@ from my_claude_code.core.anthropic import (
 )
 from my_claude_code.core.credential_attribution import record_credential
 from my_claude_code.core.diagnostics import safe_exception_message
-from my_claude_code.core.failures import ExecutionFailure, FailureKind
+from my_claude_code.core.failures import (
+    ExecutionFailure,
+    FailureKind,
+    failure_kind,
+    failure_kind_name,
+    parse_failure_kinds,
+)
 from my_claude_code.core.trace import (
     close_stream_input,
     trace_event,
@@ -93,6 +99,11 @@ class RouteExecutionPolicy:
 
     first_token_timeout: float = FALLBACK_FIRST_TOKEN_TIMEOUT_DEFAULT
     total_timeout: float = FALLBACK_TOTAL_TIMEOUT_DEFAULT
+    # Failure kinds that end the route rather than moving to the next model.
+    # A malformed request is the caller's, not the model's: the same body
+    # fails identically everywhere, so walking a three-model chain buys three
+    # round trips to the same 400. Empty means fall back on everything.
+    skip_kinds: frozenset[FailureKind] = frozenset({FailureKind.INVALID_REQUEST})
 
 
 class _DeadlineExceeded(Exception):
@@ -222,10 +233,29 @@ class _AttemptLedger:
         self._set(
             index,
             outcome="failed",
-            error_kind=_failure_kind_name(exc),
+            error_kind=failure_kind_name(exc),
             error_message=safe_exception_message(exc),
             duration_ms=self._elapsed_ms(index),
         )
+
+    def unreachable_after(self, index: int, exc: BaseException) -> None:
+        """Mark every model behind ``index`` as never worth trying.
+
+        A route ended by the failure kind rather than by exhaustion: the models
+        behind it were not skipped for time or health, they were skipped
+        because nothing they could do would change the answer. Saying which is
+        the difference between "your chain did not help" and "your chain was
+        correctly not used".
+        """
+        reason = f"not tried: a {failure_kind_name(exc)} failure ends the route"
+        for other in self._records:
+            if other > index:
+                self._set(
+                    other,
+                    outcome="skipped",
+                    error_kind="route_ended",
+                    error_message=reason,
+                )
 
     def out_of_time(self, index: int) -> None:
         self._set(
@@ -241,20 +271,6 @@ class _AttemptLedger:
         for index in sorted(self._records):
             self._observer(self._records[index])
         self._observer = None
-
-
-def _failure_kind_name(exc: BaseException) -> str:
-    """Name a failure the same way the request row does.
-
-    ``ExecutionFailure`` already carries a ``FailureKind``; anything else is
-    named by its class. Without this the attempt log would mix the two
-    vocabularies the request row already mixes, which is the thing that makes
-    ``error_kind`` awkward to group by today.
-    """
-    kind = getattr(exc, "kind", None)
-    if isinstance(kind, FailureKind):
-        return kind.value
-    return type(exc).__name__
 
 
 class ProviderExecutor:
@@ -464,6 +480,10 @@ class ProviderExecutor:
                 failures.append(uncommitted_failure)
                 ledger.failed(index, uncommitted_failure)
                 self._health.record_failure(model_ref)
+                if self._ends_the_route(uncommitted_failure):
+                    ledger.unreachable_after(index, uncommitted_failure)
+                    ledger.publish()
+                    raise uncommitted_failure
                 self._trace_fallback(
                     routed, uncommitted_failure, request_id=request_id, attempt=index
                 )
@@ -507,6 +527,20 @@ class ProviderExecutor:
             chunk_event=None,
             extra=stream_trace,
         )
+
+    def _ends_the_route(self, exc: BaseException) -> bool:
+        """Whether this failure means no other model would do better.
+
+        Only kinds the operator has listed. The default is the malformed
+        request: the same body fails identically on every model, so a chain
+        turns one fast 400 into three slow ones. Everything else -- timeout,
+        upstream, rate_limit, overloaded, authentication -- is a property of
+        the model or the moment, which is what a chain exists for.
+        """
+        if not self._policy.skip_kinds:
+            return False
+        kind = failure_kind(exc)
+        return kind is not None and kind in self._policy.skip_kinds
 
     def _attempt_deadline(
         self, deadline: float | None, attempts_remaining: int
@@ -653,6 +687,10 @@ class ProviderExecutor:
                     ledger.failed(index, exc)
                 self._health.record_failure(model_ref)
                 self._trace_fallback(routed, exc, request_id=request_id, attempt=index)
+                if self._ends_the_route(exc):
+                    if ledger is not None:
+                        ledger.unreachable_after(index, exc)
+                    return None
                 continue
             return position, provider
         return None
@@ -721,10 +759,11 @@ class ProviderExecutor:
 
 
 def route_execution_policy(settings: Settings) -> RouteExecutionPolicy:
-    """Read the route deadlines a request should run under."""
+    """Read the route deadlines and stop-conditions a request should run under."""
     return RouteExecutionPolicy(
         first_token_timeout=settings.fallback_first_token_timeout,
         total_timeout=settings.fallback_total_timeout,
+        skip_kinds=parse_failure_kinds(settings.fallback_skip_kinds),
     )
 
 
