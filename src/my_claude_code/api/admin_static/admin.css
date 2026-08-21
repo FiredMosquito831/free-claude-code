@@ -4805,3 +4805,118 @@ details.turn-pane > summary:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
+
+/* ------------------------------------------------------------ Route chain --
+   What each model on the route did, in the order the chain tried them. Drawn
+   as a list rather than a table because the interesting cell is the reason,
+   which is a sentence of variable length and would wreck any column. */
+.req-chain {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.req-chain-title {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.req-chain-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.req-chain-item {
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+}
+
+/* The left edge carries the verdict, so the shape of a route is readable
+   before a single word of it is. */
+.req-chain-item.is-succeeded {
+  border-left-color: var(--accent);
+}
+
+.req-chain-item.is-failed {
+  border-left-color: var(--error, #f87171);
+}
+
+.req-chain-item.is-skipped {
+  border-left-color: var(--neutral-border);
+  opacity: 0.75;
+}
+
+.req-chain-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.req-chain-outcome {
+  flex: 0 0 auto;
+  padding: 2px 8px;
+  border-radius: var(--radius-full);
+  background: var(--neutral-bg);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.is-succeeded .req-chain-outcome {
+  background: var(--accent-muted);
+  color: var(--accent);
+}
+
+.is-failed .req-chain-outcome {
+  background: var(--error-bg, rgba(248, 113, 113, 0.14));
+  color: var(--error, #f87171);
+}
+
+.req-chain-model {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: 12px;
+  color: var(--text-strong);
+}
+
+.req-chain-duration {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.req-chain-reason {
+  margin: 6px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.req-chain-kind {
+  display: inline-block;
+  margin-right: 6px;
+  padding: 1px 6px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 10px;
+}

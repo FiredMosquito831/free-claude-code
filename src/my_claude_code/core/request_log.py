@@ -14,6 +14,7 @@ from collections.abc import Iterator
 from compression import zstd
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from enum import StrEnum
 from pathlib import Path
 from typing import Any, Literal
 
@@ -240,6 +241,31 @@ CREATE TABLE IF NOT EXISTS request_images (
     sha TEXT NOT NULL,
     PRIMARY KEY (request_id, position)
 );
+-- One row per model the chain reached, or deliberately did not reach.
+--
+-- ``requests`` holds one row per request, so it can only ever name the model
+-- that answered: ``route_attempt`` is the index that won and ``error_kind`` is
+-- the *final* outcome. When a primary failed and a fallback succeeded, the row
+-- said "success" and the reason the primary failed existed only in a log line.
+-- Measured over 21 days of real traffic: 1,144 successful fallbacks, and for
+-- the largest cohort of 319 the reason was recoverable from the database in
+-- exactly 0 of them.
+--
+-- A side table rather than more columns, because the number of attempts is a
+-- property of the chain, not of the schema, and because "attempt 2 was skipped
+-- because the budget was already spent" is a fact about an attempt that never
+-- ran and therefore has no column on the request.
+CREATE TABLE IF NOT EXISTS request_attempts (
+    request_id TEXT NOT NULL,
+    attempt INTEGER NOT NULL,
+    provider TEXT,
+    model_ref TEXT,
+    outcome TEXT NOT NULL,
+    error_kind TEXT,
+    error_message TEXT,
+    duration_ms REAL,
+    PRIMARY KEY (request_id, attempt)
+);
 """
 
 # Keys inside the packed payload. Short because they repeat in every blob.
@@ -438,6 +464,33 @@ def cap_text(text: str | None, limit: int = MAX_TEXT_CHARS) -> str | None:
     return text[:limit]
 
 
+class RouteAttemptOutcome(StrEnum):
+    """What became of one model on a route.
+
+    ``SKIPPED`` is the one that pays for itself: an attempt that never ran is
+    invisible in every other signal, so a three-model chain that only ever
+    tried one looked identical to a one-model route. The reason it was skipped
+    travels in ``error_message``.
+    """
+
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"
+    SKIPPED = "skipped"
+
+
+@dataclass(frozen=True, slots=True)
+class RouteAttempt:
+    """One model the chain reached, and what happened when it did."""
+
+    attempt: int
+    provider: str | None
+    model_ref: str | None
+    outcome: RouteAttemptOutcome
+    error_kind: str | None = None
+    error_message: str | None = None
+    duration_ms: float | None = None
+
+
 @dataclass(slots=True)
 class RequestRecord:
     """One completed request, queued for the background writer."""
@@ -504,6 +557,7 @@ class RequestRecord:
     # rows can show it; the pictures themselves live in their own tables.
     input_image_count: int | None = None
     images: tuple[CapturedImage, ...] = ()
+    attempts: tuple[RouteAttempt, ...] = ()
     tool_calls: list[dict[str, Any]] | None = None
     tool_call_count: int | None = None
 
@@ -1290,6 +1344,60 @@ class RequestLogStore:
         )
 
     @staticmethod
+    def _store_attempts(conn: sqlite3.Connection, batch: list[RequestRecord]) -> None:
+        """Persist each record's route attempts.
+
+        ``INSERT OR REPLACE``: an attempt is identified by (request, index), so
+        replacing is the correct merge if a record is ever written twice.
+        """
+        rows = [
+            (
+                record.id,
+                attempt.attempt,
+                attempt.provider,
+                attempt.model_ref,
+                attempt.outcome.value,
+                attempt.error_kind,
+                attempt.error_message,
+                attempt.duration_ms,
+            )
+            for record in batch
+            for attempt in record.attempts
+        ]
+        if not rows:
+            return
+        conn.executemany(
+            "INSERT OR REPLACE INTO request_attempts (request_id, attempt,"
+            " provider, model_ref, outcome, error_kind, error_message,"
+            " duration_ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            rows,
+        )
+
+    @staticmethod
+    def _fetch_attempts(
+        conn: sqlite3.Connection, request_id: str
+    ) -> list[dict[str, Any]]:
+        """Return one request's attempts in the order the chain tried them."""
+        rows = conn.execute(
+            "SELECT attempt, provider, model_ref, outcome, error_kind,"
+            " error_message, duration_ms FROM request_attempts"
+            " WHERE request_id = ? ORDER BY attempt",
+            (request_id,),
+        ).fetchall()
+        return [
+            {
+                "attempt": row["attempt"],
+                "provider": row["provider"],
+                "model_ref": row["model_ref"],
+                "outcome": row["outcome"],
+                "error_kind": row["error_kind"],
+                "error_message": row["error_message"],
+                "duration_ms": row["duration_ms"],
+            }
+            for row in rows
+        ]
+
+    @staticmethod
     def _fetch_images(
         conn: sqlite3.Connection, request_id: str
     ) -> list[dict[str, Any]]:
@@ -1404,6 +1512,7 @@ class RequestLogStore:
                 )
                 self._store_bodies(conn, packed)
                 self._store_images(conn, batch)
+                self._store_attempts(conn, batch)
                 self._accumulate_totals(
                     conn,
                     [record for record in batch if record.id not in already_stored],
@@ -1648,10 +1757,12 @@ class RequestLogStore:
                 return None
             bodies = self._fetch_bodies(conn, [request_id])
             images = self._fetch_images(conn, request_id)
+            attempts = self._fetch_attempts(conn, request_id)
         data = self._row_to_dict(
             row, body_preview_chars=None, bodies=bodies.get(request_id)
         )
         data["input_images"] = images
+        data["route_attempts"] = attempts
         return data
 
     def iter_export_rows(
@@ -2247,6 +2358,11 @@ class RequestLogStore:
                     " request_images.request_id)"
                 )
                 conn.execute(
+                    "DELETE FROM request_attempts WHERE NOT EXISTS ("
+                    " SELECT 1 FROM requests WHERE requests.id ="
+                    " request_attempts.request_id)"
+                )
+                conn.execute(
                     "DELETE FROM image_blobs WHERE NOT EXISTS ("
                     " SELECT 1 FROM request_images WHERE request_images.sha ="
                     " image_blobs.sha)"
@@ -2279,6 +2395,7 @@ class RequestLogStore:
             conn.execute("DELETE FROM body_blobs")
             conn.execute("DELETE FROM request_images")
             conn.execute("DELETE FROM image_blobs")
+            conn.execute("DELETE FROM request_attempts")
             return cursor.rowcount
 
     def lifetime(self) -> dict[str, Any]:

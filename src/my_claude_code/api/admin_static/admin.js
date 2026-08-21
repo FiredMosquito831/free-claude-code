@@ -7471,6 +7471,7 @@ async function openRequestDetail(requestId) {
   });
   renderRequestRouteTrace(row);
   renderRequestImages(row);
+  renderRequestChain(row);
   renderTurnTranscript(row);
   byId("reqDetailModal").hidden = false;
   byId("reqDetailClose").focus();
@@ -7546,6 +7547,100 @@ function formatVisionModel(row) {
     ? `${row.provider}/${row.resolved_model}`
     : row.resolved_model || "a fallback";
   return `${adapter} — failed, answered by ${served}`;
+}
+
+/** What each model on the route did, in the order the chain tried them.
+ *
+ * The request row can only name the model that answered. When a primary failed
+ * and a fallback rescued the request, the row said "success" and the reason the
+ * primary was abandoned survived only in a log line -- so the one question
+ * worth asking of a fallback, "what was wrong with the model I chose?", had no
+ * answer here at all.
+ *
+ * Skipped attempts are drawn too. A three-model chain that only ever ran one
+ * looked exactly like a one-model route, which is the difference between "the
+ * fallback did not help" and "the fallback was never asked".
+ */
+function renderRequestChain(row) {
+  const container = byId("reqDetailChain");
+  if (!container) return;
+  container.innerHTML = "";
+  const attempts = row.route_attempts || [];
+  // One attempt that succeeded is just "the model answered" -- the route
+  // summary above already says that, and repeating it as a timeline implies a
+  // chain did something when it did not.
+  if (attempts.length < 2) {
+    container.hidden = true;
+    return;
+  }
+  container.hidden = false;
+
+  const heading = document.createElement("h4");
+  heading.className = "req-chain-title";
+  heading.textContent = "Route attempts";
+  container.appendChild(heading);
+
+  const list = document.createElement("ol");
+  list.className = "req-chain-list";
+  attempts.forEach((attempt) => {
+    const item = document.createElement("li");
+    item.className = `req-chain-item is-${attempt.outcome || "skipped"}`;
+
+    const head = document.createElement("div");
+    head.className = "req-chain-head";
+
+    const badge = document.createElement("span");
+    badge.className = "req-chain-outcome";
+    badge.textContent = CHAIN_OUTCOME_LABELS[attempt.outcome] || attempt.outcome || "—";
+    head.appendChild(badge);
+
+    const model = document.createElement("code");
+    model.className = "req-chain-model";
+    model.textContent = attempt.model_ref || "—";
+    model.title = attempt.model_ref || "";
+    head.appendChild(model);
+
+    if (attempt.duration_ms != null) {
+      const took = document.createElement("span");
+      took.className = "req-chain-duration";
+      took.textContent = formatChainDuration(attempt.duration_ms);
+      head.appendChild(took);
+    }
+    item.appendChild(head);
+
+    // The reason, which is the entire point of the panel.
+    const reason = attempt.error_message || "";
+    if (reason) {
+      const why = document.createElement("p");
+      why.className = "req-chain-reason";
+      if (attempt.error_kind) {
+        const kind = document.createElement("span");
+        kind.className = "req-chain-kind";
+        kind.textContent = attempt.error_kind;
+        why.appendChild(kind);
+      }
+      why.appendChild(document.createTextNode(reason));
+      item.appendChild(why);
+    }
+    list.appendChild(item);
+  });
+  container.appendChild(list);
+}
+
+const CHAIN_OUTCOME_LABELS = {
+  succeeded: "answered",
+  failed: "failed",
+  skipped: "not tried",
+};
+
+/** Attempt durations span milliseconds to ten minutes, so the unit moves. */
+function formatChainDuration(ms) {
+  const seconds = Number(ms) / 1000;
+  if (!Number.isFinite(seconds)) return "";
+  if (seconds < 1) return `${Math.round(Number(ms))} ms`;
+  if (seconds < 60) return `${seconds.toFixed(1)}s`;
+  const minutes = Math.floor(seconds / 60);
+  return `${minutes}m ${Math.round(seconds - minutes * 60)}s`;
 }
 
 /** One line naming what arrived, whether or not its pixels were kept. */
