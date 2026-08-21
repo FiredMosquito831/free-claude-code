@@ -3,6 +3,7 @@
 import httpx
 import openai
 
+from my_claude_code.core.anthropic.stream_contracts import sse_is_scaffolding
 from my_claude_code.providers.stream_recovery import (
     EARLY_TRANSPARENT_MAX_RETRIES,
     EARLY_TRANSPARENT_TOTAL_ATTEMPTS,
@@ -223,12 +224,19 @@ def test_recovery_controller_non_retryable_error_is_final() -> None:
 
 
 def test_holdback_buffers_until_delay_then_commits() -> None:
+    """The window still commits on the clock -- it just starts later now.
+
+    It is anchored to the first frame that shows the reader something,
+    rather than to the first frame of any kind. The payload-less frames
+    below classify as "unknown", which keeps the old timing behaviour for
+    output this parser cannot read.
+    """
     now = [10.0]
     holdback = RecoveryHoldbackBuffer(holdback_seconds=0.75, now=lambda: now[0])
 
     assert holdback.push("event: content_block_start\n\n") == []
-    now[0] += 0.74
     assert holdback.push("event: content_block_delta\n\n") == []
+    now[0] += 0.74
     assert not holdback.committed
 
     now[0] += 0.01
@@ -296,3 +304,160 @@ def test_restarting_the_window_after_commit_does_not_uncommit() -> None:
 
     assert holdback.committed
     assert holdback.push("cd") == ["cd"]
+
+
+# ------------------------------------------------- content commit boundary --
+#
+# Committing on the first *frame* meant a model that sent a header and then
+# stalled had already burned the route. Measured on 21 days of real traffic:
+# 500 requests hung for the full 600s budget with a three-model chain sitting
+# unused, and every failed request in that window had tokens_out = 0 -- so no
+# fallback would ever have spliced two answers together.
+
+
+def _sse(event: str, payload: str) -> str:
+    return f"event: {event}\ndata: {payload}\n\n"
+
+
+MESSAGE_START = _sse(
+    "message_start",
+    '{"type":"message_start","message":{"id":"msg_1","content":[]}}',
+)
+PING = _sse("ping", '{"type":"ping"}')
+BLOCK_START = _sse(
+    "content_block_start",
+    '{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}',
+)
+TEXT = _sse(
+    "content_block_delta",
+    '{"type":"content_block_delta","index":0,'
+    '"delta":{"type":"text_delta","text":"hello"}}',
+)
+THINKING = _sse(
+    "content_block_delta",
+    '{"type":"content_block_delta","index":0,'
+    '"delta":{"type":"thinking_delta","thinking":"hmm"}}',
+)
+TOOL_ARGS = _sse(
+    "content_block_delta",
+    '{"type":"content_block_delta","index":0,'
+    '"delta":{"type":"input_json_delta","partial_json":"{\\"a\\":1}"}}',
+)
+
+
+def test_scaffolding_never_commits_however_long_it_takes() -> None:
+    """The exact shape of the 600s hangs: a header, then nothing.
+
+    The clock used to commit this stream 0.75s in, which made the model
+    unfallbackable while the reader had been shown nothing at all.
+    """
+    clock = iter([0.0, 0.5, 900.0, 1800.0, 3600.0])
+    buffer = RecoveryHoldbackBuffer(now=lambda: next(clock))
+
+    assert buffer.push(MESSAGE_START) == []
+    assert buffer.push(PING) == []
+    assert buffer.push(BLOCK_START) == []
+    assert not buffer.committed
+    assert buffer.has_buffered
+
+
+def test_the_first_real_token_starts_the_window_then_commits() -> None:
+    """Content starts the clock; the window still buys an invisible retry.
+
+    Committing on content's first byte instead would remove the grace the
+    window exists for: bytes still held have not reached the client, which is
+    what lets the provider retry an immediate cutoff with no visible seam.
+    Scaffolding is what must never start it.
+    """
+    now = [0.0]
+    buffer = RecoveryHoldbackBuffer(now=lambda: now[0])
+
+    assert buffer.push(MESSAGE_START) == []
+    assert buffer.push(BLOCK_START) == []
+    # Content arrives and is still held: this is the retry grace.
+    assert buffer.push(TEXT) == []
+    assert not buffer.committed
+
+    now[0] += 0.75
+    released = buffer.push(TEXT)
+
+    assert released == [MESSAGE_START, BLOCK_START, TEXT, TEXT]
+    assert buffer.committed
+    # Past the boundary every event goes straight out.
+    assert buffer.push(PING) == [PING]
+
+
+def test_reasoning_and_tool_arguments_are_not_scaffolding() -> None:
+    """A turn that only thinks, or only calls a tool, has still shown its work.
+
+    Under Claude Code most turns call tools and produce no prose at all, so
+    treating a reasoning or tool-argument delta as envelope would hold a whole
+    real answer back from the reader until the byte cap.
+    """
+    for content in (THINKING, TOOL_ARGS):
+        now = [0.0]
+        buffer = RecoveryHoldbackBuffer(now=lambda clock=now: clock[0])
+        assert buffer.push(MESSAGE_START) == []
+        # Scaffolding leaves the window unstarted, so this frame anchors it.
+        assert buffer.push(content) == []
+        now[0] += 0.75
+        assert buffer.push(content)[-1] == content
+        assert buffer.committed
+
+
+def test_scaffolding_alone_never_starts_the_window_at_any_length() -> None:
+    """The property the whole change rests on, stated once, directly."""
+    message_delta = _sse(
+        "message_delta",
+        '{"type":"message_delta","delta":{"stop_reason":"end_turn"},'
+        '"usage":{"output_tokens":3}}',
+    )
+    # message_delta carries a "delta" key holding a stop reason, not answer
+    # text. Classifying on frame type rather than on the presence of a delta
+    # field is what keeps it on the right side of the line.
+    for frame in (MESSAGE_START, PING, BLOCK_START, message_delta):
+        assert sse_is_scaffolding(frame), frame
+    for frame in (TEXT, THINKING, TOOL_ARGS):
+        assert not sse_is_scaffolding(frame), frame
+    # Anything unrecognised is treated as content, so it starts the window
+    # and is merely delayed rather than held indefinitely.
+    assert not sse_is_scaffolding(_sse("surprise", '{"type":"surprise"}'))
+
+
+def test_output_the_parser_does_not_recognise_still_commits_on_the_clock() -> None:
+    """An unclassifiable frame must be delayed, never held forever.
+
+    Recognised scaffolding is exempt from the clock -- holding it is the point.
+    Anything else keeps the old time-based behaviour, so a provider emitting
+    some shape this parser has never seen degrades to a 0.75s delay rather than
+    to a stream that never arrives.
+    """
+    now = 0.0
+    buffer = RecoveryHoldbackBuffer(now=lambda: now)
+    surprise = _sse("surprise", '{"type":"surprise"}')
+
+    assert buffer.push(surprise) == []
+    assert not buffer.committed
+
+    now = 10.0
+    assert buffer.push(surprise) == [surprise, surprise]
+    assert buffer.committed
+
+
+def test_scaffolding_is_exempt_from_the_clock_but_unknown_output_is_not() -> None:
+    """The two paths differ only in what the frame is, so pin them together."""
+    now = 0.0
+    scaffolding_only = RecoveryHoldbackBuffer(now=lambda: now)
+    assert scaffolding_only.push(MESSAGE_START) == []
+    now = 3600.0
+    assert scaffolding_only.push(PING) == []
+    assert not scaffolding_only.committed
+
+
+def test_the_byte_cap_still_bounds_what_is_held() -> None:
+    """Holding longer must not mean holding without limit."""
+    buffer = RecoveryHoldbackBuffer(max_bytes=len(MESSAGE_START) + 1, now=lambda: 0.0)
+
+    assert buffer.push(MESSAGE_START) == []
+    assert buffer.push(PING) == [MESSAGE_START, PING]
+    assert buffer.committed
