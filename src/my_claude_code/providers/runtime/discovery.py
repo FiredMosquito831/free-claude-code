@@ -136,7 +136,9 @@ class ProviderModelDiscovery:
                 # that publish none stop being a blind spot. Without this,
                 # "this model cannot read images" was unanswerable for most
                 # of the catalog, and vision routing silently never fired.
-                model_infos = await models_dev.enrich_provider_model_infos(result)
+                model_infos = await models_dev.enrich_provider_model_infos(
+                    result, provider_id=provider_id
+                )
                 self._model_cache.cache_model_infos(provider_id, model_infos)
                 refreshed_provider_ids.append(provider_id)
                 logger.info(
