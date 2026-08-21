@@ -7,7 +7,9 @@ from unittest.mock import MagicMock
 import pytest
 
 from my_claude_code.application.execution import (
+    AttemptResultObserver,
     ProviderExecutor,
+    RouteAttemptRecord,
     RouteExecutionPolicy,
 )
 from my_claude_code.application.ports import ProviderPort
@@ -671,3 +673,239 @@ async def test_a_served_request_clears_the_models_failure_streak() -> None:
 
     health.record_failure("primary/big")
     assert not health.is_ejected("primary/big")
+
+
+# ---------------------------------------------------------------- attempts --
+#
+# The chain's own account of itself. ``requests`` holds one row per request, so
+# it can only ever name the model that answered: when a primary failed and a
+# fallback succeeded the row said "success" and the reason the primary failed
+# lived only in a log line. Measured over 21 days of real traffic, 1,144
+# fallbacks succeeded and the largest cohort of 319 carried no recoverable
+# reason at all.
+
+
+def _attempt_log() -> tuple[list[RouteAttemptRecord], AttemptResultObserver]:
+    seen: list[RouteAttemptRecord] = []
+    return seen, seen.append
+
+
+@pytest.mark.asyncio
+async def test_a_rescued_request_records_why_the_primary_was_abandoned() -> None:
+    """The fallback's success must not erase the primary's failure."""
+    primary = FailingPreflightProvider()
+    backup = FakeProvider()
+    providers = {"broken": primary, "healthy": backup}
+    first = _routed_request(provider_id="broken")
+    second = _routed_request(provider_id="healthy")
+    attempts, observer = _attempt_log()
+
+    stream = ProviderExecutor(
+        lambda provider_id: providers[provider_id],
+        token_counter=lambda _m, _s, _t: 1,
+    ).stream(
+        _plan(first, second),
+        wire_api="messages",
+        raw_log_label="FULL_PAYLOAD",
+        raw_log_payload={},
+        request_id="req_rescued",
+        on_attempt_result=observer,
+    )
+    assert [chunk async for chunk in stream] == ["event: message_stop\ndata: {}\n\n"]
+
+    assert [(a.attempt, a.model_ref, a.outcome) for a in attempts] == [
+        (0, "broken/provider-model", "failed"),
+        (1, "healthy/provider-model", "succeeded"),
+    ]
+    # The reason, which is the whole point: the request succeeded, and the log
+    # still says what it had to survive to do so.
+    assert attempts[0].error_kind == "ValueError"
+    assert "invalid provider request" in (attempts[0].error_message or "")
+    assert attempts[1].error_kind is None
+
+
+@pytest.mark.asyncio
+async def test_a_model_the_chain_never_reached_says_so() -> None:
+    """ "Not tried" and "tried and failed" are different facts about a route."""
+    provider = FakeProvider()
+    attempts, observer = _attempt_log()
+
+    stream = ProviderExecutor(
+        lambda _provider_id: provider,
+        token_counter=lambda _m, _s, _t: 1,
+    ).stream(
+        _plan(
+            _routed_request(provider_id="first"),
+            _routed_request(provider_id="second"),
+            _routed_request(provider_id="third"),
+        ),
+        wire_api="messages",
+        raw_log_label="FULL_PAYLOAD",
+        raw_log_payload={},
+        request_id="req_untouched",
+        on_attempt_result=observer,
+    )
+    assert [chunk async for chunk in stream] == ["event: message_stop\ndata: {}\n\n"]
+
+    assert [(a.attempt, a.outcome, a.error_message) for a in attempts] == [
+        (0, "succeeded", None),
+        (1, "skipped", "never reached"),
+        (2, "skipped", "never reached"),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_a_model_benched_by_recent_failures_is_recorded_as_benched() -> None:
+    """A three-model chain that only ran one must not look like a one-model route.
+
+    Health ejection removes a model from the route before the request starts,
+    so nothing else in the log distinguishes it from a chain that was never
+    configured -- which is exactly the confusion this row exists to prevent.
+    """
+    health = RouteHealthRegistry(eject_after_failures=1, eject_seconds=300.0)
+    health.record_failure("sick/provider-model")
+    attempts, observer = _attempt_log()
+
+    stream = ProviderExecutor(
+        lambda _provider_id: FakeProvider(),
+        token_counter=lambda _m, _s, _t: 1,
+        health=health,
+    ).stream(
+        _plan(
+            _routed_request(provider_id="sick"),
+            _routed_request(provider_id="healthy"),
+        ),
+        wire_api="messages",
+        raw_log_label="FULL_PAYLOAD",
+        raw_log_payload={},
+        request_id="req_benched",
+        on_attempt_result=observer,
+    )
+    assert [chunk async for chunk in stream] == ["event: message_stop\ndata: {}\n\n"]
+
+    benched = attempts[0]
+    assert benched.outcome == "skipped"
+    assert benched.error_kind == "ejected"
+    assert "recent consecutive failures" in (benched.error_message or "")
+    assert attempts[1].outcome == "succeeded"
+
+
+@pytest.mark.asyncio
+async def test_an_exhausted_chain_records_every_failure_not_just_the_last() -> None:
+    """When everything fails, the log must name what each model did."""
+    attempts, observer = _attempt_log()
+    executor = ProviderExecutor(
+        lambda _provider_id: FailingPreflightProvider(),
+        token_counter=lambda _m, _s, _t: 1,
+    )
+
+    with pytest.raises(ValueError):
+        executor.stream(
+            _plan(
+                _routed_request(provider_id="a"),
+                _routed_request(provider_id="b"),
+            ),
+            wire_api="messages",
+            raw_log_label="FULL_PAYLOAD",
+            raw_log_payload={},
+            request_id="req_exhausted",
+            on_attempt_result=observer,
+        )
+
+    assert [(a.attempt, a.outcome, a.error_kind) for a in attempts] == [
+        (0, "failed", "ValueError"),
+        (1, "failed", "ValueError"),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_an_execution_failure_is_named_by_its_kind_not_its_class() -> None:
+    """One vocabulary for the attempt log.
+
+    ``error_kind`` on the request row mixes ``FailureKind`` values with Python
+    class names, which makes it awkward to group by. The attempt log prefers the
+    kind wherever the failure carries one.
+    """
+
+    class RateLimited(FakeProvider):
+        def preflight_stream(
+            self, request: MessagesRequest, *, reasoning: ReasoningPolicy
+        ) -> None:
+            raise ExecutionFailure(
+                kind=FailureKind.RATE_LIMIT,
+                status_code=429,
+                message="slow down",
+                retryable=True,
+            )
+
+    attempts, observer = _attempt_log()
+    providers: dict[str, ProviderPort] = {
+        "limited": RateLimited(),
+        "ok": FakeProvider(),
+    }
+    stream = ProviderExecutor(
+        lambda provider_id: providers[provider_id],
+        token_counter=lambda _m, _s, _t: 1,
+    ).stream(
+        _plan(
+            _routed_request(provider_id="limited"), _routed_request(provider_id="ok")
+        ),
+        wire_api="messages",
+        raw_log_label="FULL_PAYLOAD",
+        raw_log_payload={},
+        request_id="req_kind",
+        on_attempt_result=observer,
+    )
+    assert [chunk async for chunk in stream] == ["event: message_stop\ndata: {}\n\n"]
+
+    assert attempts[0].error_kind == "rate_limit"
+    assert attempts[0].outcome == "failed"
+
+
+@pytest.mark.asyncio
+async def test_a_stream_that_dies_after_preflight_is_recorded_as_failed() -> None:
+    """Preflight and streaming fail on different code paths.
+
+    A preflight failure never opens a stream and is recorded where the chain
+    picks the next candidate; a stream that dies afterwards is recorded in the
+    execution loop. Covering only the first left the second free to report a
+    failed attempt as a success -- verified by mutation, which the preflight
+    test alone did not catch.
+    """
+    broken = FailingStreamConstructionProvider()
+    healthy = FakeProvider()
+    providers: dict[str, ProviderPort] = {"broken": broken, "healthy": healthy}
+    attempts, observer = _attempt_log()
+
+    stream = ProviderExecutor(
+        lambda provider_id: providers[provider_id],
+        token_counter=lambda _m, _s, _t: 1,
+    ).stream(
+        _plan(
+            _routed_request(provider_id="broken"),
+            _routed_request(provider_id="healthy"),
+        ),
+        wire_api="messages",
+        raw_log_label="FULL_PAYLOAD",
+        raw_log_payload={},
+        request_id="req_midstream",
+        on_attempt_result=observer,
+    )
+    assert [chunk async for chunk in stream] == ["event: message_stop\ndata: {}\n\n"]
+
+    # Preflight passed, so this attempt really did start; it failed opening the
+    # stream, and that is what the log has to say.
+    assert broken.preflight_calls
+    assert [(a.attempt, a.outcome, a.error_kind) for a in attempts] == [
+        (0, "failed", "RuntimeError"),
+        (1, "succeeded", None),
+    ]
+    assert "stream construction failed" in (attempts[0].error_message or "")
+    # And the attempt that ran was timed, which is what makes a slow failure
+    # legible next to a fast one. Asserted as "present", not ">= 0": the latter
+    # is true of None too, and passed against a mutation that dropped timing
+    # altogether.
+    assert attempts[0].duration_ms is not None
+    assert attempts[1].duration_ms is not None
+    # A model that never ran has nothing to time.
+    assert all(a.duration_ms is None for a in attempts if a.outcome == "skipped")

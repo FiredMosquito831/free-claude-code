@@ -43,6 +43,34 @@ AttemptObserver = Callable[[RoutedMessagesRequest, int], None]
 
 
 @dataclass(frozen=True, slots=True)
+class RouteAttemptRecord:
+    """The verdict on one model of a chain, for the request log.
+
+    ``skipped`` covers a model the chain never actually tried -- benched by
+    recent failures, or reached with no time left. Those are the attempts that
+    were invisible before: a three-model chain that only ever ran one looked
+    exactly like a one-model route, so "the fallback did not help" and "the
+    fallback was never asked" could not be told apart.
+    """
+
+    attempt: int
+    provider_id: str
+    model_ref: str
+    outcome: Literal["succeeded", "failed", "skipped"]
+    error_kind: str | None = None
+    error_message: str | None = None
+    duration_ms: float | None = None
+
+
+# Reports what became of one attempt, as opposed to announcing that it started.
+# The two are separate because the request row wants the model in flight (so a
+# failed chain still names the last model it reached) while the attempt log
+# wants the verdict, which is only known afterwards. Declared after the record
+# it names: a type alias is evaluated eagerly, lazy annotations notwithstanding.
+AttemptResultObserver = Callable[[RouteAttemptRecord], None]
+
+
+@dataclass(frozen=True, slots=True)
 class RouteExecutionPolicy:
     """Wall-clock limits deciding when an attempt stops being worth waiting for.
 
@@ -109,6 +137,126 @@ def _timeout_failure(
     )
 
 
+class _AttemptLedger:
+    """Collects one verdict per model on the route, in chain order.
+
+    Built from the plan rather than from what ran, so a model the chain never
+    reached still gets a row saying why. Publishing once at the end keeps the
+    request log's writer out of the streaming path -- an attempt verdict is
+    never worth a database round trip while a client is waiting for tokens.
+    """
+
+    def __init__(
+        self,
+        model_refs: tuple[str, ...],
+        attempts: tuple[RoutedMessagesRequest, ...],
+        observer: AttemptResultObserver | None,
+    ) -> None:
+        self._observer = observer
+        self._records: dict[int, RouteAttemptRecord] = {}
+        self._started: dict[int, float] = {}
+        for index, ref in enumerate(model_refs):
+            self._records[index] = RouteAttemptRecord(
+                attempt=index,
+                provider_id=(
+                    attempts[index].resolved.provider_id
+                    if index < len(attempts)
+                    else ""
+                ),
+                model_ref=ref,
+                outcome="skipped",
+                error_message="never reached",
+            )
+
+    def mark_benched(self, order: tuple[int, ...]) -> None:
+        """Record models the health registry removed before the request began."""
+        usable = set(order)
+        for index in self._records:
+            if index not in usable:
+                self._set(
+                    index,
+                    outcome="skipped",
+                    error_kind="ejected",
+                    error_message="benched after recent consecutive failures",
+                )
+
+    def start(self, index: int) -> None:
+        self._started[index] = time.monotonic()
+
+    def _elapsed_ms(self, index: int) -> float | None:
+        started = self._started.get(index)
+        return None if started is None else (time.monotonic() - started) * 1000.0
+
+    def _set(
+        self,
+        index: int,
+        *,
+        outcome: Literal["succeeded", "failed", "skipped"],
+        error_kind: str | None = None,
+        error_message: str | None = None,
+        duration_ms: float | None = None,
+    ) -> None:
+        current = self._records.get(index)
+        if current is None:
+            return
+        self._records[index] = RouteAttemptRecord(
+            attempt=current.attempt,
+            provider_id=current.provider_id,
+            model_ref=current.model_ref,
+            outcome=outcome,
+            error_kind=error_kind,
+            error_message=error_message,
+            duration_ms=duration_ms,
+        )
+
+    def succeeded(self, index: int) -> None:
+        self._set(
+            index,
+            outcome="succeeded",
+            error_kind=None,
+            error_message=None,
+            duration_ms=self._elapsed_ms(index),
+        )
+
+    def failed(self, index: int, exc: BaseException) -> None:
+        self._set(
+            index,
+            outcome="failed",
+            error_kind=_failure_kind_name(exc),
+            error_message=safe_exception_message(exc),
+            duration_ms=self._elapsed_ms(index),
+        )
+
+    def out_of_time(self, index: int) -> None:
+        self._set(
+            index,
+            outcome="skipped",
+            error_kind="budget_exhausted",
+            error_message="request budget spent before this model was tried",
+        )
+
+    def publish(self) -> None:
+        if self._observer is None:
+            return
+        for index in sorted(self._records):
+            self._observer(self._records[index])
+        self._observer = None
+
+
+def _failure_kind_name(exc: BaseException) -> str:
+    """Name a failure the same way the request row does.
+
+    ``ExecutionFailure`` already carries a ``FailureKind``; anything else is
+    named by its class. Without this the attempt log would mix the two
+    vocabularies the request row already mixes, which is the thing that makes
+    ``error_kind`` awkward to group by today.
+    """
+    kind = getattr(exc, "kind", None)
+    if isinstance(kind, FailureKind):
+        return kind.value
+    return type(exc).__name__
+
+
 class ProviderExecutor:
     """Resolve a provider and execute one routed Anthropic Messages stream."""
 
@@ -138,6 +286,7 @@ class ProviderExecutor:
         raw_log_payload: object,
         request_id: str,
         on_attempt: AttemptObserver | None = None,
+        on_attempt_result: AttemptResultObserver | None = None,
     ) -> AsyncIterator[str]:
         """Preflight synchronously, then return the traced provider stream.
 
@@ -170,6 +319,11 @@ class ProviderExecutor:
             if self._policy.total_timeout > 0
             else None
         )
+        # Every model on the route starts as "never reached". Each one that is
+        # tried, benched or timed out overwrites its own entry, so what is left
+        # at the end is the whole chain's story rather than only the winner's.
+        ledger = _AttemptLedger(plan.model_refs(), attempts, on_attempt_result)
+        ledger.mark_benched(order)
         prepared = self._prepare_from(
             attempts,
             order,
@@ -178,10 +332,12 @@ class ProviderExecutor:
             request_id=request_id,
             on_attempt=on_attempt,
             deadline=deadline,
+            ledger=ledger,
         )
         if prepared is None:
             # Every attempt failed before opening a stream. Raising here keeps
             # the caller's existing synchronous error surface intact.
+            ledger.publish()
             raise failures[-1]
 
         trace_event(
@@ -258,6 +414,11 @@ class ProviderExecutor:
                         yield chunk
                 except Exception as exc:
                     if committed:
+                        # No fallback is possible past the commit point, but the
+                        # attempt still ended in a failure and the log should
+                        # say so rather than leaving it as "never reached".
+                        ledger.failed(index, exc)
+                        ledger.publish()
                         raise
                     uncommitted_failure = exc
                 finally:
@@ -275,11 +436,14 @@ class ProviderExecutor:
                     for chunk in held:
                         yield chunk
                     self._health.record_success(model_ref)
+                    ledger.succeeded(index)
+                    ledger.publish()
                     return
 
                 # The failed stream is closed by now, so the next attempt never
                 # runs alongside a half-open connection to the previous one.
                 failures.append(uncommitted_failure)
+                ledger.failed(index, uncommitted_failure)
                 self._health.record_failure(model_ref)
                 self._trace_fallback(
                     routed, uncommitted_failure, request_id=request_id, attempt=index
@@ -292,8 +456,10 @@ class ProviderExecutor:
                     request_id=request_id,
                     on_attempt=on_attempt,
                     deadline=deadline,
+                    ledger=ledger,
                 )
                 if following is None:
+                    ledger.publish()
                     raise uncommitted_failure
                 position, provider = following
 
@@ -374,6 +540,7 @@ class ProviderExecutor:
         request_id: str,
         on_attempt: AttemptObserver | None = None,
         deadline: float | None = None,
+        ledger: _AttemptLedger | None = None,
     ) -> tuple[int, ProviderPort] | None:
         """Return the first attempt at or after ``start`` that resolves and preflights.
 
@@ -406,14 +573,23 @@ class ProviderExecutor:
                         first_token=False,
                     )
                 )
+                if ledger is not None:
+                    # Everything from here on is unreachable for the same
+                    # reason, so say so for each rather than only the first.
+                    for remaining in range(position, len(order)):
+                        ledger.out_of_time(order[remaining])
                 return None
             if on_attempt is not None:
                 on_attempt(routed, index)
+            if ledger is not None:
+                ledger.start(index)
             try:
                 provider = self._provider_resolver(routed.resolved.provider_id)
                 provider.preflight_stream(routed.request, reasoning=routed.reasoning)
             except Exception as exc:
                 failures.append(exc)
+                if ledger is not None:
+                    ledger.failed(index, exc)
                 self._health.record_failure(model_ref)
                 self._trace_fallback(routed, exc, request_id=request_id, attempt=index)
                 continue

@@ -15,6 +15,8 @@ from my_claude_code.core.request_log import (
     MAX_TEXT_CHARS,
     RequestLogStore,
     RequestRecord,
+    RouteAttempt,
+    RouteAttemptOutcome,
     compact_request_log,
     get_request_log_store,
     pack_bodies,
@@ -1951,3 +1953,92 @@ def test_compaction_splits_blobs_written_before_the_split(tmp_path) -> None:
         assert store.list_requests(q="shared prompt")[1] == 300
     finally:
         store.close()
+
+
+# ---------------------------------------------------------------- attempts --
+
+
+def _attempts() -> tuple[RouteAttempt, ...]:
+    return (
+        RouteAttempt(
+            attempt=0,
+            provider="nous_portal",
+            model_ref="nous_portal/tencent/hy3:free",
+            outcome=RouteAttemptOutcome.FAILED,
+            error_kind="timeout",
+            error_message="exceeded the 600s request budget",
+            duration_ms=600_000.0,
+        ),
+        RouteAttempt(
+            attempt=1,
+            provider="opencode",
+            model_ref="opencode/hy3-free",
+            outcome=RouteAttemptOutcome.SUCCEEDED,
+            duration_ms=1_200.0,
+        ),
+        RouteAttempt(
+            attempt=2,
+            provider="groq",
+            model_ref="groq/llama-3.3-70b",
+            outcome=RouteAttemptOutcome.SKIPPED,
+            error_message="never reached",
+        ),
+    )
+
+
+def test_a_rescued_request_keeps_the_reason_its_primary_failed(store):
+    """The reason a fallback was needed must survive the request succeeding.
+
+    ``requests`` records only the model that answered, so a chain that rescued
+    a request reported ``status='success'`` and lost the failure entirely. On 21
+    days of real traffic that hid the cause of 1,144 fallbacks.
+    """
+    store.enqueue(_record("req_chain", attempts=_attempts()))
+    store.close()
+
+    stored = store.get_request("req_chain")
+    assert [(a["attempt"], a["outcome"]) for a in stored["route_attempts"]] == [
+        (0, "failed"),
+        (1, "succeeded"),
+        (2, "skipped"),
+    ]
+    first = stored["route_attempts"][0]
+    assert first["model_ref"] == "nous_portal/tencent/hy3:free"
+    assert first["error_kind"] == "timeout"
+    assert first["error_message"] == "exceeded the 600s request budget"
+    assert first["duration_ms"] == 600_000.0
+    # And the row itself still reports the request as the success it was.
+    assert stored["status"] == "success"
+
+
+def test_a_request_with_no_chain_reports_no_attempts(store):
+    """A single-model route costs nothing: no rows, and an empty list."""
+    store.enqueue(_record("req_plain"))
+    store.close()
+
+    assert store.get_request("req_plain")["route_attempts"] == []
+
+
+def test_attempts_are_deleted_with_the_request_they_belong_to(store, tmp_path):
+    """Retention must not leave attempts behind for pruned requests.
+
+    A side table keyed on request_id grows forever unless prune reaches it, and
+    a request log that trims itself to a row cap is exactly where that would go
+    unnoticed.
+    """
+    small = RequestLogStore(tmp_path / "small.db", max_rows=1)
+    try:
+        small.enqueue(_record("req_old", attempts=_attempts()))
+        small.enqueue(_record("req_new", attempts=_attempts()))
+        small.close()
+        small.prune()
+
+        with sqlite3.connect(tmp_path / "small.db") as conn:
+            orphans = conn.execute(
+                "SELECT COUNT(*) FROM request_attempts WHERE NOT EXISTS ("
+                " SELECT 1 FROM requests WHERE requests.id ="
+                " request_attempts.request_id)"
+            ).fetchone()[0]
+        assert orphans == 0
+    finally:
+        small.close()

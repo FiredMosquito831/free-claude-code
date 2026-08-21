@@ -14,6 +14,7 @@ from collections.abc import AsyncIterator, Mapping
 from dataclasses import dataclass
 from typing import Any, Literal
 
+from my_claude_code.application.execution import RouteAttemptRecord
 from my_claude_code.application.routing import (
     RoutedMessagesPlan,
     RoutedMessagesRequest,
@@ -36,6 +37,8 @@ from my_claude_code.core.request_log import (
     MAX_TEXT_CHARS,
     RequestLogStore,
     RequestRecord,
+    RouteAttempt,
+    RouteAttemptOutcome,
     store_from_settings,
 )
 
@@ -68,6 +71,10 @@ class RequestCapture:
         # first token, so it happens at finalize time instead.
         self._images = images
         self._capture_images_pixels = capture_images_pixels
+        # Filled once, at the end of the chain, not per attempt: an attempt
+        # verdict is never worth a database round trip while a client is
+        # still waiting for tokens.
+        self._attempts: list[RouteAttempt] = []
         self._start = time.perf_counter()
         self._ttft_ms: float | None = None
         self._output_parts: list[str] = []
@@ -109,6 +116,28 @@ class RequestCapture:
     @property
     def enabled(self) -> bool:
         return self._store is not None
+
+    def record_attempt_result(self, attempt: RouteAttemptRecord) -> None:
+        """Store one model's verdict for the request log.
+
+        The chain's own account of itself: which models it tried, which it
+        benched, which it never reached, and why. The request row can only name
+        the model that answered, so without this a fallback that rescued a
+        request left no trace of what it rescued it from.
+        """
+        if not self.enabled:
+            return
+        self._attempts.append(
+            RouteAttempt(
+                attempt=attempt.attempt,
+                provider=attempt.provider_id or None,
+                model_ref=attempt.model_ref or None,
+                outcome=RouteAttemptOutcome(attempt.outcome),
+                error_kind=attempt.error_kind,
+                error_message=attempt.error_message,
+                duration_ms=attempt.duration_ms,
+            )
+        )
 
     def set_plan(self, plan: RoutedMessagesPlan) -> None:
         """Record the whole routing decision before any attempt is made.
@@ -404,6 +433,7 @@ class RequestCapture:
             )
         record.key_index = self._credential.index
         record.key_label = self._credential.label
+        record.attempts = tuple(self._attempts)
         self._store.enqueue(record)
 
 

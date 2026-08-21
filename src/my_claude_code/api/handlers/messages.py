@@ -145,6 +145,7 @@ class MessagesHandler:
                         # Analytics must name the model that actually answered,
                         # not the one the route started from.
                         on_attempt=capture.set_routing,
+                        on_attempt_result=capture.record_attempt_result,
                     )
                 )
             if isinstance(result, _MessagesStreamResult):

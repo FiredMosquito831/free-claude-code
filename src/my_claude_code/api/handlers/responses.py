@@ -102,6 +102,7 @@ class ResponsesHandler:
                     raw_log_payload=request_payload,
                     request_id=request_id,
                     on_attempt=capture.set_routing,
+                    on_attempt_result=capture.record_attempt_result,
                 )
             )
             return await openai_responses_sse_streaming_response(
