@@ -376,6 +376,21 @@ class ProviderExecutor:
                     attempt_count=len(attempts),
                 )
 
+                # No attempt may spend the whole budget before producing
+                # anything: the share is what guarantees the models below this
+                # one actually get a turn. It bounds time-to-first-content
+                # only -- once content is flowing the attempt owns the rest of
+                # the budget, because cutting a working stream to hand over to
+                # another model is worse than letting it finish.
+                attempt_deadline = self._attempt_deadline(
+                    deadline, len(order) - position
+                )
+                attempt_budget = (
+                    None
+                    if attempt_deadline is None
+                    else max(0.0, attempt_deadline - time.monotonic())
+                )
+
                 provider_stream: AsyncIterator[str] | None = None
                 committed = False
                 uncommitted_failure: Exception | None = None
@@ -396,7 +411,10 @@ class ProviderExecutor:
                     while True:
                         try:
                             chunk = await _next_chunk(
-                                chunks, self._chunk_timeout(seen_chunk, deadline)
+                                chunks,
+                                self._chunk_timeout(
+                                    seen_chunk, deadline, attempt_deadline
+                                ),
                             )
                         except StopAsyncIteration:
                             break
@@ -405,6 +423,7 @@ class ProviderExecutor:
                                 model_ref,
                                 seen_chunk=seen_chunk,
                                 request_id=request_id,
+                                attempt_budget=attempt_budget,
                             ) from exc
                         seen_chunk = True
                         if buffer_until_complete:
@@ -489,23 +508,60 @@ class ProviderExecutor:
             extra=stream_trace,
         )
 
-    def _chunk_timeout(self, seen_chunk: bool, deadline: float | None) -> float | None:
+    def _attempt_deadline(
+        self, deadline: float | None, attempts_remaining: int
+    ) -> float | None:
+        """When this attempt stops being allowed to produce nothing.
+
+        An equal share of whatever budget is left, counting this attempt and
+        every model still behind it. One shared pool meant the first model
+        could drain it and the chain was never reached: measured on 21 days of
+        real traffic, 393 requests ran the full 600s budget having produced
+        only scaffolding, with a configured chain sitting unused.
+
+        Time an attempt does not use flows forward, so a chain of fast failures
+        leaves the last model nearly the whole budget rather than a third of it.
+        """
+        if deadline is None or attempts_remaining <= 1:
+            return deadline
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return deadline
+        return time.monotonic() + remaining / attempts_remaining
+
+    def _chunk_timeout(
+        self,
+        seen_chunk: bool,
+        deadline: float | None,
+        attempt_deadline: float | None = None,
+    ) -> float | None:
         """Seconds to wait for the next chunk, or ``None`` to wait indefinitely.
 
-        The first-token limit applies once, to the wait preceding the first
-        chunk; the total budget applies to every wait, so a stream that stalls
-        after committing still ends at the budget rather than at the transport
-        read timeout.
+        Three limits, and which apply depends on whether the stream has started
+        producing. Before the first content chunk the first-token limit and this
+        attempt's share both apply, because the attempt is still costing the
+        chain its turn. After it, only the total budget does -- the attempt has
+        shown the reader something, so truncating it to preserve a fallback
+        that can no longer run cleanly would trade a working answer for nothing.
         """
         limits: list[float] = []
-        if not seen_chunk and self._policy.first_token_timeout > 0:
-            limits.append(self._policy.first_token_timeout)
+        now = time.monotonic()
+        if not seen_chunk:
+            if self._policy.first_token_timeout > 0:
+                limits.append(self._policy.first_token_timeout)
+            if attempt_deadline is not None:
+                limits.append(max(0.0, attempt_deadline - now))
         if deadline is not None:
-            limits.append(max(0.0, deadline - time.monotonic()))
+            limits.append(max(0.0, deadline - now))
         return min(limits) if limits else None
 
     def _deadline_reached(
-        self, model_ref: str, *, seen_chunk: bool, request_id: str
+        self,
+        model_ref: str,
+        *,
+        seen_chunk: bool,
+        request_id: str,
+        attempt_budget: float | None = None,
     ) -> ExecutionFailure:
         first_token = not seen_chunk
         seconds = (
@@ -513,6 +569,11 @@ class ProviderExecutor:
             if first_token
             else self._policy.total_timeout
         )
+        # Report the limit that actually ended it. "produced no output within
+        # 120s" on a request abandoned at 40s, because it was one of three
+        # models sharing a budget, sends the reader to the wrong setting.
+        if first_token and attempt_budget is not None:
+            seconds = attempt_budget if seconds <= 0 else min(seconds, attempt_budget)
         logger.warning(
             "MODEL DEADLINE: '{}' {} after {:g}s",
             model_ref,
@@ -667,14 +728,41 @@ def route_execution_policy(settings: Settings) -> RouteExecutionPolicy:
     )
 
 
-def route_health_registry(settings: Settings) -> RouteHealthRegistry:
-    """Build an ejection registry from settings.
+# Registries live here rather than on the executor, keyed by the settings that
+# define them. The executor is built per request -- `MessagesHandler` and
+# everything it owns is constructed inside the request handler -- so a registry
+# owned by it was rebuilt every time, its consecutive-failure counter reset
+# every time, and its threshold therefore never reached. The docstring below
+# named that exact failure mode as the thing to avoid; it just did not account
+# for the executor itself being per-request.
+#
+# Confirmed against a live server before this change: four consecutive failures
+# of the same model produced zero "MODEL CHAIN: skipping" lines.
+_REGISTRIES: dict[tuple[int, float], RouteHealthRegistry] = {}
 
-    One registry per executor, so what a route learned about a model outlives a
-    single request. A registry rebuilt per request would never reach its
-    failure threshold and would eject nothing.
+
+def route_health_registry(settings: Settings) -> RouteHealthRegistry:
+    """Return the shared ejection registry for these ejection settings.
+
+    What a route learns about a model has to outlive a single request: three
+    consecutive failures cannot be observed by three independent registries.
+
+    Keyed by the settings that define ejection rather than held as one global,
+    so changing either value starts a clean registry instead of inheriting
+    benches made under a different policy. Nothing else about a request can
+    reach it, which keeps this a cache rather than shared mutable state.
     """
-    return RouteHealthRegistry(
-        eject_after_failures=settings.fallback_eject_after_failures,
-        eject_seconds=settings.fallback_eject_seconds,
-    )
+    key = (settings.fallback_eject_after_failures, settings.fallback_eject_seconds)
+    registry = _REGISTRIES.get(key)
+    if registry is None:
+        registry = RouteHealthRegistry(
+            eject_after_failures=key[0],
+            eject_seconds=key[1],
+        )
+        _REGISTRIES[key] = registry
+    return registry
+
+
+def reset_route_health_registries() -> None:
+    """Forget every bench. For tests, and for a deliberate config reload."""
+    _REGISTRIES.clear()

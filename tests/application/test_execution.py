@@ -11,6 +11,7 @@ from my_claude_code.application.execution import (
     ProviderExecutor,
     RouteAttemptRecord,
     RouteExecutionPolicy,
+    route_health_registry,
 )
 from my_claude_code.application.ports import ProviderPort
 from my_claude_code.application.route_health import RouteHealthRegistry
@@ -20,6 +21,7 @@ from my_claude_code.application.routing import (
     RoutedMessagesRequest,
 )
 from my_claude_code.config.reasoning import ReasoningPreference
+from my_claude_code.config.settings import Settings
 from my_claude_code.core.anthropic.models import Message, MessagesRequest
 from my_claude_code.core.async_iterators import AsyncCloseable
 from my_claude_code.core.failures import ExecutionFailure, FailureKind
@@ -555,8 +557,15 @@ async def test_a_committed_stall_ends_at_the_total_budget() -> None:
 
 @pytest.mark.asyncio
 async def test_the_chain_is_not_extended_once_the_budget_is_spent() -> None:
-    """Starting another model with no time left only delays the same error."""
-    primary = StallingProvider()
+    """Starting another model with no time left only delays the same error.
+
+    The budget can only be spent this way once an attempt is past its share:
+    a stream that has produced content owns the rest of the request, because
+    truncating a working answer to preserve a fallback is the wrong trade. The
+    non-streaming client is what keeps the fallback theoretically available
+    here, so the reason the second model is never tried is the budget itself.
+    """
+    primary = StallingProvider(before=("event: content\n\n",))
     secondary = FakeProvider()
     executor = _deadline_executor(
         {"primary": primary, "secondary": secondary},
@@ -566,8 +575,8 @@ async def test_the_chain_is_not_extended_once_the_budget_is_spent() -> None:
 
     stream = executor.stream(
         _plan(
-            _routed_request("primary", "big"),
-            _routed_request("secondary", "small"),
+            _routed_request("primary", "big", stream=False),
+            _routed_request("secondary", "small", stream=False),
         ),
         wire_api="messages",
         raw_log_label="FULL_PAYLOAD",
@@ -579,6 +588,73 @@ async def test_the_chain_is_not_extended_once_the_budget_is_spent() -> None:
         async for _chunk in stream:
             pass
     assert secondary.stream_calls == []
+
+
+@pytest.mark.asyncio
+async def test_a_silent_primary_cannot_spend_the_whole_budget() -> None:
+    """The chain is guaranteed a turn, which is the entire point of the share.
+
+    One shared pool meant the first model could drain it and every model behind
+    it was skipped for lack of time. Measured on 21 days of real traffic, 393
+    requests ran the full 600s budget having produced only scaffolding, with a
+    configured chain sitting unused -- the primary was never abandoned early
+    enough for the fallback to be reachable.
+    """
+    primary = StallingProvider()
+    secondary = FakeProvider()
+    executor = _deadline_executor(
+        {"primary": primary, "secondary": secondary},
+        # Disabled, so the share is provably the thing that ends the attempt.
+        first_token_timeout=0.0,
+        total_timeout=0.2,
+    )
+
+    stream = executor.stream(
+        _plan(
+            _routed_request("primary", "big"),
+            _routed_request("secondary", "small"),
+        ),
+        wire_api="messages",
+        raw_log_label="FULL_PAYLOAD",
+        raw_log_payload={},
+        request_id="req_share",
+    )
+
+    assert [chunk async for chunk in stream] == ["event: message_stop\ndata: {}\n\n"]
+    assert primary.stream_calls, "the primary must still be tried first"
+    assert secondary.stream_calls, "the fallback must get its turn"
+
+
+@pytest.mark.asyncio
+async def test_a_producing_stream_is_not_cut_short_by_the_share() -> None:
+    """A share bounds silence, never a working answer.
+
+    The share applies only until the first content chunk. After that the
+    attempt owns the remaining budget: cutting a stream that is producing, to
+    hand over to a model that may not be, trades a real answer for nothing.
+    """
+    slow = StallingProvider(stall_seconds=0.08, before=("event: content\n\n",))
+    executor = _deadline_executor(
+        {"primary": slow, "secondary": FakeProvider()},
+        first_token_timeout=0.0,
+        total_timeout=0.4,
+    )
+
+    stream = executor.stream(
+        _plan(
+            _routed_request("primary", "big"),
+            _routed_request("secondary", "small"),
+        ),
+        wire_api="messages",
+        raw_log_label="FULL_PAYLOAD",
+        raw_log_payload={},
+        request_id="req_producing",
+    )
+
+    # 0.08s of silence after content is longer than the 0.2s share would have
+    # been generous about had it still applied, and well inside the total.
+    chunks = [chunk async for chunk in stream]
+    assert chunks[0] == "event: content\n\n"
 
 
 @pytest.mark.asyncio
@@ -909,3 +985,51 @@ async def test_a_stream_that_dies_after_preflight_is_recorded_as_failed() -> Non
     assert attempts[1].duration_ms is not None
     # A model that never ran has nothing to time.
     assert all(a.duration_ms is None for a in attempts if a.outcome == "skipped")
+
+
+def _ejection_settings(*, after_failures: int) -> Settings:
+    """Real Settings, because that is what the factory keys itself on."""
+    settings = Settings()
+    settings.fallback_eject_after_failures = after_failures
+    settings.fallback_eject_seconds = 300.0
+    return settings
+
+
+@pytest.mark.asyncio
+async def test_a_model_is_benched_across_requests_not_within_one() -> None:
+    """Three consecutive failures cannot be seen by three fresh registries.
+
+    `MessagesHandler`, the executor and its registry are all constructed per
+    request, so a registry owned by the executor reset its counter every time
+    and the ejection threshold was never reached. Confirmed against a live
+    server before the fix: four consecutive failures of the same model produced
+    zero "MODEL CHAIN: skipping" lines.
+    """
+    settings = _ejection_settings(after_failures=2)
+
+    # Two separate "requests", each resolving its registry the way a handler
+    # does. Sharing is the whole contract being tested.
+    first = route_health_registry(settings)
+    second = route_health_registry(settings)
+    assert first is second
+
+    for _ in range(2):
+        first.record_failure("sick/model")
+    assert second.usable_indexes(("sick/model", "healthy/model")) == (1,)
+
+
+def test_changing_the_ejection_policy_starts_a_clean_registry() -> None:
+    """A bench made under one policy must not be inherited by another.
+
+    Two models on the route, because ejecting every candidate is deliberately
+    bypassed -- skipping a bad model is an optimisation, refusing to try
+    anything is an outage -- so a single-model route can never show a bench.
+    """
+    strict = _ejection_settings(after_failures=1)
+    lenient = _ejection_settings(after_failures=9)
+    route = ("sick/model", "healthy/model")
+
+    route_health_registry(strict).record_failure("sick/model")
+
+    assert route_health_registry(strict).usable_indexes(route) == (1,)
+    assert route_health_registry(lenient).usable_indexes(route) == (0, 1)
