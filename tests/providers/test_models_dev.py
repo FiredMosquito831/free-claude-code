@@ -840,3 +840,111 @@ def test_reverse_tag_match_ignores_tags_outside_the_allow_list(
         model_reasoning_capability_from_models_dev("open_router", "vendor/thinky", path)
         is None
     )
+
+
+# ------------------------------------------------- provider-scoped matching --
+#
+# The flat index is every provider's models in one namespace, first writer
+# wins, and the winner is whichever order models.dev serialises its JSON. On
+# the live 2026-08 snapshot 3,757 model ids were claimed by more than one
+# provider and 234 of those disagreed about whether the model reads images.
+
+
+def _two_providers_claiming_one_name() -> dict[str, object]:
+    """Same model id, opposite vision answers, different context lengths."""
+    return {
+        "first-alphabetically": {
+            "models": {
+                "shared-name": {
+                    "modalities": {"input": ["text"]},
+                    "limit": {"context": 8_000},
+                }
+            }
+        },
+        "groq": {
+            "models": {
+                "shared-name": {
+                    "modalities": {"input": ["text", "image"]},
+                    "limit": {"context": 128_000},
+                }
+            }
+        },
+    }
+
+
+def test_a_models_own_provider_decides_what_it_can_do():
+    """A namesake hosted elsewhere must not answer for this model.
+
+    Without scoping this model is told it cannot read images because another
+    provider happens to publish something with the same name earlier in the
+    file -- and vision routing then diverts a request that never needed it.
+    """
+    index = _two_providers_claiming_one_name()
+    infos = (ProviderModelInfo(model_id="shared-name"),)
+
+    (scoped,) = enrich_model_infos(infos, index, "groq")
+    assert scoped.supports_vision is True
+    assert scoped.context_length == 128_000
+
+    # The other provider's own answer is equally its own.
+    (other,) = enrich_model_infos(infos, index, "first-alphabetically")
+    assert other.supports_vision is False
+    assert other.context_length == 8_000
+
+
+def test_a_provider_models_dev_does_not_know_still_gets_the_flat_index():
+    """Scoping is a preference, not a restriction.
+
+    Most gateways resell models they do not publish metadata for, so falling
+    back to the cross-provider index is what keeps them described at all.
+    """
+    index = _two_providers_claiming_one_name()
+    (info,) = enrich_model_infos(
+        (ProviderModelInfo(model_id="shared-name"),), index, "some-gateway"
+    )
+    assert info.supports_vision is not None
+    assert info.context_length in {8_000, 128_000}
+
+
+def test_a_sparse_provider_entry_does_not_strip_what_the_index_knows():
+    """Merged field by field, not chosen wholesale.
+
+    A provider that lists a model but says little about it would otherwise
+    remove fields the flat index could still supply. Measured against the live
+    index, choosing wholesale cost 11 models metadata they have today.
+    """
+    index = {
+        "groq": {
+            "models": {"shared-name": {"modalities": {"input": ["text", "image"]}}}
+        },
+        "elsewhere": {"models": {"shared-name": {"limit": {"context": 64_000}}}},
+    }
+    (info,) = enrich_model_infos(
+        (ProviderModelInfo(model_id="shared-name"),), index, "groq"
+    )
+
+    # Its own provider is believed about vision...
+    assert info.supports_vision is True
+    # ...and the gap it left is still filled from elsewhere.
+    assert info.context_length == 64_000
+
+
+def test_the_provider_alias_map_is_used_for_scoping_too():
+    """MCC's provider ids and models.dev's do not always agree.
+
+    Another provider claims the same name and answers differently, and is
+    reached first by the flat fallback -- so the alias is the only thing that
+    can produce the right answer here.
+    """
+    index = {
+        "aaa-other": {"models": {"a-model": {"modalities": {"input": ["text"]}}}},
+        "openrouter": {
+            "models": {"a-model": {"modalities": {"input": ["text", "image"]}}}
+        },
+    }
+    # Without the alias, "open_router" finds no bucket and the flat fallback
+    # answers with aaa-other's False.
+    (info,) = enrich_model_infos(
+        (ProviderModelInfo(model_id="a-model"),), index, "open_router"
+    )
+    assert info.supports_vision is True

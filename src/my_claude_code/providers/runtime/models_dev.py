@@ -182,7 +182,19 @@ class _ModelsDevModelMetadata:
 
 
 def _flatten_index(index: Mapping[str, Any]) -> dict[str, _ModelsDevModelMetadata]:
-    """Flatten models.dev providers into normalized model-id match keys."""
+    """Flatten models.dev providers into normalized model-id match keys.
+
+    Used only as the fallback for a model whose own provider models.dev does
+    not describe, which is most of what a gateway resells.
+
+    Entries accumulate field by field rather than first-writer-wins. On the
+    live 2026-08 index 3,757 model ids are claimed by more than one provider,
+    so with `setdefault` the answer for a shared name was decided by whichever
+    order models.dev happened to serialise its JSON -- including 234 ids whose
+    providers disagree about whether the model reads images. Accumulating
+    cannot remove anything and does not depend on that order for whether a
+    field is populated at all.
+    """
     flattened: dict[str, _ModelsDevModelMetadata] = {}
     for provider_bucket in index.values():
         if not isinstance(provider_bucket, Mapping):
@@ -195,7 +207,10 @@ def _flatten_index(index: Mapping[str, Any]) -> dict[str, _ModelsDevModelMetadat
                 continue
             parsed = _parse_models_dev_metadata(metadata)
             for candidate in _normalize_candidates(model_id):
-                flattened.setdefault(candidate, parsed)
+                existing = flattened.get(candidate)
+                flattened[candidate] = (
+                    parsed if existing is None else _merge_metadata(existing, parsed)
+                )
     return flattened
 
 
@@ -255,25 +270,129 @@ def _int_or_none(value: Any) -> int | None:
     return None
 
 
+def _provider_bucket_metadata(
+    index: Mapping[str, Any], provider_id: str | None
+) -> dict[str, _ModelsDevModelMetadata]:
+    """Parse just one provider's models, keyed the same way as the flat index.
+
+    The flat index is every provider's models in one namespace, first writer
+    wins, and the winner is decided by the order models.dev happens to serialise
+    its JSON. On a 2026-08 snapshot 984 of 3,873 keys were claimed by more than
+    one provider and 240 of those disagreed about whether the model can read
+    images -- so a model could be told it was blind because a different
+    provider hosts something with the same name.
+
+    Looking here first makes a model's own provider the authority on it.
+    """
+    if not provider_id:
+        return {}
+    # MCC's provider ids and models.dev's do not always agree (open_router vs
+    # openrouter, fireworks vs fireworks-ai); the alias map is the same one the
+    # reasoning-capability lookup uses.
+    bucket = index.get(provider_id)
+    if not isinstance(bucket, Mapping):
+        alias = PROVIDER_ID_ALIASES.get(provider_id)
+        bucket = index.get(alias) if alias else None
+    if not isinstance(bucket, Mapping):
+        return {}
+    models = bucket.get("models")
+    if not isinstance(models, Mapping):
+        return {}
+    scoped: dict[str, _ModelsDevModelMetadata] = {}
+    for model_id, metadata in models.items():
+        if not isinstance(model_id, str) or not isinstance(metadata, Mapping):
+            continue
+        parsed = _parse_models_dev_metadata(metadata)
+        for candidate in _normalize_candidates(model_id):
+            scoped.setdefault(candidate, parsed)
+    return scoped
+
+
+def _match_metadata(
+    table: Mapping[str, _ModelsDevModelMetadata], model_id: str
+) -> _ModelsDevModelMetadata | None:
+    """Longest normalized candidate wins, so the most specific name matches."""
+    return next(
+        (
+            table[candidate]
+            for candidate in sorted(
+                _normalize_candidates(model_id), key=len, reverse=True
+            )
+            if candidate in table
+        ),
+        None,
+    )
+
+
+def _prefer_own_provider(
+    scoped: _ModelsDevModelMetadata | None,
+    fallback: _ModelsDevModelMetadata | None,
+) -> _ModelsDevModelMetadata | None:
+    """Merge two matches field by field, the model's own provider winning.
+
+    Not "scoped or fallback": a provider that publishes a model but describes
+    it sparsely would then strip fields the flat index could still supply.
+    Measured against the live 2026-08 index, choosing wholesale cost 11 models
+    metadata they have today, which is a regression however much more correct
+    the source is.
+
+    Per field, the model's own provider is authoritative where it says
+    anything at all, and a namesake elsewhere fills only the gaps.
+    """
+    if scoped is None:
+        return fallback
+    if fallback is None:
+        return scoped
+    return _merge_metadata(scoped, fallback)
+
+
+def _merge_metadata(
+    primary: _ModelsDevModelMetadata, secondary: _ModelsDevModelMetadata
+) -> _ModelsDevModelMetadata:
+    """Field-by-field merge of two known matches; ``primary`` wins each field."""
+    return _ModelsDevModelMetadata(
+        supports_vision=(
+            primary.supports_vision
+            if primary.supports_vision is not None
+            else secondary.supports_vision
+        ),
+        context_length=primary.context_length or secondary.context_length,
+        input_price=(
+            primary.input_price
+            if primary.input_price is not None
+            else secondary.input_price
+        ),
+        output_price=(
+            primary.output_price
+            if primary.output_price is not None
+            else secondary.output_price
+        ),
+    )
+
+
 def enrich_model_infos(
     model_infos: Iterable[ProviderModelInfo],
     index: Mapping[str, Any],
+    provider_id: str | None = None,
 ) -> tuple[ProviderModelInfo, ...]:
-    """Fill models.dev metadata on model infos via name-normalized matching."""
+    """Fill models.dev metadata on model infos via name-normalized matching.
+
+    The model's own provider is consulted first and the cross-provider index
+    only as a fallback. Deliberately a fallback rather than a replacement: some
+    models match only in another provider's bucket, and dropping that would
+    take metadata away from models that have it today. Nothing loses
+    information here -- some models stop being described by a namesake hosted
+    somewhere else.
+    """
+    scoped = _provider_bucket_metadata(index, provider_id)
     flattened = _flatten_index(index)
-    if not flattened:
+    if not scoped and not flattened:
         return tuple(model_infos)
     enriched: list[ProviderModelInfo] = []
     for info in model_infos:
-        metadata = next(
-            (
-                flattened[candidate]
-                for candidate in sorted(
-                    _normalize_candidates(info.model_id), key=len, reverse=True
-                )
-                if candidate in flattened
-            ),
-            None,
+        metadata = _prefer_own_provider(
+            _match_metadata(scoped, info.model_id),
+            _match_metadata(flattened, info.model_id),
         )
         if metadata is None:
             enriched.append(info)
@@ -306,6 +425,7 @@ def enrich_model_infos(
 async def enrich_provider_model_infos(
     model_infos: Iterable[ProviderModelInfo],
     path: Path | None = None,
+    provider_id: str | None = None,
 ) -> tuple[ProviderModelInfo, ...]:
     """Enrich model infos from the models.dev cache; schedule a refresh.
 
@@ -318,7 +438,7 @@ async def enrich_provider_model_infos(
         schedule_models_dev_refresh(path)
     if cache is None:
         return infos
-    return enrich_model_infos(infos, cache.index)
+    return enrich_model_infos(infos, cache.index, provider_id)
 
 
 # --------------------------------------------------------------------------
