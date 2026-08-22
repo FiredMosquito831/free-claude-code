@@ -10,7 +10,7 @@ import sqlite3
 import threading
 import time
 from collections import OrderedDict
-from collections.abc import Iterator
+from collections.abc import Generator, Iterator
 from compression import zstd
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -1805,7 +1805,7 @@ class RequestLogStore:
         until: float | None = None,
         q: str | None = None,
         page_size: int = 1_000,
-    ) -> Iterator[dict[str, Any]]:
+    ) -> Generator[dict[str, Any]]:
         """Yield every matching row for an export, bypassing the 500-row page cap.
 
         Uses keyset pagination over ``(ts_epoch, id)`` instead of OFFSET so a
@@ -1814,6 +1814,11 @@ class RequestLogStore:
         ``finally`` so abandoning the generator mid-iteration leaks nothing).
         Bodies are decompressed only when ``need_bodies`` is true and a row
         actually references a stored blob.
+
+        Typed ``Generator`` rather than ``Iterator`` because ``close()`` is
+        part of the contract: a caller that stops early -- a bounded scan, an
+        aborted download -- calls it to run the ``finally`` above now, instead
+        of leaving the connection open until the garbage collector notices.
         """
         where, args = self._where(
             provider=provider,
