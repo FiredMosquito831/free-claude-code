@@ -301,6 +301,7 @@ class TestStepInstructionsAndTargets:
             "model_config",
             "messaging",
             "requests",
+            "optimizer",
             "web_search",
             "guide",
         }

@@ -13,6 +13,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
+from my_claude_code.api.optimization_handlers import OPTIMIZATION_RULE_SPECS
 from my_claude_code.application.model_metadata import ProviderModelRefreshResult
 from my_claude_code.application.release_updates import (
     get_release_status,
@@ -1489,6 +1490,79 @@ async def request_log_lifetime(
     result = await asyncio.to_thread(store.lifetime)
     result["enabled"] = True
     result["retained_rows_max"] = int(settings.request_log_max_rows)
+    return result
+
+
+@router.get("/admin/api/requests/optimization-stats")
+async def request_log_optimization_stats(
+    request: Request,
+    since: float | None = None,
+    until: float | None = None,
+    settings: Settings = Depends(get_settings),
+):
+    """Per-rule fire counts and tokens avoided, for the Token Optimizer page.
+
+    Every rule the proxy can apply appears here, including one that has never
+    matched: a rule missing from the list is indistinguishable from a rule that
+    does not exist, and "this has never fired" is a thing a reader needs told.
+    A rule that has never fired carries ``requests: 0`` and
+    ``tokens_saved: null`` -- the count is a real zero, the saving is unknown,
+    and the two are not the same claim.
+
+    ``enabled`` is the rule's live setting, so the state beside a number is the
+    state that produced it.
+    """
+    require_loopback_admin(request)
+    store = _request_log_store_or_none(settings)
+    specs = [
+        {
+            "rule": spec.rule,
+            "label": spec.label,
+            "description": spec.description,
+            "answer": spec.answer,
+            "env_key": spec.env_key,
+            "enabled": bool(getattr(settings, spec.settings_attr)),
+        }
+        for spec in OPTIMIZATION_RULE_SPECS
+    ]
+    if store is None:
+        return {"enabled": False, "rules": specs}
+    result = await asyncio.to_thread(store.optimization_stats, since=since, until=until)
+    measured = {row["rule"]: row for row in result.get("rules", [])}
+    merged: list[dict[str, Any]] = []
+    for spec in specs:
+        row = measured.pop(spec["rule"], None)
+        if row is None:
+            merged.append(
+                {
+                    **spec,
+                    "requests": 0,
+                    # Not 0: nothing was measured, so nothing is claimed.
+                    "tokens_saved": None,
+                    "tokens_reported": 0,
+                    "first_ts": None,
+                    "last_ts": None,
+                    "daily": [],
+                }
+            )
+            continue
+        merged.append({**spec, **row})
+    # Rules retired since the rows were written still hold real savings. They
+    # are reported, flagged as no longer present, and never silently dropped.
+    merged.extend(
+        {
+            "label": row["rule"],
+            "description": "This rule is no longer part of the proxy.",
+            "answer": None,
+            "env_key": None,
+            "enabled": None,
+            "retired": True,
+            **row,
+        }
+        for row in measured.values()
+    )
+    result["rules"] = merged
+    result["enabled"] = True
     return result
 
 

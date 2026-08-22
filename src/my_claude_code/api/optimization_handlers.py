@@ -43,6 +43,48 @@ class LocalOptimization:
     tokens_saved: int
 
 
+@dataclass(frozen=True, slots=True)
+class OptimizationRuleSpec:
+    """What a rule is, in the terms a reader of the dashboard needs.
+
+    ``answer`` is the literal string the proxy replies with, and the handler
+    below sends this exact attribute rather than a second copy of the text.
+    A page that showed one string while the wire carried another would be
+    worse than a page that showed nothing.
+    """
+
+    rule: str
+    label: str
+    description: str
+    answer: str
+    env_key: str
+    settings_attr: str
+
+
+TITLE_GENERATION_SKIP = OptimizationRuleSpec(
+    rule="title_generation_skip",
+    label="Title generation skip",
+    description="Claude Code asking a model to name your session.",
+    answer="Conversation",
+    env_key="ENABLE_TITLE_GENERATION_SKIP",
+    settings_attr="enable_title_generation_skip",
+)
+
+SUGGESTION_MODE_SKIP = OptimizationRuleSpec(
+    rule="suggestion_mode_skip",
+    label="Suggestion mode skip",
+    description="The suggested next message Claude Code offers you.",
+    answer="",
+    env_key="ENABLE_SUGGESTION_MODE_SKIP",
+    settings_attr="enable_suggestion_mode_skip",
+)
+
+OPTIMIZATION_RULE_SPECS: tuple[OptimizationRuleSpec, ...] = (
+    TITLE_GENERATION_SKIP,
+    SUGGESTION_MODE_SKIP,
+)
+
+
 def _answer(
     request_data: MessagesRequest,
     text: str,
@@ -87,8 +129,8 @@ def try_title_skip(
 
     return _answer(
         request_data,
-        "Conversation",
-        rule="title_generation_skip",
+        TITLE_GENERATION_SKIP.answer,
+        rule=TITLE_GENERATION_SKIP.rule,
         token_counter=token_counter,
     )
 
@@ -104,8 +146,8 @@ def try_suggestion_skip(
 
     return _answer(
         request_data,
-        "",
-        rule="suggestion_mode_skip",
+        SUGGESTION_MODE_SKIP.answer,
+        rule=SUGGESTION_MODE_SKIP.rule,
         token_counter=token_counter,
     )
 
@@ -121,10 +163,12 @@ OPTIMIZATION_HANDLERS: list[OptimizationHandler] = [
 ]
 
 # Every rule name this module can record, so a consumer can enumerate them
-# without importing the handlers or scraping strings out of the log.
-OPTIMIZATION_RULES: tuple[str, ...] = (
-    "title_generation_skip",
-    "suggestion_mode_skip",
+# without importing the handlers or scraping strings out of the log. Derived
+# from the specs rather than typed twice: a rule the registry does not describe
+# is a rule the dashboard cannot report on, and the two lists drifting apart is
+# exactly the failure that would hide it.
+OPTIMIZATION_RULES: tuple[str, ...] = tuple(
+    spec.rule for spec in OPTIMIZATION_RULE_SPECS
 )
 
 

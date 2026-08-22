@@ -34,6 +34,17 @@ LIMIT_KEYS = (
     "REQUEST_LOG_COMPRESSION_LEVEL",
     "REQUEST_LOG_QUEUE_MAX_SIZE",
     "LOG_LEVEL",
+)
+
+# Tool-result trimming and the two local skip rules moved to their own section
+# when the Token Optimizer page was added: they are one feature with one page,
+# and a setting rendered in two places is a setting that can be shown two
+# answers. They are still limits in spirit, so they keep the same guarantees --
+# editable, bound to a real setting, and defaulting to what the code defaults
+# to -- checked below against the section that now owns them.
+OPTIMIZER_KEYS = (
+    "ENABLE_TITLE_GENERATION_SKIP",
+    "ENABLE_SUGGESTION_MODE_SKIP",
     "ENABLE_TOOL_RESULT_TRIMMING",
     "TOOL_RESULT_TRIM_READ",
     "TOOL_RESULT_TRIM_GREP",
@@ -58,7 +69,28 @@ def test_every_limit_is_editable_and_bound_to_a_real_setting(key: str) -> None:
     assert hasattr(Settings(), attr), f"{key} points at a setting that does not exist"
 
 
-@pytest.mark.parametrize("key", LIMIT_KEYS)
+def test_there_is_an_optimizer_section() -> None:
+    assert any(section.section_id == "optimizer" for section in SECTIONS)
+
+
+@pytest.mark.parametrize("key", OPTIMIZER_KEYS)
+def test_every_optimizer_field_is_editable_and_bound_to_a_real_setting(
+    key: str,
+) -> None:
+    field = FIELD_BY_KEY[key]
+    assert field.section_id == "optimizer"
+    attr = field.settings_attr
+    assert attr, f"{key} has no settings attribute"
+    assert hasattr(Settings(), attr), f"{key} points at a setting that does not exist"
+
+
+def test_no_optimizer_field_is_orphaned() -> None:
+    """Every field in the section is listed above, so the list cannot rot."""
+    declared = {f.key for f in FIELDS if f.section_id == "optimizer"}
+    assert declared == set(OPTIMIZER_KEYS)
+
+
+@pytest.mark.parametrize("key", LIMIT_KEYS + OPTIMIZER_KEYS)
 def test_each_limit_default_matches_the_setting_default(key: str) -> None:
     """A form that shows a different default than the code uses is a lie."""
     field = FIELD_BY_KEY[key]

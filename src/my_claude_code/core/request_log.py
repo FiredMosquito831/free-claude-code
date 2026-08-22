@@ -49,6 +49,27 @@ _STATS_CACHE_MAX_ENTRIES = 64
 # distinct models does not return hundreds of rows on every poll.
 _BREAKDOWN_LIMIT = 50
 
+# A request answered by a local optimization rule never reached a provider, so
+# its ``provider`` column is NULL by design. Grouping it under "(unknown)" was
+# accurate about the column and wrong about the fact: we know exactly what
+# served it, and the ``optimization`` column names the rule. These two keys let
+# every provider-shaped surface -- breakdowns, filters, exports -- distinguish
+# "answered inside the proxy by this rule" from "we genuinely have no idea".
+LOCAL_PROVIDER_PREFIX = "local:"
+UNKNOWN_PROVIDER_KEY = "(unknown)"
+
+#: SQL producing the provider grouping key. Kept as one expression so the
+#: breakdown, the export dimension and the filter predicate cannot drift apart.
+PROVIDER_KEY_SQL = (
+    "CASE WHEN provider IS NOT NULL THEN provider"
+    f" WHEN optimization IS NOT NULL THEN '{LOCAL_PROVIDER_PREFIX}' || optimization"
+    f" ELSE '{UNKNOWN_PROVIDER_KEY}' END"
+)
+
+# Days of per-rule history the optimizer page plots. Fourteen daily buckets is
+# what a sparkline can carry legibly; the companion table shows the same rows.
+_OPTIMIZATION_SERIES_DAYS = 14
+
 # Columns read for list views. Body columns are deliberately excluded and
 # replaced by SQL-side ``substr`` previews so list queries never load full
 # request/response bodies into memory just to truncate them in Python.
@@ -1656,9 +1677,35 @@ class RequestLogStore:
             # Comma-separated values mean "any of these providers" (multi-select).
             providers = [part for part in provider.split(",") if part]
             if providers:
-                placeholders = ",".join("?" * len(providers))
-                clauses.append(f"provider IN ({placeholders})")
-                args.extend(providers)
+                # The breakdown emits synthetic keys for traffic that never had
+                # a provider (see ``PROVIDER_KEY_SQL``). Those keys are what a
+                # reader sees and therefore what they will filter by, so they
+                # have to resolve to a predicate rather than to ``IN`` against a
+                # column that is NULL for exactly those rows.
+                named = [
+                    part
+                    for part in providers
+                    if not part.startswith(LOCAL_PROVIDER_PREFIX)
+                    and part != UNKNOWN_PROVIDER_KEY
+                ]
+                alternatives: list[str] = []
+                named_args: list[Any] = []
+                local_args: list[Any] = []
+                if named:
+                    placeholders = ",".join("?" * len(named))
+                    alternatives.append(f"provider IN ({placeholders})")
+                    named_args.extend(named)
+                for part in providers:
+                    if part.startswith(LOCAL_PROVIDER_PREFIX):
+                        alternatives.append("(provider IS NULL AND optimization = ?)")
+                        local_args.append(part[len(LOCAL_PROVIDER_PREFIX) :])
+                    elif part == UNKNOWN_PROVIDER_KEY:
+                        alternatives.append(
+                            "(provider IS NULL AND optimization IS NULL)"
+                        )
+                clauses.append(f"({' OR '.join(alternatives)})")
+                args.extend(named_args)
+                args.extend(local_args)
         if key:
             clauses.append("key_label = ?")
             args.append(key)
@@ -2075,7 +2122,7 @@ class RequestLogStore:
             ).fetchone()
             percentiles = self._percentiles(conn, where, args, (0.50, 0.95))
             by_provider, by_provider_truncated = self._breakdown(
-                conn, "provider", where, args
+                conn, "provider", where, args, key_sql=PROVIDER_KEY_SQL
             )
             by_model, by_model_truncated = self._breakdown(
                 conn, "resolved_model", where, args
@@ -2181,6 +2228,95 @@ class RequestLogStore:
                 self._stats_cache.popitem(last=False)
         return dict(payload)
 
+    def optimization_stats(
+        self,
+        *,
+        since: float | None = None,
+        until: float | None = None,
+        days: int = _OPTIMIZATION_SERIES_DAYS,
+    ) -> dict[str, Any]:
+        """Aggregate what the local optimization rules actually did.
+
+        One row per rule that has ever fired in the window, plus a daily series
+        for the sparkline the optimizer page draws and the table underneath it.
+
+        ``tokens_saved`` is a sum of ``optimization_tokens_saved``, which rows
+        written before that column existed do not carry. ``tokens_reported``
+        counts the rows that did carry it, so a caller can tell "this rule saved
+        nothing" from "we stopped being able to say" instead of printing a
+        reassuring zero over the gap. Rules that exist but have never fired are
+        not invented here: the store reports what is in the log, and the caller
+        that knows the rule registry merges the rest in.
+        """
+        days = max(1, days)
+        where, args = self._where(since=since, until=until)
+        connector = " AND" if where else " WHERE"
+        with self._connection() as conn:
+            totals = conn.execute(
+                f"SELECT COUNT(*),"
+                " SUM(CASE WHEN optimization IS NOT NULL THEN 1 ELSE 0 END),"
+                " COALESCE(SUM(optimization_tokens_saved), 0)"
+                f" FROM requests{where}",
+                args,
+            ).fetchone()
+            rule_rows = conn.execute(
+                f"SELECT optimization AS rule, COUNT(*) AS requests,"
+                " COALESCE(SUM(optimization_tokens_saved), 0) AS tokens_saved,"
+                " SUM(CASE WHEN optimization_tokens_saved IS NOT NULL THEN 1 ELSE 0 END)"
+                " AS tokens_reported,"
+                " MIN(ts_epoch) AS first_ts, MAX(ts_epoch) AS last_ts"
+                f" FROM requests{where}{connector} optimization IS NOT NULL"
+                " GROUP BY rule ORDER BY requests DESC",
+                args,
+            ).fetchall()
+            series_rows = conn.execute(
+                "SELECT optimization AS rule,"
+                " strftime('%Y-%m-%d', ts_epoch, 'unixepoch') AS bucket,"
+                " COUNT(*) AS requests,"
+                " COALESCE(SUM(optimization_tokens_saved), 0) AS tokens_saved"
+                f" FROM requests{where}{connector} optimization IS NOT NULL"
+                " GROUP BY rule, bucket ORDER BY bucket DESC",
+                args,
+            ).fetchall()
+
+        daily: dict[str, list[dict[str, Any]]] = {}
+        for row in series_rows:
+            if row["bucket"] is None:
+                continue
+            buckets = daily.setdefault(row["rule"], [])
+            if len(buckets) >= days:
+                continue
+            buckets.append(
+                {
+                    "bucket": row["bucket"],
+                    "requests": int(row["requests"] or 0),
+                    "tokens_saved": int(row["tokens_saved"] or 0),
+                }
+            )
+        # Oldest first, so the sparkline reads left to right like a calendar.
+        for buckets in daily.values():
+            buckets.reverse()
+
+        return {
+            "window": {"since": since, "until": until},
+            "series_days": days,
+            "total_requests": int(totals[0] or 0),
+            "answered_locally": int(totals[1] or 0),
+            "tokens_saved": int(totals[2] or 0),
+            "rules": [
+                {
+                    "rule": row["rule"],
+                    "requests": int(row["requests"] or 0),
+                    "tokens_saved": int(row["tokens_saved"] or 0),
+                    "tokens_reported": int(row["tokens_reported"] or 0),
+                    "first_ts": row["first_ts"],
+                    "last_ts": row["last_ts"],
+                    "daily": daily.get(row["rule"], []),
+                }
+                for row in rule_rows
+            ],
+        }
+
     def pulse(
         self,
         *,
@@ -2217,15 +2353,24 @@ class RequestLogStore:
 
     @staticmethod
     def _breakdown(
-        conn: sqlite3.Connection, column: str, where: str, args: list[Any]
+        conn: sqlite3.Connection,
+        column: str,
+        where: str,
+        args: list[Any],
+        *,
+        key_sql: str | None = None,
     ) -> tuple[list[dict[str, Any]], bool]:
         """Return (rows, truncated) for a GROUP BY breakdown, capped at ``_BREAKDOWN_LIMIT``.
 
         Fetches one row past the cap to detect truncation without a second
         COUNT(DISTINCT ...) query, then trims it back off before returning.
+
+        ``key_sql`` overrides the grouping expression for a column whose NULLs
+        are not all the same fact -- provider being the case that needs it.
         """
+        key_expression = key_sql or f"COALESCE({column}, '{UNKNOWN_PROVIDER_KEY}')"
         cursor = conn.execute(
-            f"SELECT COALESCE({column}, '(unknown)') AS key, COUNT(*) AS requests,"
+            f"SELECT {key_expression} AS key, COUNT(*) AS requests,"
             " COALESCE(SUM(tokens_in),0) AS tokens_in,"
             " COALESCE(SUM(tokens_out),0) AS tokens_out,"
             " COALESCE(SUM(cache_read_tokens),0) AS cache_read_tokens,"

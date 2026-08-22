@@ -4920,3 +4920,373 @@ details.turn-pane > summary:focus-visible {
   font-family: var(--font-mono, ui-monospace, monospace);
   font-size: 10px;
 }
+
+/* ------------------------------------------------------------ token optimizer
+   A ledger: what you saved, what is saving it, what could save more. One
+   column, dense, nothing hidden behind a disclosure. Every colour here comes
+   from a token already defined at the top of this file -- an undefined
+   custom property with no fallback drops the whole declaration, and that
+   failure is silent. Semantic colour lands on borders, fills and pills, never
+   on body text: --warn as text measures 4.1:1 on the paper theme. */
+.opt-section {
+  margin-bottom: var(--space-4);
+}
+
+.opt-hint {
+  font-size: 12px;
+  color: var(--muted);
+  margin: var(--space-3) 0 0;
+}
+
+.opt-kpis {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(168px, 1fr));
+  gap: var(--space-3);
+}
+
+.opt-kpi {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: var(--space-3);
+}
+
+.opt-kpi-label {
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.opt-kpi-value {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 22px;
+  font-weight: 600;
+  color: var(--text-strong);
+  margin-top: 2px;
+}
+
+.opt-kpi-sub {
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: 2px;
+}
+
+/* An unknown number is greyed so it never reads as a measured one. */
+.opt-kpi-unknown .opt-kpi-value {
+  color: var(--muted);
+}
+
+.opt-scroll {
+  overflow-x: auto;
+}
+
+.opt-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.opt-table th {
+  text-align: left;
+  font-weight: 500;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--line-strong);
+  white-space: nowrap;
+}
+
+.opt-table td {
+  padding: var(--space-3);
+  border-bottom: 1px solid var(--line);
+  vertical-align: top;
+}
+
+.opt-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.opt-table tbody tr:hover {
+  background: var(--card);
+}
+
+.opt-table .opt-r {
+  text-align: right;
+}
+
+.opt-num {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.opt-rule-name {
+  font-weight: 600;
+  color: var(--text-strong);
+}
+
+.opt-sub {
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: 2px;
+}
+
+.opt-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  padding: 3px 8px;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--neutral-border);
+  background: var(--neutral-bg);
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.opt-pill-on {
+  border-color: var(--ok-border);
+  background: var(--ok-bg);
+  color: var(--ok);
+}
+
+.opt-pill-warn {
+  border-color: var(--warn-border);
+  background: var(--warn-bg);
+  color: var(--warn);
+}
+
+.opt-pill-info {
+  border-color: var(--reasoning-border);
+  background: var(--reasoning-bg);
+  color: var(--info);
+}
+
+.opt-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius-full);
+  background: currentColor;
+  flex: 0 0 auto;
+}
+
+/* Three-state segmented control. The selected button is a neutral raised
+   surface with an accent underline, never an accent fill: a full fill
+   recolours per theme and stops reading as "selected" at all. */
+.opt-seg {
+  display: inline-flex;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.opt-seg button {
+  background: transparent;
+  border: 0;
+  color: var(--muted);
+  padding: 5px 11px;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  border-right: 1px solid var(--line);
+  transition:
+    background var(--transition-fast),
+    color var(--transition-fast);
+}
+
+.opt-seg button:last-child {
+  border-right: 0;
+}
+
+.opt-seg button:hover:not(:disabled) {
+  background: var(--card-hover);
+  color: var(--text);
+}
+
+.opt-seg button[aria-pressed="true"] {
+  background: var(--panel-strong);
+  color: var(--text-strong);
+  font-weight: 600;
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+
+.opt-seg button[aria-pressed="true"][data-state="observe"] {
+  box-shadow: inset 0 -2px 0 var(--info);
+}
+
+.opt-seg button[aria-pressed="true"][data-state="off"],
+.opt-seg button[aria-pressed="true"][data-state="false"] {
+  box-shadow: inset 0 -2px 0 var(--neutral);
+}
+
+.opt-seg button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.opt-master {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  border: 1px solid var(--warn-border);
+  background: var(--warn-bg);
+  border-radius: var(--radius-md);
+  padding: var(--space-3) var(--space-4);
+  margin-bottom: var(--space-4);
+}
+
+.opt-master-title {
+  font-weight: 600;
+  color: var(--text-strong);
+}
+
+.opt-master-detail {
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: 2px;
+  max-width: 62ch;
+}
+
+.opt-switch {
+  position: relative;
+  width: 40px;
+  height: 22px;
+  border-radius: var(--radius-full);
+  background: var(--neutral-bg);
+  border: 1px solid var(--neutral-border);
+  flex: 0 0 auto;
+  cursor: pointer;
+  transition:
+    background var(--transition-fast),
+    border-color var(--transition-fast);
+}
+
+.opt-switch::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: var(--radius-full);
+  background: var(--muted);
+  transition:
+    transform var(--transition-fast),
+    background var(--transition-fast);
+}
+
+.opt-switch[aria-pressed="true"] {
+  background: var(--ok-bg);
+  border-color: var(--ok-border);
+}
+
+.opt-switch[aria-pressed="true"]::after {
+  transform: translateX(18px);
+  background: var(--ok);
+}
+
+/* The raw manifest control stays in the document -- changedValues() walks
+   [data-key] and a detached input is silently never saved -- but it is not
+   shown and not focusable, so there is one visible control per setting. */
+.opt-proxied-field {
+  display: none;
+}
+
+.opt-spark {
+  display: block;
+  width: 140px;
+  height: 34px;
+}
+
+.opt-spark rect {
+  fill: var(--accent);
+  opacity: 0.55;
+}
+
+.opt-spark rect.opt-spark-hi {
+  opacity: 1;
+}
+
+.opt-data {
+  margin-top: var(--space-2);
+}
+
+.opt-data summary {
+  font-size: 12px;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.opt-data table {
+  margin-top: var(--space-2);
+}
+
+.opt-bar {
+  height: 6px;
+  border-radius: var(--radius-sm);
+  background: var(--line-strong);
+  overflow: hidden;
+  min-width: 70px;
+}
+
+.opt-bar i {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+}
+
+.opt-bar i.opt-bar-low {
+  background: var(--warn);
+}
+
+.opt-empty {
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--radius-sm);
+  padding: var(--space-4);
+  text-align: center;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.opt-note {
+  border: 1px solid var(--warn-border);
+  background: var(--warn-bg);
+  border-radius: var(--radius-md);
+  padding: var(--space-3) var(--space-4);
+  margin-top: var(--space-4);
+  font-size: 13px;
+  color: var(--text);
+}
+
+.opt-note strong {
+  color: var(--text-strong);
+}
+
+.opt-note table {
+  margin-top: var(--space-3);
+}
+
+.opt-note-icon {
+  vertical-align: -2px;
+  margin-right: var(--space-1);
+  color: var(--warn);
+}
+
+@media (max-width: 720px) {
+  .opt-master {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}
+
+.opt-note-heading {
+  margin: 0;
+}
+
+.opt-note-body {
+  margin: var(--space-2) 0 0;
+}

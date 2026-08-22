@@ -57,7 +57,13 @@ _MARKUP_ID = re.compile(r"""\bid=["']([^"']+)["']""")
 # hide exactly the defect this guard exists to catch, so keep it empty
 # unless you can point at the `createElement` + `id = "..."` (or
 # `.id = ...`) call.
-KNOWN_DYNAMIC_ONLY_IDS: set[str] = set()
+KNOWN_DYNAMIC_ONLY_IDS: set[str] = {
+    # Created by renderOptimizerSettings() in admin.js -- the heading note for
+    # the per-tool trimming rules, whose text depends on the master switch.
+    # It lives inside the section the settings renderer builds, so it cannot
+    # be declared in index.html: that container is emptied on every render.
+    "optPerToolNote",
+}
 
 
 def _js_id_lookups() -> set[str]:
