@@ -22,6 +22,7 @@ from my_claude_code.core.failures import (
 def test_failure_kind_has_only_protocol_neutral_semantics() -> None:
     assert tuple(FailureKind) == (
         FailureKind.INVALID_REQUEST,
+        FailureKind.CONTEXT_LENGTH,
         FailureKind.AUTHENTICATION,
         FailureKind.PERMISSION,
         FailureKind.RATE_LIMIT,
@@ -32,6 +33,7 @@ def test_failure_kind_has_only_protocol_neutral_semantics() -> None:
     )
     assert tuple(kind.value for kind in FailureKind) == (
         "invalid_request",
+        "context_length",
         "authentication",
         "permission",
         "rate_limit",

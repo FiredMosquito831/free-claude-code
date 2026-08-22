@@ -8,11 +8,16 @@ import httpx
 import openai
 import pytest
 
+from my_claude_code.core.anthropic.errors import (
+    anthropic_error_type_for_failure,
+    anthropic_status_for_error_type,
+)
 from my_claude_code.core.diagnostics import (
     ERROR_DETAIL_DISPLAY_CAP_BYTES,
     attach_upstream_error_body,
 )
 from my_claude_code.core.failures import ExecutionFailure, FailureKind
+from my_claude_code.core.openai_responses.errors import openai_error_type_for_failure
 from my_claude_code.providers.failure_policy import classify_provider_failure
 
 
@@ -373,3 +378,101 @@ def test_attached_streamed_error_body_remains_bounded() -> None:
 
     assert f"truncated after {ERROR_DETAIL_DISPLAY_CAP_BYTES} bytes" in failure.message
     assert "x" * 100 in failure.message
+
+
+# The three upstream wordings measured on 153,198 production requests: half of
+# every `invalid_request` failure was one of these, and each ended a route that
+# had a configured fallback chain sitting unused.
+_NIM_CONTEXT_OVERFLOW = (
+    "This model's maximum context length is 262144 tokens. However, your "
+    "messages resulted in 262294 tokens. Please reduce the length of the messages."
+)
+_NOUS_CONTEXT_OVERFLOW = (
+    "This request is not valid. Check the model name and other parameters. "
+    "Additional info: This endpoint's maximum context length is 262144 tokens. "
+    "However, you requested about 266577 tokens (165073 of text input, 37504 of "
+    "tool input, 64000 in the output). Please reduce the length of either one, "
+    "or use the context-compression plugin to compress your prompt automatically."
+)
+_OPENROUTER_CONTEXT_OVERFLOW = (
+    "This endpoint's maximum context length is 256000 tokens. However, you "
+    "requested about 256487 tokens (151032 of text input, 41455 of tool input, "
+    "64000 in the output). Please reduce the length of either one, or use the "
+    "context-compression plugin to compress your prompt automatically."
+)
+
+
+def _classify(error: Exception) -> ExecutionFailure:
+    return classify_provider_failure(
+        error,
+        provider_name="OPENROUTER",
+        read_timeout_s=30.0,
+        request_id=None,
+        mark_rate_limited=Mock(),
+    )
+
+
+@pytest.mark.parametrize(
+    ("vendor", "message"),
+    (
+        ("nvidia_nim", _NIM_CONTEXT_OVERFLOW),
+        ("nous_portal", _NOUS_CONTEXT_OVERFLOW),
+        ("open_router", _OPENROUTER_CONTEXT_OVERFLOW),
+    ),
+)
+def test_a_context_overflow_400_is_not_a_malformed_request(vendor, message) -> None:
+    """Every vendor spells it differently; none of them means "the body is wrong"."""
+    sdk = _classify(
+        _openai_status_error(openai.BadRequestError, status_code=400, message=message)
+    )
+    raw = _classify(_http_status_error(400, message))
+
+    for failure in (sdk, raw):
+        assert failure.kind is FailureKind.CONTEXT_LENGTH, vendor
+        assert failure.status_code == 400, vendor
+        # Not retryable: the same model rejects the same body again. This flag
+        # is about reusing the credential, not about the fallback chain.
+        assert failure.retryable is False, vendor
+
+
+@pytest.mark.parametrize(
+    ("vendor", "message", "requested", "limit"),
+    (
+        ("nvidia_nim", _NIM_CONTEXT_OVERFLOW, "262294", "262144"),
+        ("nous_portal", _NOUS_CONTEXT_OVERFLOW, "266577", "262144"),
+        ("open_router", _OPENROUTER_CONTEXT_OVERFLOW, "256487", "256000"),
+    ),
+)
+def test_a_context_overflow_names_both_numbers(
+    vendor, message, requested, limit
+) -> None:
+    """ "Needed 256487, this model holds 256000" is the whole diagnosis."""
+    failure = _classify(_http_status_error(400, message))
+
+    assert f"Needed about {requested} tokens" in failure.message, vendor
+    assert f"this model holds {limit}" in failure.message, vendor
+
+
+def test_an_ordinary_malformed_request_still_ends_the_route() -> None:
+    """The narrow match is the point: a real 400 must keep aborting the chain."""
+    for error in (
+        _openai_status_error(
+            openai.BadRequestError,
+            status_code=400,
+            message="messages: field required",
+        ),
+        _http_status_error(400, "Unsupported value for parameter 'temperature'."),
+    ):
+        failure = _classify(error)
+        assert failure.kind is FailureKind.INVALID_REQUEST
+        assert failure.status_code == 400
+        assert failure.retryable is False
+
+
+def test_a_context_overflow_still_serializes_on_both_wire_protocols() -> None:
+    """A new kind missing from a wire map is a KeyError at the commit boundary."""
+    failure = _classify(_http_status_error(400, _OPENROUTER_CONTEXT_OVERFLOW))
+
+    assert anthropic_error_type_for_failure(failure) == "invalid_request_error"
+    assert anthropic_status_for_error_type("invalid_request_error") == 400
+    assert openai_error_type_for_failure(failure) == "invalid_request_error"

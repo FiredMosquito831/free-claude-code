@@ -58,6 +58,7 @@ FALLBACK_SKIP_KINDS_DEFAULT = "invalid_request"
 FAILURE_KIND_NAMES: frozenset[str] = frozenset(
     {
         "invalid_request",
+        "context_length",
         "authentication",
         "permission",
         "rate_limit",

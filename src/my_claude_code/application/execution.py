@@ -111,6 +111,9 @@ class RouteExecutionPolicy:
     # A malformed request is the caller's, not the model's: the same body
     # fails identically everywhere, so walking a three-model chain buys three
     # round trips to the same 400. Empty means fall back on everything.
+    # A context overflow is deliberately *not* here: it is also a 400, but it
+    # is a property of this model's window, which is exactly what a chain of
+    # differently-sized models can answer. It classifies as CONTEXT_LENGTH.
     skip_kinds: frozenset[FailureKind] = frozenset({FailureKind.INVALID_REQUEST})
 
 
@@ -561,10 +564,18 @@ class ProviderExecutor:
         """Whether this failure means no other model would do better.
 
         Only kinds the operator has listed. The default is the malformed
-        request: the same body fails identically on every model, so a chain
-        turns one fast 400 into three slow ones. Everything else -- timeout,
-        upstream, rate_limit, overloaded, authentication -- is a property of
-        the model or the moment, which is what a chain exists for.
+        request: the body itself is wrong, so it fails identically on every
+        model and a chain turns one fast 400 into three of them. Everything
+        else -- timeout, upstream, rate_limit, overloaded, authentication --
+        is a property of the model or the moment, which is what a chain is for.
+
+        A context overflow arrives as a 400 too, and used to be swallowed by
+        this default because both classified as ``invalid_request``. It is a
+        property of *this* model's window, not of the body: the request that
+        overflows 256k fits 1M. It is now its own ``CONTEXT_LENGTH`` kind and
+        is deliberately absent from the default, so the chain gets its turn.
+        An operator who prefers the old abort can put ``context_length`` back
+        via ``FALLBACK_SKIP_KINDS``.
         """
         if not self._policy.skip_kinds:
             return False
