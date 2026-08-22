@@ -578,14 +578,9 @@ class Settings(BaseSettings):
         validation_alias="HTTP_CONNECT_TIMEOUT",
     )
 
-    # ==================== Fast Prefix Detection ====================
-    fast_prefix_detection: bool = True
-
     # ==================== Optimizations ====================
-    enable_network_probe_mock: bool = True
     enable_title_generation_skip: bool = True
     enable_suggestion_mode_skip: bool = True
-    enable_filepath_extraction_mock: bool = True
 
     # ==================== Local web server tools (web_search / web_fetch) ====================
     # On by default to match the shipped env template (env.example) and the

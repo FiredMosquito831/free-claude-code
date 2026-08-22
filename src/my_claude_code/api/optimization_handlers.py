@@ -22,11 +22,7 @@ from my_claude_code.core.anthropic import (
     count_text_tokens,
 )
 
-from .command_utils import extract_command_prefix, extract_filepaths_from_command
 from .detection import (
-    is_filepath_extraction_request,
-    is_prefix_detection_request,
-    is_quota_check_request,
     is_suggestion_mode_request,
     is_title_generation_request,
 )
@@ -80,42 +76,6 @@ def _answer(
     )
 
 
-def try_prefix_detection(
-    request_data: MessagesRequest, settings: Settings, token_counter: TokenCounter
-) -> LocalOptimization | None:
-    """Fast prefix detection - return command prefix without API call."""
-    if not settings.fast_prefix_detection:
-        return None
-
-    is_prefix_req, command = is_prefix_detection_request(request_data)
-    if not is_prefix_req:
-        return None
-
-    return _answer(
-        request_data,
-        extract_command_prefix(command),
-        rule="prefix_detection",
-        token_counter=token_counter,
-    )
-
-
-def try_quota_mock(
-    request_data: MessagesRequest, settings: Settings, token_counter: TokenCounter
-) -> LocalOptimization | None:
-    """Mock quota probe requests."""
-    if not settings.enable_network_probe_mock:
-        return None
-    if not is_quota_check_request(request_data):
-        return None
-
-    return _answer(
-        request_data,
-        "Quota check passed.",
-        rule="quota_mock",
-        token_counter=token_counter,
-    )
-
-
 def try_title_skip(
     request_data: MessagesRequest, settings: Settings, token_counter: TokenCounter
 ) -> LocalOptimization | None:
@@ -150,46 +110,21 @@ def try_suggestion_skip(
     )
 
 
-def try_filepath_mock(
-    request_data: MessagesRequest, settings: Settings, token_counter: TokenCounter
-) -> LocalOptimization | None:
-    """Mock filepath extraction requests."""
-    if not settings.enable_filepath_extraction_mock:
-        return None
-
-    is_fp, cmd, output = is_filepath_extraction_request(request_data)
-    if not is_fp:
-        return None
-
-    return _answer(
-        request_data,
-        extract_filepaths_from_command(cmd, output),
-        rule="filepath_extraction_mock",
-        token_counter=token_counter,
-    )
-
-
 OptimizationHandler = Callable[
     [MessagesRequest, Settings, TokenCounter], LocalOptimization | None
 ]
 
 # Cheapest/most common optimizations first for faster short-circuit.
 OPTIMIZATION_HANDLERS: list[OptimizationHandler] = [
-    try_quota_mock,
-    try_prefix_detection,
     try_title_skip,
     try_suggestion_skip,
-    try_filepath_mock,
 ]
 
 # Every rule name this module can record, so a consumer can enumerate them
 # without importing the handlers or scraping strings out of the log.
 OPTIMIZATION_RULES: tuple[str, ...] = (
-    "quota_mock",
-    "prefix_detection",
     "title_generation_skip",
     "suggestion_mode_skip",
-    "filepath_extraction_mock",
 )
 
 

@@ -1,7 +1,7 @@
 """Request detection utilities for API optimizations.
 
-Detects quota checks, title generation, prefix detection, safety classifier,
-suggestion mode, and filepath extraction requests to enable targeted handling.
+Detects title generation, safety classifier, and suggestion mode requests to
+enable targeted handling.
 """
 
 from my_claude_code.core.anthropic import (
@@ -9,18 +9,6 @@ from my_claude_code.core.anthropic import (
     MessagesRequest,
     extract_text_from_content,
 )
-
-
-def _single_user_turn(request_data: MessagesRequest) -> Message | None:
-    """Return the sole conversational user turn, ignoring system context."""
-    user_turn: Message | None = None
-    for message in request_data.messages:
-        if message.role == "system":
-            continue
-        if message.role != "user" or user_turn is not None:
-            return None
-        user_turn = message
-    return user_turn
 
 
 def _request_system_text(request_data: MessagesRequest) -> str:
@@ -37,19 +25,6 @@ def _request_system_text(request_data: MessagesRequest) -> str:
         if text:
             parts.append(text)
     return "\n".join(parts)
-
-
-def is_quota_check_request(request_data: MessagesRequest) -> bool:
-    """Check if this is a quota probe request.
-
-    Quota checks are typically simple requests with max_tokens=1
-    and a single message containing the word "quota".
-    """
-    message = _single_user_turn(request_data)
-    if request_data.max_tokens != 1 or message is None:
-        return False
-    text = extract_text_from_content(message.content)
-    return "quota" in text.lower()
 
 
 def is_title_generation_request(request_data: MessagesRequest) -> bool:
@@ -71,31 +46,6 @@ def is_title_generation_request(request_data: MessagesRequest) -> bool:
         and "field" in system_text
         and ("coding session" in system_text or "this session" in system_text)
     )
-
-
-def is_prefix_detection_request(request_data: MessagesRequest) -> tuple[bool, str]:
-    """Check if this is a fast prefix detection request.
-
-    Prefix detection requests contain a policy_spec block and
-    a Command: section for extracting shell command prefixes.
-
-    Returns:
-        Tuple of (is_prefix_request, command_string)
-    """
-    message = _single_user_turn(request_data)
-    if message is None:
-        return False, ""
-
-    content = extract_text_from_content(message.content)
-
-    if "<policy_spec>" in content and "Command:" in content:
-        try:
-            cmd_start = content.rfind("Command:") + len("Command:")
-            return True, content[cmd_start:].strip()
-        except TypeError:
-            return False, ""
-
-    return False, ""
 
 
 def is_safety_classifier_request(request_data: MessagesRequest) -> bool:
@@ -136,53 +86,3 @@ def is_suggestion_mode_request(request_data: MessagesRequest) -> bool:
     if last_user_turn is None:
         return False
     return "[SUGGESTION MODE:" in extract_text_from_content(last_user_turn.content)
-
-
-def is_filepath_extraction_request(
-    request_data: MessagesRequest,
-) -> tuple[bool, str, str]:
-    """Check if this is a filepath extraction request.
-
-    Filepath extraction requests have a single user message with
-    "Command:" and "Output:" sections, asking to extract file paths
-    from command output.
-
-    Returns:
-        Tuple of (is_filepath_request, command, output)
-    """
-    message = _single_user_turn(request_data)
-    if message is None:
-        return False, "", ""
-    if request_data.tools:
-        return False, "", ""
-
-    content = extract_text_from_content(message.content)
-
-    if "Command:" not in content or "Output:" not in content:
-        return False, "", ""
-
-    # Match if user content OR system block indicates filepath extraction
-    user_has_filepaths = (
-        "filepaths" in content.lower() or "<filepaths>" in content.lower()
-    )
-    system_text = _request_system_text(request_data)
-    system_has_extract = (
-        "extract any file paths" in system_text.lower()
-        or "file paths that this command" in system_text.lower()
-    )
-    if not user_has_filepaths and not system_has_extract:
-        return False, "", ""
-
-    cmd_start = content.find("Command:") + len("Command:")
-    output_marker = content.find("Output:", cmd_start)
-    if output_marker == -1:
-        return False, "", ""
-
-    command = content[cmd_start:output_marker].strip()
-    output = content[output_marker + len("Output:") :].strip()
-
-    for marker in ["<", "\n\n"]:
-        if marker in output:
-            output = output.split(marker)[0].strip()
-
-    return True, command, output
