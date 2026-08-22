@@ -16,10 +16,37 @@ That is also why this module is dangerous, and why it is built the way it is:
   ``tool_use_id`` resolves to exactly one of :data:`TRIMMABLE_TOOL_NAMES`. An
   unmatched id, a duplicated id, an error result, or any content shape this
   module does not fully understand is left byte-for-byte alone.
-* **The transform is deterministic.** The same result trims to the same bytes on
-  every turn, so a conversation prefix stays stable and Anthropic prompt caching
-  keeps hitting after the one turn on which a result first crosses the
-  threshold.
+* **The transform is deterministic** -- the same result trims to the same bytes
+  every time -- but per-request determinism is NOT cross-request prefix
+  stability, and an earlier version of this docstring wrongly claimed it was.
+
+  A result changes on TWO occasions, not one: when it first crosses the
+  threshold, and again when it ages out of ``protect_recent_results``. The
+  second is the expensive one, because it rewrites bytes in the middle of an
+  already-established prefix.
+
+  Measured over a 24-turn session against a stub modelling prefix caching,
+  with the same sign at cache-block granularity 1, 128 and 1024::
+
+      protect_recent        fresh tokens   cache hit   chars removed
+      ---------------------------------------------------------------
+      0                           72,897       91.9%      15,024,408
+      1                          486,278       62.5%      13,781,644
+      2 (shipped default)        521,860       69.1%      12,561,418
+      4                          955,949       59.8%      10,409,077
+      trimming off               470,648       91.8%               0
+
+  The shipped default therefore costs **10.9% more fresh input tokens than
+  not trimming at all**, and switching it on mid-conversation costs one
+  near-total cache miss (3.8% hit on that turn). Break-even is a baseline hit
+  rate of ~90.9%: below it trimming wins, above it trimming loses.
+
+  At ``protect_recent_results=0`` every turn matches its predecessor's prefix
+  exactly and fresh tokens fall 84.5%, because a result is then trimmed the
+  moment it appears and never mutates again. That default was deliberately
+  NOT changed: it means the model never sees the full text of the read it
+  just issued, and that answer-quality cost is unmeasured. Cache numbers
+  alone do not justify it.
 
 Policy -- which rules run, and at what size -- is decided in ``config`` and
 handed in as :class:`ToolResultTrimPolicy`. This module owns only the protocol
