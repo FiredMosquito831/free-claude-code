@@ -47,7 +47,7 @@ class TestSettings:
         assert isinstance(settings.provider_rate_limit, int)
         assert isinstance(settings.provider_rate_window, int)
         assert isinstance(settings.nim.temperature, float)
-        assert isinstance(settings.fast_prefix_detection, bool)
+        assert isinstance(settings.enable_title_generation_skip, bool)
         assert settings.reasoning_policy is ReasoningPreference.CLIENT
         assert settings.http_read_timeout == 120.0
         assert settings.http_connect_timeout == HTTP_CONNECT_TIMEOUT_DEFAULT

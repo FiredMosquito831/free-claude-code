@@ -5,10 +5,7 @@ from unittest.mock import patch
 from my_claude_code.api.optimization_handlers import (
     OPTIMIZATION_HANDLERS,
     OPTIMIZATION_RULES,
-    try_filepath_mock,
     try_optimizations,
-    try_prefix_detection,
-    try_quota_mock,
     try_suggestion_skip,
     try_title_skip,
 )
@@ -30,80 +27,6 @@ def _make_request(
         max_tokens=max_tokens if max_tokens is not None else 100,
         messages=[Message(role="user", content=messages_content)],
     )
-
-
-class TestTryPrefixDetection:
-    def test_disabled_returns_none(self):
-        settings = Settings()
-        settings.fast_prefix_detection = False
-        req = _make_request("x")
-        with patch(
-            "my_claude_code.api.optimization_handlers.is_prefix_detection_request",
-            return_value=(True, "/ask"),
-        ):
-            assert try_prefix_detection(req, settings, get_token_count) is None
-
-    def test_enabled_and_match_returns_response(self):
-        settings = Settings()
-        settings.fast_prefix_detection = True
-        req = _make_request("x")
-        with (
-            patch(
-                "my_claude_code.api.optimization_handlers.is_prefix_detection_request",
-                return_value=(True, "/ask"),
-            ),
-            patch(
-                "my_claude_code.api.optimization_handlers.extract_command_prefix",
-                return_value="/ask",
-            ),
-            patch(
-                "my_claude_code.api.optimization_handlers.logger.info"
-            ) as mock_log_info,
-        ):
-            result = try_prefix_detection(req, settings, get_token_count)
-        assert result is not None
-        block = result.response.content[0]
-        assert isinstance(block, ContentBlockText)
-        assert block.text == "/ask"
-        mock_log_info.assert_called_once_with(
-            "Optimization: {} answered locally", "prefix_detection"
-        )
-
-    def test_enabled_but_no_match_returns_none(self):
-        settings = Settings()
-        settings.fast_prefix_detection = True
-        req = _make_request("x")
-        with patch(
-            "my_claude_code.api.optimization_handlers.is_prefix_detection_request",
-            return_value=(False, ""),
-        ):
-            assert try_prefix_detection(req, settings, get_token_count) is None
-
-
-class TestTryQuotaMock:
-    def test_disabled_returns_none(self):
-        settings = Settings()
-        settings.enable_network_probe_mock = False
-        req = _make_request("quota", max_tokens=1)
-        with patch(
-            "my_claude_code.api.optimization_handlers.is_quota_check_request",
-            return_value=True,
-        ):
-            assert try_quota_mock(req, settings, get_token_count) is None
-
-    def test_enabled_and_match_returns_response(self):
-        settings = Settings()
-        settings.enable_network_probe_mock = True
-        req = _make_request("quota", max_tokens=1)
-        with patch(
-            "my_claude_code.api.optimization_handlers.is_quota_check_request",
-            return_value=True,
-        ):
-            result = try_quota_mock(req, settings, get_token_count)
-        assert result is not None
-        block = result.response.content[0]
-        assert isinstance(block, ContentBlockText)
-        assert "Quota check passed" in block.text
 
 
 class TestTryTitleSkip:
@@ -158,82 +81,28 @@ class TestTrySuggestionSkip:
         assert block.text == ""
 
 
-class TestTryFilepathMock:
-    def test_disabled_returns_none(self):
-        settings = Settings()
-        settings.enable_filepath_extraction_mock = False
-        req = _make_request("Command:\nls\nOutput:\nfilepaths")
-        with patch(
-            "my_claude_code.api.optimization_handlers.is_filepath_extraction_request",
-            return_value=(True, "ls", "out"),
-        ):
-            assert try_filepath_mock(req, settings, get_token_count) is None
-
-    def test_enabled_and_match_returns_response(self):
-        settings = Settings()
-        settings.enable_filepath_extraction_mock = True
-        req = _make_request("x")
-        with (
-            patch(
-                "my_claude_code.api.optimization_handlers.is_filepath_extraction_request",
-                return_value=(True, "ls", "a.txt b.txt"),
-            ),
-            patch(
-                "my_claude_code.api.optimization_handlers.extract_filepaths_from_command",
-                return_value="a.txt\nb.txt",
-            ),
-        ):
-            result = try_filepath_mock(req, settings, get_token_count)
-        assert result is not None
-        block = result.response.content[0]
-        assert isinstance(block, ContentBlockText)
-        assert block.text == "a.txt\nb.txt"
-
-    def test_extract_filepaths_empty_list_still_returns_response(self):
-        settings = Settings()
-        settings.enable_filepath_extraction_mock = True
-        req = _make_request("x")
-        with (
-            patch(
-                "my_claude_code.api.optimization_handlers.is_filepath_extraction_request",
-                return_value=(True, "ls", "out"),
-            ),
-            patch(
-                "my_claude_code.api.optimization_handlers.extract_filepaths_from_command",
-                return_value="",
-            ),
-        ):
-            result = try_filepath_mock(req, settings, get_token_count)
-        assert result is not None
-        block = result.response.content[0]
-        assert isinstance(block, ContentBlockText)
-        assert block.text == ""
-
-
 class TestTryOptimizations:
     def test_first_match_wins(self):
-        """Quota mock is first in OPTIMIZATION_HANDLERS; it should win over prefix."""
+        """Title skip is first in OPTIMIZATION_HANDLERS; it should win."""
         settings = Settings()
-        settings.enable_network_probe_mock = True
-        settings.fast_prefix_detection = True
-        req = _make_request("quota", max_tokens=1)
+        settings.enable_title_generation_skip = True
+        settings.enable_suggestion_mode_skip = True
+        req = _make_request("[SUGGESTION MODE: on]")
         with patch(
-            "my_claude_code.api.optimization_handlers.is_quota_check_request",
+            "my_claude_code.api.optimization_handlers.is_title_generation_request",
             return_value=True,
         ):
             result = try_optimizations(req, settings, get_token_count)
         assert result is not None
+        assert result.rule == "title_generation_skip"
         block = result.response.content[0]
         assert isinstance(block, ContentBlockText)
-        assert "Quota check passed" in block.text
+        assert block.text == "Conversation"
 
     def test_no_match_returns_none(self):
         settings = Settings()
-        settings.fast_prefix_detection = False
-        settings.enable_network_probe_mock = False
         settings.enable_title_generation_skip = False
         settings.enable_suggestion_mode_skip = False
-        settings.enable_filepath_extraction_mock = False
         req = _make_request("random user message")
         assert try_optimizations(req, settings, get_token_count) is None
 

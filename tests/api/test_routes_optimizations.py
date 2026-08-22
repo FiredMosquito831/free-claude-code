@@ -20,59 +20,8 @@ def client():
 @pytest.fixture
 def mock_settings():
     settings = Settings()
-    settings.fast_prefix_detection = True
-    settings.enable_network_probe_mock = True
     settings.enable_title_generation_skip = True
     return settings
-
-
-def test_create_message_fast_prefix_detection(client, mock_settings):
-    app.dependency_overrides[get_settings] = lambda: mock_settings
-
-    payload = {
-        "model": "claude-3-sonnet",
-        "max_tokens": 100,
-        "messages": [{"role": "user", "content": "What is the prefix?"}],
-    }
-
-    with (
-        patch(
-            "my_claude_code.api.optimization_handlers.is_prefix_detection_request",
-            return_value=(True, "/ask"),
-        ),
-        patch(
-            "my_claude_code.api.optimization_handlers.extract_command_prefix",
-            return_value="/ask",
-        ),
-    ):
-        response = client.post("/v1/messages", json=payload)
-
-    assert response.status_code == 200
-    data = response.json()
-    assert "/ask" in data["content"][0]["text"]
-
-    app.dependency_overrides.clear()
-
-
-def test_create_message_quota_check_mock(client, mock_settings):
-    app.dependency_overrides[get_settings] = lambda: mock_settings
-
-    payload = {
-        "model": "claude-3-sonnet",
-        "max_tokens": 100,
-        "messages": [{"role": "user", "content": "quota check"}],
-    }
-
-    with patch(
-        "my_claude_code.api.optimization_handlers.is_quota_check_request",
-        return_value=True,
-    ):
-        response = client.post("/v1/messages", json=payload)
-
-    assert response.status_code == 200
-    assert "Quota check passed" in response.json()["content"][0]["text"]
-
-    app.dependency_overrides.clear()
 
 
 def test_create_message_title_generation_skip(client, mock_settings):

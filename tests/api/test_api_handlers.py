@@ -489,7 +489,7 @@ async def test_messages_handler_optimization_intercepts_before_provider_executio
         messages=[Message(role="user", content="quota check")],
     )
     optimized = LocalOptimization(
-        rule="quota_mock",
+        rule="title_generation_skip",
         response=MessagesResponse(
             id="msg_test",
             model=request.model,
