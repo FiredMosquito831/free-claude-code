@@ -133,3 +133,34 @@ DESKTOP_HEALTH_POLL_SECONDS_DEFAULT = 5.0
 DESKTOP_HEALTH_FAILURE_THRESHOLD_DEFAULT = 3
 DESKTOP_WINDOW_WIDTH_DEFAULT = 1400
 DESKTOP_WINDOW_HEIGHT_DEFAULT = 900
+
+# Tool-result trimming (Read / Grep / Glob). Off by default: this layer changes
+# what the model sees, so a fresh install must behave exactly as it did before
+# the layer existed.
+#
+# Grounding for the size default, measured rather than chosen. Rendering every
+# source, doc and config file in this repository the way Claude Code's `Read`
+# renders one (a right-aligned line number, a tab, the line) gives 970 whole-file
+# results: p50 3,012 chars, p75 8,534, p90 20,735, p99 93,433, max 374,612. The
+# default sits at that p90, so roughly nine reads in ten are never touched --
+# while the tenth holds 59.6% of all the bytes, because size distribution here is
+# extremely long-tailed. A threshold is a real setting rather than a constant in
+# code precisely because that distribution is per-repository.
+TOOL_RESULT_TRIM_THRESHOLD_CHARS_DEFAULT = 20_000
+# Kept from each end of a trimmed body. 4,000 each means a trimmed result still
+# carries more text than the p50 whole-file read (3,012 chars) at both its head
+# and its tail, so the opening structure and the closing lines both survive.
+TOOL_RESULT_TRIM_KEEP_HEAD_CHARS_DEFAULT = 4_000
+TOOL_RESULT_TRIM_KEEP_TAIL_CHARS_DEFAULT = 4_000
+# Newest attributable results never trimmed. The result the model just received
+# is the one it is reasoning about now, and it is also the cheapest to keep: an
+# old result is re-sent on every later turn, the newest is sent once. 2 covers
+# the common Read-then-act and Grep-then-Read pairs. 0 protects nothing.
+TOOL_RESULT_TRIM_PROTECT_RECENT_DEFAULT = 2
+
+# Mirrors core.anthropic.tool_result_trimming.TrimMode. `config` is a leaf
+# package by declared policy -- it imports nothing, not even core -- so the
+# names are repeated here rather than imported, and
+# tests/contracts/test_import_boundaries.py pins the two equal in both
+# directions exactly as it does for FAILURE_KIND_NAMES.
+TRIM_MODE_NAMES: frozenset[str] = frozenset({"off", "observe", "on"})

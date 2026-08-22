@@ -60,6 +60,28 @@ LIMIT_RANGES: dict[str, LimitRange] = {
     ),
     "rate_limit_cooldown_seconds": LimitRange(0.0, DAY, "0 does not pause"),
     "credential_circuit_threshold": LimitRange(1, 1_000),
+    # --- how much of a tool result to keep ---------------------------------
+    # Longest a single Read/Grep/Glob result may be before a trim rule looks at
+    # it. 0 would mean "consider everything", which is exactly the setting most
+    # likely to hurt an answer, so the floor is deliberately not 0: the smallest
+    # accepted threshold still leaves room for a head, a tail and the marker
+    # that explains the hole between them. The ceiling is the point past which
+    # no realistic tool result would ever qualify.
+    "tool_result_trim_threshold_chars": LimitRange(2_000, 10_000_000),
+    # Kept from each end of a trimmed body. 0 is allowed and means "keep no
+    # head" / "keep no tail" -- a real choice for Glob, where the tail is as
+    # informative as the head. The ceiling matches the threshold ceiling; the
+    # transform itself refuses any combination that would not shrink the body.
+    "tool_result_trim_keep_head_chars": LimitRange(
+        0, 10_000_000, "0 keeps nothing before the elision"
+    ),
+    "tool_result_trim_keep_tail_chars": LimitRange(
+        0, 10_000_000, "0 keeps nothing after the elision"
+    ),
+    # Newest attributable results never trimmed.
+    "tool_result_trim_protect_recent_results": LimitRange(
+        0, 1_000, "0 leaves even the result the model just received trimmable"
+    ),
     # --- what to keep ------------------------------------------------------
     "request_log_max_rows": LimitRange(0, 100_000_000, "0 keeps every request"),
     "request_log_text_max_chars": LimitRange(0, 10_000_000, "0 stores no text"),

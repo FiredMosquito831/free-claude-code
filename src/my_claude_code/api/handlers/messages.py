@@ -50,12 +50,16 @@ from my_claude_code.application.routing import (
 from my_claude_code.config.settings import Settings
 from my_claude_code.core.anthropic import (
     MessagesRequest,
+    ToolResultTrimPolicy,
+    ToolResultTrimReport,
+    TrimMode,
     aggregate_anthropic_sse_to_message,
     anthropic_error_payload,
     anthropic_error_type_for_failure,
     anthropic_failure_payload,
     anthropic_status_for_error_type,
     get_token_count,
+    trim_tool_results,
 )
 from my_claude_code.core.diagnostics import safe_exception_message
 from my_claude_code.core.failures import ExecutionFailure, find_execution_failure
@@ -106,6 +110,7 @@ class MessagesHandler:
             generation_id=generation_id,
             log_raw_payloads=settings.log_raw_api_payloads,
         )
+        self._trim_policy = _tool_result_trim_policy(settings)
         self._message_intercepts: tuple[MessageIntercept, ...] = (
             self._intercept_web_server_tool,
             self._intercept_local_optimization,
@@ -120,6 +125,7 @@ class MessagesHandler:
     ) -> object:
         """Create an Anthropic-compatible message response."""
         request_id = request_id or new_request_id()
+        self._trim_tool_results(request_data, request_id=request_id)
         capture = build_capture(
             self._settings,
             request_data,
@@ -178,6 +184,40 @@ class MessagesHandler:
             raise unexpected_http_exception(
                 self._settings, exc, context="CREATE_MESSAGE_ERROR"
             ) from exc
+
+    def _trim_tool_results(
+        self, request_data: MessagesRequest, *, request_id: str
+    ) -> ToolResultTrimReport:
+        """Apply the tool-result trim layer, and record what it did either way.
+
+        Called before the capture is built, so the request log holds the bytes
+        that actually went upstream rather than the ones the client sent. The
+        measurement of the difference lives in the trace row below, which is
+        what makes the saving a number somebody read rather than a percentage
+        somebody claimed.
+
+        Applied to ``request_data`` before the plan is resolved, so every
+        attempt in a fallback chain carries the same body -- a request must not
+        regain content merely by being served by the second model in a chain.
+        """
+        report = trim_tool_results(request_data, self._trim_policy)
+        if not report.outcomes:
+            return report
+        trace_event(
+            stage="request",
+            event="my_claude_code.api.tool_result_trim",
+            source="api",
+            request_id=request_id,
+            model=request_data.model,
+            applied=report.applied,
+            results_scanned=report.scanned,
+            results_matched=len(report.outcomes),
+            chars_before=report.chars_before,
+            chars_after=report.chars_after,
+            chars_removed=report.chars_removed,
+            by_tool=report.by_tool(),
+        )
+        return report
 
     async def _to_public_response(
         self,
@@ -408,6 +448,27 @@ class MessagesHandler:
             optimization=optimized.rule,
             tokens_saved=optimized.tokens_saved,
         )
+
+
+def _tool_result_trim_policy(settings: Settings) -> ToolResultTrimPolicy:
+    """Translate configuration into the policy the protocol layer obeys.
+
+    The split is deliberate: ``core`` owns the transform and knows nothing about
+    settings, ``config`` owns the thresholds and knows nothing about the
+    protocol, and this one function is where the two meet.
+    """
+    return ToolResultTrimPolicy(
+        enabled=settings.enable_tool_result_trimming,
+        modes={
+            "Read": TrimMode(settings.tool_result_trim_read),
+            "Grep": TrimMode(settings.tool_result_trim_grep),
+            "Glob": TrimMode(settings.tool_result_trim_glob),
+        },
+        threshold_chars=settings.tool_result_trim_threshold_chars,
+        keep_head_chars=settings.tool_result_trim_keep_head_chars,
+        keep_tail_chars=settings.tool_result_trim_keep_tail_chars,
+        protect_recent_results=settings.tool_result_trim_protect_recent_results,
+    )
 
 
 def _stream_error_fields(error: dict[str, object]) -> tuple[str, str]:

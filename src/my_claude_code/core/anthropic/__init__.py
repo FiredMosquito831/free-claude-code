@@ -53,10 +53,22 @@ from .streaming import (
 )
 from .thinking import ContentChunk, ContentType, ThinkTagParser
 from .tokens import count_text_tokens, get_token_count
+from .tool_result_trimming import (
+    TRIM_MARKER_OPEN,
+    TRIM_MODE_NAMES,
+    TRIMMABLE_TOOL_NAMES,
+    ToolResultTrimPolicy,
+    ToolResultTrimReport,
+    TrimMode,
+    trim_tool_results,
+)
 from .tools import FunctionTagToolParser, HeuristicToolParser
 from .utils import set_if_not_none
 
 __all__ = [
+    "TRIMMABLE_TOOL_NAMES",
+    "TRIM_MARKER_OPEN",
+    "TRIM_MODE_NAMES",
     "AnthropicStreamLedger",
     "AnthropicToOpenAIConverter",
     "ContentBlockDocument",
@@ -88,6 +100,9 @@ __all__ = [
     "TokenCountResponse",
     "Tool",
     "ToolBlockState",
+    "ToolResultTrimPolicy",
+    "ToolResultTrimReport",
+    "TrimMode",
     "Usage",
     "aggregate_anthropic_sse_to_message",
     "anthropic_error_payload",
@@ -109,4 +124,5 @@ __all__ = [
     "request_image_inputs",
     "serialize_tool_result_content",
     "set_if_not_none",
+    "trim_tool_results",
 ]

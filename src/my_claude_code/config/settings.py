@@ -37,6 +37,11 @@ from .constants import (
     STREAM_COMMIT_HOLDBACK_SECONDS_DEFAULT,
     STREAM_EARLY_RETRY_ATTEMPTS_DEFAULT,
     STREAM_MIDSTREAM_RECOVERY_ATTEMPTS_DEFAULT,
+    TOOL_RESULT_TRIM_KEEP_HEAD_CHARS_DEFAULT,
+    TOOL_RESULT_TRIM_KEEP_TAIL_CHARS_DEFAULT,
+    TOOL_RESULT_TRIM_PROTECT_RECENT_DEFAULT,
+    TOOL_RESULT_TRIM_THRESHOLD_CHARS_DEFAULT,
+    TRIM_MODE_NAMES,
 )
 from .env_files import (
     ANTHROPIC_AUTH_TOKEN_ENV,
@@ -582,6 +587,51 @@ class Settings(BaseSettings):
     enable_title_generation_skip: bool = True
     enable_suggestion_mode_skip: bool = True
 
+    # ==================== Tool-Result Trimming (Read / Grep / Glob) ==========
+    # Off by default, and deliberately so: this layer is the only thing in the
+    # proxy that changes what the model is allowed to see. A fresh install must
+    # produce a byte-identical request, which is what the master switch below
+    # guarantees -- it beats every per-rule mode, so there is one way to turn
+    # the whole layer off and no partial states.
+    enable_tool_result_trimming: bool = Field(
+        default=False, validation_alias="ENABLE_TOOL_RESULT_TRIMMING"
+    )
+    # Each rule is off / observe / on. `observe` is the safety story: it records
+    # what the rule would have removed from real traffic while changing nothing
+    # on the wire, so a rule can be watched before it is trusted.
+    tool_result_trim_read: str = Field(
+        default="off", validation_alias="TOOL_RESULT_TRIM_READ"
+    )
+    tool_result_trim_grep: str = Field(
+        default="off", validation_alias="TOOL_RESULT_TRIM_GREP"
+    )
+    tool_result_trim_glob: str = Field(
+        default="off", validation_alias="TOOL_RESULT_TRIM_GLOB"
+    )
+    # Longest a single tool result may be before a rule considers it at all.
+    # See config/constants.py for the measured distribution behind the default.
+    tool_result_trim_threshold_chars: int = Field(
+        default=TOOL_RESULT_TRIM_THRESHOLD_CHARS_DEFAULT,
+        validation_alias="TOOL_RESULT_TRIM_THRESHOLD_CHARS",
+    )
+    # Kept from the start and the end of a trimmed body. The head carries the
+    # path and opening line numbers, the tail carries the last matches; only the
+    # middle can be replaced by a marker without costing the ability to navigate
+    # what is left.
+    tool_result_trim_keep_head_chars: int = Field(
+        default=TOOL_RESULT_TRIM_KEEP_HEAD_CHARS_DEFAULT,
+        validation_alias="TOOL_RESULT_TRIM_KEEP_HEAD_CHARS",
+    )
+    tool_result_trim_keep_tail_chars: int = Field(
+        default=TOOL_RESULT_TRIM_KEEP_TAIL_CHARS_DEFAULT,
+        validation_alias="TOOL_RESULT_TRIM_KEEP_TAIL_CHARS",
+    )
+    # How many of the newest attributable results are never touched.
+    tool_result_trim_protect_recent_results: int = Field(
+        default=TOOL_RESULT_TRIM_PROTECT_RECENT_DEFAULT,
+        validation_alias="TOOL_RESULT_TRIM_PROTECT_RECENT_RESULTS",
+    )
+
     # ==================== Local web server tools (web_search / web_fetch) ====================
     # On by default to match the shipped env template (env.example) and the
     # dashboard manifest. These tools perform outbound HTTP from the proxy, so
@@ -994,6 +1044,31 @@ class Settings(BaseSettings):
                 f"Known kinds: {', '.join(sorted(known))}"
             )
         return ",".join(dict.fromkeys(kept))
+
+    @field_validator(
+        "tool_result_trim_read",
+        "tool_result_trim_grep",
+        "tool_result_trim_glob",
+    )
+    @classmethod
+    def validate_trim_mode(cls, v: str, info: Any) -> str:
+        """Reject an unknown mode rather than guess at it.
+
+        Guessing here would mean either trimming when the operator asked for
+        something else, or silently doing nothing when they asked to trim. A
+        typo has to be loud in both directions. A blank value is not a typo --
+        the admin UI writes ``KEY=`` for a cleared field -- so it falls back to
+        the field default the same way a blank numeric limit does.
+        """
+        mode = str(v).strip().lower()
+        if not mode:
+            return str(cls.model_fields[info.field_name].default)
+        if mode not in TRIM_MODE_NAMES:
+            raise ValueError(
+                f"Unknown trim mode: {v!r}. Known modes: "
+                f"{', '.join(sorted(TRIM_MODE_NAMES))}"
+            )
+        return mode
 
     @field_validator(
         "model",

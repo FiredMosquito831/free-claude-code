@@ -46,6 +46,21 @@ def _reasoning_options(
     )
 
 
+# One shared option list, so the three rules cannot drift apart.
+_TRIM_MODE_OPTIONS: tuple[ConfigOptionSpec, ...] = (
+    ConfigOptionSpec("off", "Off"),
+    ConfigOptionSpec("observe", "Observe"),
+    ConfigOptionSpec("on", "On"),
+)
+
+_TRIM_MODE_HELP = (
+    "Off leaves every {tool} result untouched. Observe measures what would "
+    "have been removed and records it, changing nothing on the wire -- run a "
+    "rule here first and read the numbers before trusting it. On performs the "
+    "elision and marks it inline. Requires the master switch above."
+)
+
+
 SECTIONS: tuple[ConfigSectionSpec, ...] = (
     ConfigSectionSpec(
         "providers",
@@ -91,9 +106,11 @@ SECTIONS: tuple[ConfigSectionSpec, ...] = (
     ConfigSectionSpec(
         "limits",
         "Limits",
-        "What MCC waits for, keeps, and records. Every value here is a "
-        "trade-off between how long a failing model may hold a request and "
-        "how much history survives on disk.",
+        "What MCC waits for, keeps, and records -- and, at the bottom, how "
+        "much of a large Read/Grep/Glob result is forwarded to the model. "
+        "Every value here is a trade-off between how long a failing model may "
+        "hold a request, how much history survives on disk, and how much of a "
+        "tool result the model gets to see.",
     ),
     ConfigSectionSpec(
         "desktop",
@@ -988,6 +1005,112 @@ _NON_PROVIDER_FIELDS: tuple[ConfigFieldSpec, ...] = (
             "Height, in CSS pixels, of the app-mode/embedded dashboard "
             "window. Applies the next time mcc-desktop starts, not to a "
             "window already open."
+        ),
+    ),
+    ConfigFieldSpec(
+        "ENABLE_TOOL_RESULT_TRIMMING",
+        "Trim large tool results",
+        "limits",
+        "boolean",
+        settings_attr="enable_tool_result_trimming",
+        default="false",
+        description=(
+            "Master switch for eliding the middle of oversized Read, Grep and "
+            "Glob results before they reach the model. Off means the request "
+            "goes upstream exactly as Claude Code sent it. This is the only "
+            "setting in MCC that changes what the model is allowed to see, so "
+            "it beats every per-rule mode below and is off by default. Every "
+            "elision carries an inline marker telling the model that content "
+            "was removed, by MCC, and how to fetch it -- but a marker is not "
+            "the same as the content, and an answer can still be worse for "
+            "the gap. Watch a rule in Observe first."
+        ),
+    ),
+    ConfigFieldSpec(
+        "TOOL_RESULT_TRIM_READ",
+        "Read results",
+        "limits",
+        "select",
+        settings_attr="tool_result_trim_read",
+        default="off",
+        options=_TRIM_MODE_OPTIONS,
+        description=_TRIM_MODE_HELP.format(tool="Read"),
+    ),
+    ConfigFieldSpec(
+        "TOOL_RESULT_TRIM_GREP",
+        "Grep results",
+        "limits",
+        "select",
+        settings_attr="tool_result_trim_grep",
+        default="off",
+        options=_TRIM_MODE_OPTIONS,
+        description=_TRIM_MODE_HELP.format(tool="Grep"),
+    ),
+    ConfigFieldSpec(
+        "TOOL_RESULT_TRIM_GLOB",
+        "Glob results",
+        "limits",
+        "select",
+        settings_attr="tool_result_trim_glob",
+        default="off",
+        options=_TRIM_MODE_OPTIONS,
+        description=_TRIM_MODE_HELP.format(tool="Glob"),
+    ),
+    ConfigFieldSpec(
+        "TOOL_RESULT_TRIM_THRESHOLD_CHARS",
+        "Trim above",
+        "limits",
+        "number",
+        settings_attr="tool_result_trim_threshold_chars",
+        default="20000",
+        description=(
+            "A tool result shorter than this is never touched. The default is "
+            "the measured 90th percentile of a whole-file Read in a real "
+            "repository, so nine reads in ten pass through untouched while the "
+            "tenth -- which holds most of the bytes -- is the one considered."
+        ),
+    ),
+    ConfigFieldSpec(
+        "TOOL_RESULT_TRIM_KEEP_HEAD_CHARS",
+        "Keep from the start",
+        "limits",
+        "number",
+        settings_attr="tool_result_trim_keep_head_chars",
+        default="4000",
+        advanced=True,
+        description=(
+            "Characters kept before the elision, rounded out to a line "
+            "boundary so a path is never cut in half. The head is where the "
+            "opening line numbers and the file's shape live."
+        ),
+    ),
+    ConfigFieldSpec(
+        "TOOL_RESULT_TRIM_KEEP_TAIL_CHARS",
+        "Keep from the end",
+        "limits",
+        "number",
+        settings_attr="tool_result_trim_keep_tail_chars",
+        default="4000",
+        advanced=True,
+        description=(
+            "Characters kept after the elision, rounded out to a line "
+            "boundary. Only the middle is ever removed: the two ends carry the "
+            "structure the model needs to act on what is left."
+        ),
+    ),
+    ConfigFieldSpec(
+        "TOOL_RESULT_TRIM_PROTECT_RECENT_RESULTS",
+        "Never trim the newest",
+        "limits",
+        "number",
+        settings_attr="tool_result_trim_protect_recent_results",
+        default="2",
+        advanced=True,
+        description=(
+            "How many of the most recent Read/Grep/Glob results are exempt. "
+            "The result the model just received is the one it is reasoning "
+            "about, and it is also the cheapest to keep whole -- an older "
+            "result is re-sent on every later turn, the newest is sent once."
         ),
     ),
     ConfigFieldSpec(
