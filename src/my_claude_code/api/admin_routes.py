@@ -74,6 +74,7 @@ from my_claude_code.config.rtk import (
     RtkState,
     apply_rtk_state,
     load_rtk_state,
+    read_rtk_gain,
     rtk_status,
     save_rtk_state,
 )
@@ -856,6 +857,18 @@ async def get_rtk(request: Request):
     status = await asyncio.to_thread(rtk_status)
     state = await asyncio.to_thread(load_rtk_state)
     return {**status, **_rtk_state_response(state)}
+
+
+@router.get("/admin/api/rtk/gain")
+async def get_rtk_gain(request: Request):
+    """Return RTK's own token-savings report, or why it is unavailable.
+
+    Always 200: ``read_rtk_gain`` converts every failure mode into an
+    ``available: false`` payload so the dashboard never breaks on a missing or
+    misbehaving RTK install.
+    """
+    require_loopback_admin(request)
+    return await asyncio.to_thread(read_rtk_gain)
 
 
 @router.post("/admin/api/rtk")
