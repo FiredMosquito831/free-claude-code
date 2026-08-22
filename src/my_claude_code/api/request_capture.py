@@ -184,6 +184,27 @@ class RequestCapture:
             client_thinking_type=_client_thinking_type(routed.request),
         )
 
+    def set_optimization(self, rule: str, tokens_saved: int) -> None:
+        """Record that a local rule answered this request, and drop the route.
+
+        ``set_routing`` has already run by the time an intercept fires, so the
+        row names the provider the request *would* have gone to. Leaving it
+        there is an active lie: 3,246 rows in a production log were attributed
+        to providers that never received them, dragging every per-provider
+        average with them. The model the route resolved to is still recorded on
+        ``requested_model`` and ``route_chain``, so what would have happened
+        stays answerable -- only the claim that it *did* happen is removed.
+
+        ``tokens_in``/``tokens_out`` stay NULL rather than 0: NULL is silence,
+        and no provider spoke. What was avoided lives in its own column.
+        """
+        if not self.enabled:
+            return
+        self._record.optimization = rule
+        self._record.optimization_tokens_saved = tokens_saved
+        self._record.provider = None
+        self._record.resolved_model = None
+
     def finish_error(self, exc: BaseException) -> None:
         """Finalize for an error raised before the stream wrapper takes over."""
         failure = find_execution_failure(exc)

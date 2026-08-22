@@ -71,6 +71,11 @@ class _MessagesStreamResult:
 @dataclass(frozen=True)
 class _MessagesCompleteResult:
     response: object
+    # Set only when a local rule produced this response rather than a provider.
+    # The web-server-tool intercept also completes without a provider, but it
+    # does real work and is not an optimization, so it leaves these None.
+    optimization: str | None = None
+    tokens_saved: int = 0
 
 
 _MessagesResult = _MessagesStreamResult | _MessagesCompleteResult
@@ -151,6 +156,8 @@ class MessagesHandler:
             if isinstance(result, _MessagesStreamResult):
                 result = _MessagesStreamResult(capture.wrap(result.body))
             else:
+                if result.optimization is not None:
+                    capture.set_optimization(result.optimization, result.tokens_saved)
                 capture.finish_success_from_message(result.response)
             return await self._to_public_response(
                 result,
@@ -383,7 +390,9 @@ class MessagesHandler:
     def _intercept_local_optimization(
         self, routed: RoutedMessagesRequest
     ) -> _MessagesResult | None:
-        optimized = try_optimizations(routed.request, self._settings)
+        optimized = try_optimizations(
+            routed.request, self._settings, self._token_counter
+        )
         if optimized is None:
             return None
         trace_event(
@@ -391,8 +400,14 @@ class MessagesHandler:
             event="my_claude_code.api.optimization.short_circuit",
             source="api",
             model=routed.request.model,
+            rule=optimized.rule,
+            tokens_saved=optimized.tokens_saved,
         )
-        return _MessagesCompleteResult(optimized)
+        return _MessagesCompleteResult(
+            optimized.response,
+            optimization=optimized.rule,
+            tokens_saved=optimized.tokens_saved,
+        )
 
 
 def _stream_error_fields(error: dict[str, object]) -> tuple[str, str]:

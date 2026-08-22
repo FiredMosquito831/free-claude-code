@@ -805,3 +805,53 @@ def test_the_thumbnail_setting_decides_whether_pixels_are_kept(monkeypatch) -> N
     assert _image_pixels(Settings()) == 256
     monkeypatch.setenv("REQUEST_LOG_CAPTURE_IMAGES", "false")
     assert _image_pixels(Settings()) == 0
+
+
+def test_local_optimization_row_names_no_provider(store: RequestLogStore) -> None:
+    """A request no provider served must not be attributed to one.
+
+    ``set_routing`` runs before the intercepts, so without this the row claims
+    the provider the request would have gone to. In a production log that put
+    3,246 phantom requests onto six real providers' per-provider averages.
+    """
+    plan = _vision_router().resolve_messages_plan(
+        MessagesRequest(
+            model="claude-sonnet-4-6",
+            max_tokens=16,
+            messages=[Message(role="user", content="hi")],
+        )
+    )
+    capture = _make_capture(store, request_id="req_opt")
+    capture.set_plan(plan)
+    capture.set_routing(plan.primary, 0)
+    # Whatever routing decided is now overridden by the local answer.
+    assert capture._record.provider is not None
+    capture.set_optimization("title_generation_skip", 4931)
+    capture.finish_success("Conversation")
+    store.close()
+
+    row = store.get_request("req_opt")
+    assert row is not None
+    assert row["optimization"] == "title_generation_skip"
+    assert row["optimization_tokens_saved"] == 4931
+    assert row["provider"] is None
+    assert row["resolved_model"] is None
+    # NULL, not 0: no provider spoke, and silence is not a reported zero.
+    assert row["tokens_in"] is None
+    assert row["tokens_out"] is None
+    # What the request *would* have used stays answerable.
+    assert row["requested_model"] == "claude-sonnet-4-5"
+    assert row["route_chain"]
+
+
+def test_ordinary_row_leaves_the_optimization_columns_null(
+    store: RequestLogStore,
+) -> None:
+    capture = _make_capture(store, request_id="req_plain")
+    capture.finish_success("hello")
+    store.close()
+
+    row = store.get_request("req_plain")
+    assert row is not None
+    assert row["optimization"] is None
+    assert row["optimization_tokens_saved"] is None

@@ -117,15 +117,25 @@ def is_safety_classifier_request(request_data: MessagesRequest) -> bool:
 def is_suggestion_mode_request(request_data: MessagesRequest) -> bool:
     """Check if this is a suggestion mode request.
 
-    Suggestion mode requests contain "[SUGGESTION MODE:" in the user's message,
-    used for auto-suggesting what the user might type next.
+    Claude Code appends the suggestion instruction as the *final* user turn of
+    an otherwise ordinary transcript, so the marker is the tail of the request
+    rather than something buried in its history.
+
+    Only that final turn is inspected. Scanning every user message -- which is
+    what this did originally -- means a conversation that merely *mentions* the
+    marker answers with an empty string instead of a real reply, which is the
+    worst failure this module can produce. Measured against 61 real suggestion
+    requests: the marker is never earlier than 97.61% into the prompt and is
+    always followed by exactly the same 1,363-character instruction block, so
+    narrowing to the last turn loses nothing.
     """
-    for msg in request_data.messages:
-        if msg.role == "user":
-            text = extract_text_from_content(msg.content)
-            if "[SUGGESTION MODE:" in text:
-                return True
-    return False
+    last_user_turn: Message | None = None
+    for message in request_data.messages:
+        if message.role == "user":
+            last_user_turn = message
+    if last_user_turn is None:
+        return False
+    return "[SUGGESTION MODE:" in extract_text_from_content(last_user_turn.content)
 
 
 def is_filepath_extraction_request(

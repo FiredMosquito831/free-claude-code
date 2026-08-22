@@ -92,6 +92,13 @@ _LIST_METADATA_COLUMNS = (
     # How many images or documents the request carried. A count, not pixels,
     # so a list row can say "this turn had a screenshot in it" for free.
     "input_image_count",
+    # Which local rule answered this request without contacting a provider,
+    # and the input tokens that never went upstream because it did. NULL on
+    # every ordinary request and on every row written before the column
+    # existed -- "no rule matched" and "nobody was recording" are the same
+    # shape here only because no rule could have fired unrecorded.
+    "optimization",
+    "optimization_tokens_saved",
 )
 
 _SCHEMA = """
@@ -133,6 +140,8 @@ CREATE TABLE IF NOT EXISTS requests (
     thinking_chars INTEGER,
     tool_calls TEXT,
     tool_call_count INTEGER,
+    optimization TEXT,
+    optimization_tokens_saved INTEGER,
     input_image_count INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_requests_ts ON requests(ts_epoch);
@@ -373,6 +382,14 @@ _ADDED_COLUMNS = (
         "requested_reasoning",
         "ALTER TABLE requests ADD COLUMN requested_reasoning TEXT",
     ),
+    (
+        "optimization",
+        "ALTER TABLE requests ADD COLUMN optimization TEXT",
+    ),
+    (
+        "optimization_tokens_saved",
+        "ALTER TABLE requests ADD COLUMN optimization_tokens_saved INTEGER",
+    ),
 )
 
 # Indexes over post-release columns, created only once those columns exist.
@@ -560,6 +577,12 @@ class RequestRecord:
     attempts: tuple[RouteAttempt, ...] = ()
     tool_calls: list[dict[str, Any]] | None = None
     tool_call_count: int | None = None
+    # The local rule that answered this request inside the proxy, if any, and
+    # the input tokens it kept off the wire. ``provider`` is NULL on such a row
+    # because none was involved: attributing a request to a provider that never
+    # saw it is what made these invisible in analytics for their whole life.
+    optimization: str | None = None
+    optimization_tokens_saved: int | None = None
 
     @property
     def ts_iso(self) -> str:
@@ -1505,8 +1528,9 @@ class RequestLogStore:
                         key_index, key_label, thinking_text, thinking_chars,
                         tool_calls, tool_call_count, route_attempt,
                         route_primary_model, route_chain, route_diverted_from,
-                        route_diversion, input_image_count
-                    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                        route_diversion, input_image_count,
+                        optimization, optimization_tokens_saved
+                    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                     """,
                     rows,
                 )
@@ -1578,6 +1602,8 @@ class RequestLogStore:
             record.route_diverted_from,
             record.route_diversion,
             record.input_image_count,
+            record.optimization,
+            record.optimization_tokens_saved,
         )
 
     def close(self, *, timeout: float = _CLOSE_TIMEOUT_SECONDS) -> None:
