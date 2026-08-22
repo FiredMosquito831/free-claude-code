@@ -52,7 +52,7 @@ from .streaming import (
     map_stop_reason,
 )
 from .thinking import ContentChunk, ContentType, ThinkTagParser
-from .tokens import get_token_count
+from .tokens import count_text_tokens, get_token_count
 from .tools import FunctionTagToolParser, HeuristicToolParser
 from .utils import set_if_not_none
 
@@ -96,6 +96,7 @@ __all__ = [
     "anthropic_request_snapshot",
     "anthropic_status_for_error_type",
     "build_base_request_body",
+    "count_text_tokens",
     "dump_messages_request",
     "extract_text_from_content",
     "format_sse_event",

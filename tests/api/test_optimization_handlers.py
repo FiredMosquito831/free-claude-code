@@ -3,6 +3,8 @@
 from unittest.mock import patch
 
 from my_claude_code.api.optimization_handlers import (
+    OPTIMIZATION_HANDLERS,
+    OPTIMIZATION_RULES,
     try_filepath_mock,
     try_optimizations,
     try_prefix_detection,
@@ -16,6 +18,7 @@ from my_claude_code.core.anthropic.models import (
     Message,
     MessagesRequest,
 )
+from my_claude_code.core.anthropic.tokens import get_token_count
 
 
 def _make_request(
@@ -38,7 +41,7 @@ class TestTryPrefixDetection:
             "my_claude_code.api.optimization_handlers.is_prefix_detection_request",
             return_value=(True, "/ask"),
         ):
-            assert try_prefix_detection(req, settings) is None
+            assert try_prefix_detection(req, settings, get_token_count) is None
 
     def test_enabled_and_match_returns_response(self):
         settings = Settings()
@@ -57,13 +60,13 @@ class TestTryPrefixDetection:
                 "my_claude_code.api.optimization_handlers.logger.info"
             ) as mock_log_info,
         ):
-            result = try_prefix_detection(req, settings)
+            result = try_prefix_detection(req, settings, get_token_count)
         assert result is not None
-        block = result.content[0]
+        block = result.response.content[0]
         assert isinstance(block, ContentBlockText)
         assert block.text == "/ask"
         mock_log_info.assert_called_once_with(
-            "Optimization: Fast prefix detection request"
+            "Optimization: {} answered locally", "prefix_detection"
         )
 
     def test_enabled_but_no_match_returns_none(self):
@@ -74,7 +77,7 @@ class TestTryPrefixDetection:
             "my_claude_code.api.optimization_handlers.is_prefix_detection_request",
             return_value=(False, ""),
         ):
-            assert try_prefix_detection(req, settings) is None
+            assert try_prefix_detection(req, settings, get_token_count) is None
 
 
 class TestTryQuotaMock:
@@ -86,7 +89,7 @@ class TestTryQuotaMock:
             "my_claude_code.api.optimization_handlers.is_quota_check_request",
             return_value=True,
         ):
-            assert try_quota_mock(req, settings) is None
+            assert try_quota_mock(req, settings, get_token_count) is None
 
     def test_enabled_and_match_returns_response(self):
         settings = Settings()
@@ -96,9 +99,9 @@ class TestTryQuotaMock:
             "my_claude_code.api.optimization_handlers.is_quota_check_request",
             return_value=True,
         ):
-            result = try_quota_mock(req, settings)
+            result = try_quota_mock(req, settings, get_token_count)
         assert result is not None
-        block = result.content[0]
+        block = result.response.content[0]
         assert isinstance(block, ContentBlockText)
         assert "Quota check passed" in block.text
 
@@ -112,7 +115,7 @@ class TestTryTitleSkip:
             "my_claude_code.api.optimization_handlers.is_title_generation_request",
             return_value=True,
         ):
-            assert try_title_skip(req, settings) is None
+            assert try_title_skip(req, settings, get_token_count) is None
 
     def test_enabled_and_match_returns_response(self):
         settings = Settings()
@@ -122,9 +125,9 @@ class TestTryTitleSkip:
             "my_claude_code.api.optimization_handlers.is_title_generation_request",
             return_value=True,
         ):
-            result = try_title_skip(req, settings)
+            result = try_title_skip(req, settings, get_token_count)
         assert result is not None
-        block = result.content[0]
+        block = result.response.content[0]
         assert isinstance(block, ContentBlockText)
         assert block.text == "Conversation"
 
@@ -138,7 +141,7 @@ class TestTrySuggestionSkip:
             "my_claude_code.api.optimization_handlers.is_suggestion_mode_request",
             return_value=True,
         ):
-            assert try_suggestion_skip(req, settings) is None
+            assert try_suggestion_skip(req, settings, get_token_count) is None
 
     def test_enabled_and_match_returns_response(self):
         settings = Settings()
@@ -148,9 +151,9 @@ class TestTrySuggestionSkip:
             "my_claude_code.api.optimization_handlers.is_suggestion_mode_request",
             return_value=True,
         ):
-            result = try_suggestion_skip(req, settings)
+            result = try_suggestion_skip(req, settings, get_token_count)
         assert result is not None
-        block = result.content[0]
+        block = result.response.content[0]
         assert isinstance(block, ContentBlockText)
         assert block.text == ""
 
@@ -164,7 +167,7 @@ class TestTryFilepathMock:
             "my_claude_code.api.optimization_handlers.is_filepath_extraction_request",
             return_value=(True, "ls", "out"),
         ):
-            assert try_filepath_mock(req, settings) is None
+            assert try_filepath_mock(req, settings, get_token_count) is None
 
     def test_enabled_and_match_returns_response(self):
         settings = Settings()
@@ -180,9 +183,9 @@ class TestTryFilepathMock:
                 return_value="a.txt\nb.txt",
             ),
         ):
-            result = try_filepath_mock(req, settings)
+            result = try_filepath_mock(req, settings, get_token_count)
         assert result is not None
-        block = result.content[0]
+        block = result.response.content[0]
         assert isinstance(block, ContentBlockText)
         assert block.text == "a.txt\nb.txt"
 
@@ -200,9 +203,9 @@ class TestTryFilepathMock:
                 return_value="",
             ),
         ):
-            result = try_filepath_mock(req, settings)
+            result = try_filepath_mock(req, settings, get_token_count)
         assert result is not None
-        block = result.content[0]
+        block = result.response.content[0]
         assert isinstance(block, ContentBlockText)
         assert block.text == ""
 
@@ -218,9 +221,9 @@ class TestTryOptimizations:
             "my_claude_code.api.optimization_handlers.is_quota_check_request",
             return_value=True,
         ):
-            result = try_optimizations(req, settings)
+            result = try_optimizations(req, settings, get_token_count)
         assert result is not None
-        block = result.content[0]
+        block = result.response.content[0]
         assert isinstance(block, ContentBlockText)
         assert "Quota check passed" in block.text
 
@@ -232,4 +235,82 @@ class TestTryOptimizations:
         settings.enable_suggestion_mode_skip = False
         settings.enable_filepath_extraction_mock = False
         req = _make_request("random user message")
-        assert try_optimizations(req, settings) is None
+        assert try_optimizations(req, settings, get_token_count) is None
+
+
+class TestUsageIsCountedNotInvented:
+    """The reported usage used to be hardcoded regardless of the request."""
+
+    def test_input_tokens_track_the_real_prompt_size(self):
+        settings = Settings()
+        settings.enable_title_generation_skip = True
+        small = _make_request("hi")
+        large = _make_request("word " * 4000)
+        with patch(
+            "my_claude_code.api.optimization_handlers.is_title_generation_request",
+            return_value=True,
+        ):
+            small_result = try_title_skip(small, settings, get_token_count)
+            large_result = try_title_skip(large, settings, get_token_count)
+
+        assert small_result is not None and large_result is not None
+        # The old implementation reported 100 for both of these.
+        assert small_result.response.usage.input_tokens < 20
+        assert large_result.response.usage.input_tokens > 3000
+        assert (
+            large_result.response.usage.input_tokens
+            != small_result.response.usage.input_tokens
+        )
+
+    def test_tokens_saved_equals_the_prompt_that_never_went_upstream(self):
+        settings = Settings()
+        settings.enable_title_generation_skip = True
+        req = _make_request("word " * 500)
+        with patch(
+            "my_claude_code.api.optimization_handlers.is_title_generation_request",
+            return_value=True,
+        ):
+            result = try_title_skip(req, settings, get_token_count)
+        assert result is not None
+        assert result.tokens_saved == result.response.usage.input_tokens
+        assert result.tokens_saved == get_token_count(req.messages, None, None)
+
+    def test_output_tokens_track_the_reply_actually_returned(self):
+        settings = Settings()
+        settings.enable_suggestion_mode_skip = True
+        settings.enable_title_generation_skip = True
+        req = _make_request("x")
+        with patch(
+            "my_claude_code.api.optimization_handlers.is_suggestion_mode_request",
+            return_value=True,
+        ):
+            empty = try_suggestion_skip(req, settings, get_token_count)
+        with patch(
+            "my_claude_code.api.optimization_handlers.is_title_generation_request",
+            return_value=True,
+        ):
+            titled = try_title_skip(req, settings, get_token_count)
+        assert empty is not None and titled is not None
+        # "" against "Conversation": the old code reported 1 and 5 by fiat.
+        assert empty.response.usage.output_tokens == 0
+        assert titled.response.usage.output_tokens > 0
+
+
+class TestRuleNames:
+    def test_every_handler_reports_a_name_from_the_published_tuple(self):
+        settings = Settings()
+        settings.enable_title_generation_skip = True
+        req = _make_request("x")
+        with patch(
+            "my_claude_code.api.optimization_handlers.is_title_generation_request",
+            return_value=True,
+        ):
+            result = try_title_skip(req, settings, get_token_count)
+        assert result is not None
+        assert result.rule == "title_generation_skip"
+        assert result.rule in OPTIMIZATION_RULES
+
+    def test_published_tuple_covers_every_registered_handler(self):
+        # A rule the tuple does not know about is a rule the dashboard cannot
+        # name, which is how these went uncounted for their whole life.
+        assert len(OPTIMIZATION_RULES) == len(OPTIMIZATION_HANDLERS)

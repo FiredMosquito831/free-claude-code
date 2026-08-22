@@ -1,18 +1,25 @@
 """Optimization handlers for fast-path API responses.
 
-Each handler returns a MessagesResponse if the request matches and the
-optimization is enabled, otherwise None.
+Each handler returns a :class:`LocalOptimization` if the request matches and
+the optimization is enabled, otherwise None. A match means the proxy answers
+the request itself and no provider is contacted at all, so every match is
+recorded against the rule that produced it -- a rule nobody can count is a
+rule nobody can evaluate.
 """
 
 import uuid
+from collections.abc import Callable
+from dataclasses import dataclass
 
 from loguru import logger
 
+from my_claude_code.application.execution import TokenCounter
 from my_claude_code.config.settings import Settings
 from my_claude_code.core.anthropic import (
     MessagesRequest,
     MessagesResponse,
     Usage,
+    count_text_tokens,
 )
 
 from .command_utils import extract_command_prefix, extract_filepaths_from_command
@@ -25,25 +32,57 @@ from .detection import (
 )
 
 
-def _text_response(
+@dataclass(frozen=True, slots=True)
+class LocalOptimization:
+    """A request answered inside the proxy instead of by a model.
+
+    ``tokens_saved`` is the request's own input token count -- the tokens that
+    would have gone upstream had the rule not matched. It is a measurement of
+    this request, not an estimate of a bill: what the provider would have
+    charged for the reply is unknowable and deliberately not guessed at.
+    """
+
+    rule: str
+    response: MessagesResponse
+    tokens_saved: int
+
+
+def _answer(
     request_data: MessagesRequest,
     text: str,
     *,
-    input_tokens: int,
-    output_tokens: int,
-) -> MessagesResponse:
-    return MessagesResponse(
-        id=f"msg_{uuid.uuid4()}",
-        model=request_data.model,
-        content=[{"type": "text", "text": text}],
-        stop_reason="end_turn",
-        usage=Usage(input_tokens=input_tokens, output_tokens=output_tokens),
+    rule: str,
+    token_counter: TokenCounter,
+) -> LocalOptimization:
+    """Build the local reply, with usage counted rather than invented.
+
+    The counts this reports used to be hardcoded (``input_tokens=100``,
+    ``output_tokens=5``) regardless of the request. They reach the client and
+    feed its own accounting, so they are measured now: cl100k over the real
+    request costs 0.5 ms at 1.5 KB and 7 ms at the median title prompt,
+    against the multi-second upstream round trip the match avoids.
+    """
+    input_tokens = token_counter(
+        request_data.messages, request_data.system, request_data.tools
+    )
+    output_tokens = count_text_tokens(text)
+    logger.info("Optimization: {} answered locally", rule)
+    return LocalOptimization(
+        rule=rule,
+        response=MessagesResponse(
+            id=f"msg_{uuid.uuid4()}",
+            model=request_data.model,
+            content=[{"type": "text", "text": text}],
+            stop_reason="end_turn",
+            usage=Usage(input_tokens=input_tokens, output_tokens=output_tokens),
+        ),
+        tokens_saved=input_tokens,
     )
 
 
 def try_prefix_detection(
-    request_data: MessagesRequest, settings: Settings
-) -> MessagesResponse | None:
+    request_data: MessagesRequest, settings: Settings, token_counter: TokenCounter
+) -> LocalOptimization | None:
     """Fast prefix detection - return command prefix without API call."""
     if not settings.fast_prefix_detection:
         return None
@@ -52,72 +91,68 @@ def try_prefix_detection(
     if not is_prefix_req:
         return None
 
-    logger.info("Optimization: Fast prefix detection request")
-    return _text_response(
+    return _answer(
         request_data,
         extract_command_prefix(command),
-        input_tokens=100,
-        output_tokens=5,
+        rule="prefix_detection",
+        token_counter=token_counter,
     )
 
 
 def try_quota_mock(
-    request_data: MessagesRequest, settings: Settings
-) -> MessagesResponse | None:
+    request_data: MessagesRequest, settings: Settings, token_counter: TokenCounter
+) -> LocalOptimization | None:
     """Mock quota probe requests."""
     if not settings.enable_network_probe_mock:
         return None
     if not is_quota_check_request(request_data):
         return None
 
-    logger.info("Optimization: Intercepted and mocked quota probe")
-    return _text_response(
+    return _answer(
         request_data,
         "Quota check passed.",
-        input_tokens=10,
-        output_tokens=5,
+        rule="quota_mock",
+        token_counter=token_counter,
     )
 
 
 def try_title_skip(
-    request_data: MessagesRequest, settings: Settings
-) -> MessagesResponse | None:
+    request_data: MessagesRequest, settings: Settings, token_counter: TokenCounter
+) -> LocalOptimization | None:
     """Skip title generation requests."""
     if not settings.enable_title_generation_skip:
         return None
     if not is_title_generation_request(request_data):
         return None
 
-    logger.info("Optimization: Skipped title generation request")
-    return _text_response(
+    return _answer(
         request_data,
         "Conversation",
-        input_tokens=100,
-        output_tokens=5,
+        rule="title_generation_skip",
+        token_counter=token_counter,
     )
 
 
 def try_suggestion_skip(
-    request_data: MessagesRequest, settings: Settings
-) -> MessagesResponse | None:
+    request_data: MessagesRequest, settings: Settings, token_counter: TokenCounter
+) -> LocalOptimization | None:
     """Skip suggestion mode requests."""
     if not settings.enable_suggestion_mode_skip:
         return None
     if not is_suggestion_mode_request(request_data):
         return None
 
-    logger.info("Optimization: Skipped suggestion mode request")
-    return _text_response(
+    return _answer(
         request_data,
         "",
-        input_tokens=100,
-        output_tokens=1,
+        rule="suggestion_mode_skip",
+        token_counter=token_counter,
     )
 
 
 def try_filepath_mock(
-    request_data: MessagesRequest, settings: Settings
-) -> MessagesResponse | None:
+    request_data: MessagesRequest, settings: Settings, token_counter: TokenCounter
+) -> LocalOptimization | None:
     """Mock filepath extraction requests."""
     if not settings.enable_filepath_extraction_mock:
         return None
@@ -126,18 +161,20 @@ def try_filepath_mock(
     if not is_fp:
         return None
 
-    filepaths = extract_filepaths_from_command(cmd, output)
-    logger.info("Optimization: Mocked filepath extraction")
-    return _text_response(
+    return _answer(
         request_data,
-        filepaths,
-        input_tokens=100,
-        output_tokens=10,
+        extract_filepaths_from_command(cmd, output),
+        rule="filepath_extraction_mock",
+        token_counter=token_counter,
     )
 
 
+OptimizationHandler = Callable[
+    [MessagesRequest, Settings, TokenCounter], LocalOptimization | None
+]
+
 # Cheapest/most common optimizations first for faster short-circuit.
-OPTIMIZATION_HANDLERS = [
+OPTIMIZATION_HANDLERS: list[OptimizationHandler] = [
     try_quota_mock,
     try_prefix_detection,
     try_title_skip,
@@ -145,13 +182,23 @@ OPTIMIZATION_HANDLERS = [
     try_filepath_mock,
 ]
 
+# Every rule name this module can record, so a consumer can enumerate them
+# without importing the handlers or scraping strings out of the log.
+OPTIMIZATION_RULES: tuple[str, ...] = (
+    "quota_mock",
+    "prefix_detection",
+    "title_generation_skip",
+    "suggestion_mode_skip",
+    "filepath_extraction_mock",
+)
+
 
 def try_optimizations(
-    request_data: MessagesRequest, settings: Settings
-) -> MessagesResponse | None:
+    request_data: MessagesRequest, settings: Settings, token_counter: TokenCounter
+) -> LocalOptimization | None:
     """Run optimization handlers in order. Returns first match or None."""
     for handler in OPTIMIZATION_HANDLERS:
-        result = handler(request_data, settings)
+        result = handler(request_data, settings, token_counter)
         if result is not None:
             return result
     return None

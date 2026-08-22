@@ -11,12 +11,15 @@ from my_claude_code.api.handlers import (
     ResponsesHandler,
     TokenCountHandler,
 )
+from my_claude_code.api.optimization_handlers import LocalOptimization
 from my_claude_code.application.errors import InvalidRequestError
 from my_claude_code.config.settings import Settings
 from my_claude_code.core.anthropic.models import (
     Message,
     MessagesRequest,
+    MessagesResponse,
     TokenCountRequest,
+    Usage,
 )
 from my_claude_code.core.anthropic.streaming import format_sse_event
 from my_claude_code.core.failures import ExecutionFailure, FailureKind
@@ -485,13 +488,23 @@ async def test_messages_handler_optimization_intercepts_before_provider_executio
         max_tokens=100,
         messages=[Message(role="user", content="quota check")],
     )
-    optimized = object()
+    optimized = LocalOptimization(
+        rule="quota_mock",
+        response=MessagesResponse(
+            id="msg_test",
+            model=request.model,
+            content=[{"type": "text", "text": "Quota check passed."}],
+            stop_reason="end_turn",
+            usage=Usage(input_tokens=7, output_tokens=4),
+        ),
+        tokens_saved=7,
+    )
 
     with patch(
         "my_claude_code.api.handlers.messages.try_optimizations",
         return_value=optimized,
     ):
-        assert await handler.create(request) is optimized
+        assert await handler.create(request) is optimized.response
 
     provider_resolver.assert_not_called()
 
