@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 import platform
+import re
 import shutil
 import stat
 import subprocess
@@ -15,34 +16,58 @@ import zipfile
 from contextlib import suppress
 from dataclasses import asdict, dataclass
 from pathlib import Path, PurePosixPath
+from typing import Any
 
 from .paths import config_dir_path
 
 RTK_STATE_FILENAME = "rtk.json"
-RTK_VERSION = "0.44.2"
+RTK_VERSION = "0.45.0"
 RTK_RELEASE_BASE_URL = f"https://github.com/rtk-ai/rtk/releases/download/v{RTK_VERSION}"
+#: RTK reads this env var as its telemetry opt-out. Verified against
+#: rtk-ai/rtk @ master (v0.45.0): ``TelemetryConfig`` derives ``Default`` with
+#: ``enabled: bool`` (false), ``core/telemetry.rs::maybe_ping`` returns early
+#: unless ``consent_given == Some(true)`` *and* ``enabled``, and
+#: ``hooks/init.rs::prompt_telemetry_consent`` short-circuits when this var is
+#: set — so an ``rtk init`` we launch never records consent and the PreToolUse
+#: hook, which does not inherit our environment, still has nothing to send.
 RTK_TELEMETRY_ENV = "RTK_TELEMETRY_DISABLED"
+RTK_SUBPROCESS_TIMEOUT_SECONDS = 15
+
+#: Field names of RTK's ``ExportSummary`` struct (``src/analytics/gain.rs``).
+RTK_GAIN_SUMMARY_FIELDS: tuple[str, ...] = (
+    "total_commands",
+    "total_input",
+    "total_output",
+    "total_saved",
+    "avg_savings_pct",
+    "total_time_ms",
+    "avg_time_ms",
+)
+#: Optional period breakdowns RTK emits alongside the summary for ``--all``.
+RTK_GAIN_PERIOD_FIELDS: tuple[str, ...] = ("daily", "weekly", "monthly")
+
+_VERSION_PATTERN = re.compile(r"\d+\.\d+\.\d+")
 
 _RELEASES: dict[tuple[str, str], tuple[str, str]] = {
     ("linux", "x86_64"): (
         "rtk-x86_64-unknown-linux-musl.tar.gz",
-        "d94cc2a3e57fa534892b5235a726e7eeb7523f205a5f8f48f853bfcae7be7e33",
+        "c4c036fbf181fc55ef329786c8c17e0d427972b053b825944d968a6aafef1ba4",
     ),
     ("linux", "aarch64"): (
         "rtk-aarch64-unknown-linux-gnu.tar.gz",
-        "5cd3f7fa2697faf9e5b77a10ce4e699006e02d4752d792f06550697eb4b8e8a9",
+        "80a746dd305ef944ff50ef011ae4ce3878dd5ba88dfe35d859d05498191637c3",
     ),
     ("darwin", "x86_64"): (
         "rtk-x86_64-apple-darwin.tar.gz",
-        "636f808db86b2cefab7db7dd9393da8b6e4721bb2ffaa0644e3ffa52d3420d81",
+        "9ea02f889d5a2779e4fb700df4587824303c5a57cda22e903e30058079fca0ef",
     ),
     ("darwin", "aarch64"): (
         "rtk-aarch64-apple-darwin.tar.gz",
-        "b7c2218eca538b54e63fa594a8ce58bd3716851b01b3b0dc026515323baf6393",
+        "064151cfc2d50b24d810b06a0af2e41b9c945e83534e4c438c3d3eae607fc3f4",
     ),
     ("win32", "x86_64"): (
         "rtk-x86_64-pc-windows-msvc.zip",
-        "3a1e114edce9080f8a10663e9c87488363a82f14a5ca8aab2ad416817f89d47c",
+        "34cea9009a8099acdaf85147b971d95f65efabfa63fb3aea7d3e2b73e6f517c3",
     ),
 }
 
@@ -136,14 +161,13 @@ def _managed_binary_path() -> Path:
 
 
 def _verify_rtk(binary: str | Path) -> str | None:
-    env = os.environ.copy()
-    env[RTK_TELEMETRY_ENV] = "1"
+    env = _rtk_environment()
     try:
         completed = subprocess.run(
             [str(binary), "--version"],
             capture_output=True,
             text=True,
-            timeout=15,
+            timeout=RTK_SUBPROCESS_TIMEOUT_SECONDS,
             check=False,
             env=env,
         )
@@ -267,8 +291,7 @@ def _available_binary() -> Path | None:
 
 
 def _run_rtk(binary: Path, arguments: tuple[str, ...]) -> None:
-    env = os.environ.copy()
-    env[RTK_TELEMETRY_ENV] = "1"
+    env = _rtk_environment()
     try:
         subprocess.run(
             [str(binary), *arguments],
@@ -314,6 +337,23 @@ def apply_rtk_state(state: RtkState, *, uninstall: bool = False) -> None:
             raise RtkError(f"Could not remove RTK binary at {managed}: {exc}") from exc
 
 
+def _rtk_environment() -> dict[str, str]:
+    """Return a subprocess environment with RTK telemetry forced off."""
+
+    env = os.environ.copy()
+    env[RTK_TELEMETRY_ENV] = "1"
+    return env
+
+
+def parse_rtk_version(text: str | None) -> str | None:
+    """Extract a bare ``MAJOR.MINOR.PATCH`` from ``rtk --version`` output."""
+
+    if not text:
+        return None
+    match = _VERSION_PATTERN.search(text)
+    return match.group(0) if match is not None else None
+
+
 def rtk_status() -> dict[str, bool | str | None]:
     """Return desired agent state and verified binary metadata."""
 
@@ -327,6 +367,10 @@ def rtk_status() -> dict[str, bool | str | None]:
             installed = True
         except RtkError:
             pass
+    installed_version = parse_rtk_version(version)
+    matches_pin: bool | None = None
+    if installed_version is not None:
+        matches_pin = installed_version == RTK_VERSION
     return {
         "installed": installed,
         "claude": state.claude,
@@ -334,4 +378,129 @@ def rtk_status() -> dict[str, bool | str | None]:
         "pi": state.pi,
         "binary_path": str(binary) if binary is not None else None,
         "version": version,
+        "installed_version": installed_version,
+        "pinned_version": RTK_VERSION,
+        "version_matches_pin": matches_pin,
+    }
+
+
+# ------------------------------------------------------------------ rtk gain
+
+
+def _unavailable_gain(reason: str, detail: str | None = None) -> dict[str, Any]:
+    """Return the canonical "no savings data, and here is why" payload."""
+
+    return {
+        "available": False,
+        "reason": reason,
+        "detail": detail,
+        "binary_path": None,
+        "summary": None,
+        "periods": None,
+        "raw": None,
+    }
+
+
+def _optional_number(value: object) -> int | float | None:
+    """Return ``value`` when it is a real JSON number, otherwise ``None``.
+
+    Booleans are rejected on purpose: a missing or non-numeric field must stay
+    distinguishable from a genuine zero RTK reported.
+    """
+
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int | float):
+        return value
+    return None
+
+
+def _parse_gain_summary(
+    payload: dict[str, Any],
+) -> dict[str, int | float | None] | None:
+    summary = payload.get("summary")
+    if not isinstance(summary, dict):
+        return None
+    parsed: dict[str, int | float | None] = {
+        name: _optional_number(summary.get(name)) for name in RTK_GAIN_SUMMARY_FIELDS
+    }
+    if all(value is None for value in parsed.values()):
+        return None
+    return parsed
+
+
+def _parse_gain_periods(payload: dict[str, Any]) -> dict[str, list[Any] | None]:
+    periods: dict[str, list[Any] | None] = {}
+    for name in RTK_GAIN_PERIOD_FIELDS:
+        value = payload.get(name)
+        periods[name] = value if isinstance(value, list) else None
+    return periods
+
+
+def read_rtk_gain() -> dict[str, Any]:
+    """Read RTK's own token-savings report via ``rtk gain --all --format json``.
+
+    Never raises: every failure mode (no binary, non-zero exit, empty stdout,
+    unparseable JSON, unexpected schema, timeout) returns a payload with
+    ``available`` false and a machine-readable ``reason``.
+    """
+
+    binary = _available_binary()
+    if binary is None:
+        return _unavailable_gain("not_installed", "No RTK binary was found.")
+
+    try:
+        completed = subprocess.run(
+            [str(binary), "gain", "--all", "--format", "json"],
+            capture_output=True,
+            text=True,
+            timeout=RTK_SUBPROCESS_TIMEOUT_SECONDS,
+            check=False,
+            env=_rtk_environment(),
+        )
+    except subprocess.TimeoutExpired:
+        return _unavailable_gain(
+            "timeout",
+            f"rtk gain did not finish within {RTK_SUBPROCESS_TIMEOUT_SECONDS}s.",
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        return _unavailable_gain("run_failed", f"Could not run rtk gain: {exc}")
+
+    if completed.returncode != 0:
+        detail = (completed.stderr or completed.stdout or "").strip()
+        return _unavailable_gain(
+            "run_failed",
+            f"rtk gain exited with code {completed.returncode}."
+            + (f" {detail}" if detail else ""),
+        )
+
+    stdout = (completed.stdout or "").strip()
+    if not stdout:
+        return _unavailable_gain("empty_output", "rtk gain produced no output.")
+
+    try:
+        payload = json.loads(stdout)
+    except ValueError as exc:
+        return _unavailable_gain("invalid_json", f"rtk gain output was not JSON: {exc}")
+
+    if not isinstance(payload, dict):
+        return _unavailable_gain(
+            "unexpected_schema", "rtk gain returned a non-object payload."
+        )
+
+    summary = _parse_gain_summary(payload)
+    if summary is None:
+        return _unavailable_gain(
+            "unexpected_schema",
+            "rtk gain returned no recognizable summary fields.",
+        )
+
+    return {
+        "available": True,
+        "reason": None,
+        "detail": None,
+        "binary_path": str(binary),
+        "summary": summary,
+        "periods": _parse_gain_periods(payload),
+        "raw": payload,
     }

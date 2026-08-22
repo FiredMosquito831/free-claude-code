@@ -91,6 +91,9 @@ def test_post_partial_update_preserves_other_agents(monkeypatch, tmp_path):
         "pi": True,
         "binary_path": None,
         "version": None,
+        "installed_version": None,
+        "pinned_version": rtk_config.RTK_VERSION,
+        "version_matches_pin": None,
     }
     assert applied == [RtkState(claude=True, codex=False, pi=True)]
 

@@ -159,23 +159,23 @@ class TestPlatformSelection:
         assert rtk_config._RELEASES == {
             ("linux", "x86_64"): (
                 "rtk-x86_64-unknown-linux-musl.tar.gz",
-                "d94cc2a3e57fa534892b5235a726e7eeb7523f205a5f8f48f853bfcae7be7e33",
+                "c4c036fbf181fc55ef329786c8c17e0d427972b053b825944d968a6aafef1ba4",
             ),
             ("linux", "aarch64"): (
                 "rtk-aarch64-unknown-linux-gnu.tar.gz",
-                "5cd3f7fa2697faf9e5b77a10ce4e699006e02d4752d792f06550697eb4b8e8a9",
+                "80a746dd305ef944ff50ef011ae4ce3878dd5ba88dfe35d859d05498191637c3",
             ),
             ("darwin", "x86_64"): (
                 "rtk-x86_64-apple-darwin.tar.gz",
-                "636f808db86b2cefab7db7dd9393da8b6e4721bb2ffaa0644e3ffa52d3420d81",
+                "9ea02f889d5a2779e4fb700df4587824303c5a57cda22e903e30058079fca0ef",
             ),
             ("darwin", "aarch64"): (
                 "rtk-aarch64-apple-darwin.tar.gz",
-                "b7c2218eca538b54e63fa594a8ce58bd3716851b01b3b0dc026515323baf6393",
+                "064151cfc2d50b24d810b06a0af2e41b9c945e83534e4c438c3d3eae607fc3f4",
             ),
             ("win32", "x86_64"): (
                 "rtk-x86_64-pc-windows-msvc.zip",
-                "3a1e114edce9080f8a10663e9c87488363a82f14a5ca8aab2ad416817f89d47c",
+                "34cea9009a8099acdaf85147b971d95f65efabfa63fb3aea7d3e2b73e6f517c3",
             ),
         }
 
@@ -449,7 +449,7 @@ class TestRtkStatus:
             rtk_config.subprocess,
             "run",
             lambda *a, **k: SimpleNamespace(
-                returncode=0, stdout="rtk 0.44.2\n", stderr=""
+                returncode=0, stdout=f"rtk {rtk_config.RTK_VERSION}\n", stderr=""
             ),
         )
 
@@ -461,7 +461,10 @@ class TestRtkStatus:
             "codex": False,
             "pi": False,
             "binary_path": str(binary),
-            "version": "rtk 0.44.2",
+            "version": f"rtk {rtk_config.RTK_VERSION}",
+            "installed_version": rtk_config.RTK_VERSION,
+            "pinned_version": rtk_config.RTK_VERSION,
+            "version_matches_pin": True,
         }
 
     def test_status_reports_not_installed(self, monkeypatch, tmp_path):
