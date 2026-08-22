@@ -14,6 +14,37 @@ function totalInputTokens(row) {
   );
 }
 
+// A request a local rule answered never reached a provider, so its provider
+// column is NULL and the breakdown keys it as "local:<rule>" (see
+// PROVIDER_KEY_SQL). "(unknown)" is still used, and still honest, for a row
+// that has no provider and no rule -- we really do not know what served it.
+const LOCAL_PROVIDER_PREFIX = "local:";
+const UNKNOWN_PROVIDER_KEY = "(unknown)";
+
+/** Turn a rule name into the words a reader of this dashboard uses. */
+function optimizationRuleLabel(rule) {
+  return String(rule || "").replace(/_/g, " ").trim();
+}
+
+/** The label for a provider-shaped value, wherever one is shown.
+ *
+ * Takes the breakdown key OR a raw row: a request row carries `provider` and
+ * `optimization` as separate columns, and both have to reach the same words.
+ */
+function providerDisplayLabel(value, optimization) {
+  const key = value == null ? "" : String(value);
+  if (key.startsWith(LOCAL_PROVIDER_PREFIX)) {
+    return `answered locally · ${optimizationRuleLabel(
+      key.slice(LOCAL_PROVIDER_PREFIX.length),
+    )}`;
+  }
+  if (key && key !== UNKNOWN_PROVIDER_KEY) return key;
+  if (optimization) {
+    return `answered locally · ${optimizationRuleLabel(optimization)}`;
+  }
+  return key;
+}
+
 function formatCacheHitRate(row) {
   const total = totalInputTokens(row);
   const cached = Number(row?.cache_read_tokens || 0);
@@ -126,6 +157,16 @@ const VIEW_GROUPS = [
     title: "Observability",
     sections: [],
     containerId: "requestsSections",
+  },
+  {
+    // Measurement first, controls beside the number they affect. The
+    // trimming settings are the only fields this view owns; everything above
+    // them is read out of the request log.
+    id: "optimizer",
+    label: "Token Optimizer",
+    title: "Token Optimizer",
+    sections: ["optimizer"],
+    containerId: "optimizerSections",
   },
   {
     id: "web_search",
@@ -362,6 +403,10 @@ function setActiveView(viewId, { scroll = false } = {}) {
 
   if (activeView.id === "requests") {
     loadRequestsView().catch((error) => showMessage(error.message, "error"));
+  }
+
+  if (activeView.id === "optimizer") {
+    loadOptimizerView().catch((error) => showMessage(error.message, "error"));
   }
 }
 
@@ -957,6 +1002,8 @@ function renderSections(sections, fields) {
 
       if (section.id === "models") {
         sectionEl.appendChild(renderModelRouting(gridFields));
+      } else if (section.id === "optimizer") {
+        sectionEl.appendChild(renderOptimizerSettings(gridFields));
       } else if (section.id === "providers") {
         // Catalog order in one flat grid stopped scaling once there were 30+
         // providers to scan; grouped, searchable cards replace it, and each
@@ -6594,7 +6641,11 @@ async function loadRequestsView() {
 }
 
 function populateRequestFilterOptions(stats) {
-  const populate = (id, rows, known) => {
+  // `label` shows the reader the words the table uses while `value` stays the
+  // key the filter actually matches on. Synthetic keys ("local:<rule>") are
+  // real filter values -- the store resolves them to "no provider, this rule"
+  // -- so they belong in the list rather than being hidden from it.
+  const populate = (id, rows, known, labelFor) => {
     rows.forEach((row) => known.add(row.key));
     const datalist = byId(id);
     datalist.replaceChildren(
@@ -6603,11 +6654,18 @@ function populateRequestFilterOptions(stats) {
         .map((value) => {
           const option = document.createElement("option");
           option.value = value;
+          const label = labelFor ? labelFor(value) : "";
+          if (label && label !== value) option.label = label;
           return option;
         }),
     );
   };
-  populate("reqProviderOptions", stats.by_provider || [], reqState.providerOptions);
+  populate(
+    "reqProviderOptions",
+    stats.by_provider || [],
+    reqState.providerOptions,
+    providerDisplayLabel,
+  );
   populate("reqModelOptions", stats.by_model || [], reqState.modelOptions);
   populate("reqKeyOptions", stats.by_key || [], reqState.keyOptions);
 }
@@ -7024,7 +7082,7 @@ function renderRequestProviderBreakdown(rows) {
         const requests = Number(row.requests || 0);
         const errors = Number(row.errors || 0);
         return [
-          row.key || "unknown",
+          providerDisplayLabel(row.key) || UNKNOWN_PROVIDER_KEY,
           formatAnalyticsNumber(requests),
           requests ? `${((errors / requests) * 100).toFixed(1)}%` : "0%",
           formatAnalyticsNumber(uncachedInputTokens(row)),
@@ -7147,7 +7205,7 @@ function renderRequestsTable(rows) {
     const cells = [
       formatRequestTime(row),
       row.endpoint || "",
-      row.provider || "",
+      providerDisplayLabel(row.provider, row.optimization),
       row.key_label || "",
     ];
     cells.forEach((text) => {
@@ -7437,7 +7495,7 @@ async function openRequestDetail(requestId) {
     ["Endpoint", row.endpoint],
     ["Protocol", row.protocol],
     ["Requested model", row.requested_model],
-    ["Provider", row.provider],
+    ["Provider", providerDisplayLabel(row.provider, row.optimization) || null],
     ["Resolved model", row.resolved_model],
     ["Route attempt", formatRouteAttempt(row)],
     ["Vision model", formatVisionModel(row)],
@@ -8412,5 +8470,899 @@ function setupGuideCodeCopy() {
 setupGuideScreenshots();
 setupGuideScrollspy();
 setupGuideCodeCopy();
+
+
+/* ------------------------------------------------------------ token optimizer
+   A ledger, read top to bottom: what you saved, what is saving it, what could
+   save more. Nothing on this page is enabled by rendering it, and nothing here
+   invents a number. A figure we could not read is an em dash; a figure we read
+   as zero is a zero. Those are different facts and the page never merges them.
+
+   The measured trimming figures below come from
+   core/anthropic/tool_result_trimming.py, which holds the full table. They are
+   restated here because the reader deciding whether to flip the switch is
+   looking at this page, not at that docstring.                              */
+
+const OPT_UNKNOWN = "—";
+
+const optState = {
+  stats: null,
+  requestStats: null,
+  rtk: null,
+  rtkGain: null,
+  candidates: null,
+  candidatesError: null,
+  loading: false,
+  scanning: false,
+};
+
+function optNumber(value) {
+  if (value == null || Number.isNaN(Number(value))) return OPT_UNKNOWN;
+  return Number(value).toLocaleString();
+}
+
+/** Compact form for a headline figure. Exact figures live in the tables. */
+function optCompact(value) {
+  if (value == null || Number.isNaN(Number(value))) return OPT_UNKNOWN;
+  const number = Number(value);
+  const abs = Math.abs(number);
+  if (abs >= 1e9) return `${(number / 1e9).toFixed(1)}B`;
+  if (abs >= 1e6) return `${(number / 1e6).toFixed(1)}M`;
+  if (abs >= 1e3) return `${(number / 1e3).toFixed(1)}K`;
+  return String(number);
+}
+
+function optKpi({ label, value, sub, unknown = false }) {
+  const card = document.createElement("div");
+  card.className = `opt-kpi${unknown ? " opt-kpi-unknown" : ""}`;
+  const labelEl = document.createElement("div");
+  labelEl.className = "opt-kpi-label";
+  labelEl.textContent = label;
+  const valueEl = document.createElement("div");
+  valueEl.className = "opt-kpi-value";
+  valueEl.textContent = value;
+  const subEl = document.createElement("div");
+  subEl.className = "opt-kpi-sub";
+  subEl.textContent = sub;
+  card.append(labelEl, valueEl, subEl);
+  return card;
+}
+
+/** Dense table. A header may be a string or {label, right}. */
+function optTable(headers, rows, emptyText) {
+  const table = document.createElement("table");
+  table.className = "opt-table";
+  const thead = document.createElement("thead");
+  const headRow = document.createElement("tr");
+  headers.forEach((header) => {
+    const th = document.createElement("th");
+    const spec = typeof header === "string" ? { label: header } : header;
+    th.textContent = spec.label;
+    if (spec.right) th.className = "opt-r";
+    headRow.appendChild(th);
+  });
+  thead.appendChild(headRow);
+  const tbody = document.createElement("tbody");
+  if (rows.length === 0) {
+    const tr = document.createElement("tr");
+    const td = document.createElement("td");
+    td.colSpan = headers.length;
+    td.className = "opt-empty";
+    td.textContent = emptyText;
+    tr.appendChild(td);
+    tbody.appendChild(tr);
+  }
+  rows.forEach((cells) => {
+    const tr = document.createElement("tr");
+    cells.forEach((cell, index) => {
+      const td = document.createElement("td");
+      const spec = headers[index];
+      if (typeof spec === "object" && spec.right) td.className = "opt-r opt-num";
+      if (cell instanceof Node) {
+        td.replaceChildren(cell);
+      } else {
+        td.textContent = cell;
+      }
+      tr.appendChild(td);
+    });
+    tbody.appendChild(tr);
+  });
+  table.append(thead, tbody);
+  return table;
+}
+
+/** A sparkline and, always, the numbers behind it.
+ *
+ * Under four points there is no shape to read, so the numbers are shown on
+ * their own rather than dressed up as a chart. Above that the bars carry the
+ * shape and the <details> carries the values -- a chart with no numeric
+ * equivalent is an accessibility gap this dashboard already has too much of.
+ */
+function optSparkline(points, { valueKey = "requests", label = "" } = {}) {
+  const wrap = document.createElement("div");
+  const values = points.map((point) => Number(point[valueKey] || 0));
+  const peak = values.length ? Math.max(...values) : 0;
+
+  if (points.length < 4) {
+    const note = document.createElement("div");
+    note.className = "opt-sub";
+    note.textContent = points.length
+      ? `${points.length} day${points.length === 1 ? "" : "s"} of history — too few to plot`
+      : "No daily history yet";
+    wrap.appendChild(note);
+  } else {
+    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    svg.setAttribute("class", "opt-spark");
+    svg.setAttribute("viewBox", `0 0 ${points.length * 10} 38`);
+    svg.setAttribute("role", "img");
+    svg.setAttribute(
+      "aria-label",
+      `${label} over ${points.length} days, peak ${optNumber(peak)}`,
+    );
+    points.forEach((point, index) => {
+      const value = Number(point[valueKey] || 0);
+      const height = peak > 0 ? Math.max(1, Math.round((value / peak) * 38)) : 1;
+      const rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+      rect.setAttribute("x", String(index * 10));
+      rect.setAttribute("y", String(38 - height));
+      rect.setAttribute("width", "8");
+      rect.setAttribute("height", String(height));
+      if (value === peak && peak > 0) rect.setAttribute("class", "opt-spark-hi");
+      svg.appendChild(rect);
+    });
+    wrap.appendChild(svg);
+  }
+
+  if (points.length) {
+    const details = document.createElement("details");
+    details.className = "opt-data";
+    const summary = document.createElement("summary");
+    summary.textContent = "Show the numbers";
+    details.append(
+      summary,
+      optTable(
+        ["Day", { label: "Fired", right: true }, { label: "Tokens", right: true }],
+        points
+          .slice()
+          .reverse()
+          .map((point) => [
+            point.bucket,
+            optNumber(point.requests),
+            optNumber(point.tokens_saved),
+          ]),
+        "No days recorded.",
+      ),
+    );
+    wrap.appendChild(details);
+  }
+  return wrap;
+}
+
+function optPill(text, variant = "") {
+  const pill = document.createElement("span");
+  pill.className = `opt-pill${variant ? ` opt-pill-${variant}` : ""}`;
+  const dot = document.createElement("i");
+  dot.className = "opt-dot";
+  pill.append(dot, document.createTextNode(text));
+  return pill;
+}
+
+function optCode(text) {
+  const code = document.createElement("code");
+  code.textContent = text;
+  return code;
+}
+
+function optEmpty(text) {
+  const box = document.createElement("div");
+  box.className = "opt-empty";
+  box.textContent = text;
+  return box;
+}
+
+async function loadOptimizerView({ force = false } = {}) {
+  if (optState.loading) return;
+  if (optState.stats && !force) {
+    renderOptimizerView();
+    return;
+  }
+  optState.loading = true;
+  try {
+    // Four independent reads. One failing must not blank the other three:
+    // "RTK could not be asked" is a fact about RTK, not about the log.
+    const [stats, requestStats, rtk, rtkGain] = await Promise.all([
+      api("/admin/api/requests/optimization-stats").catch((error) => ({
+        enabled: false,
+        error: error.message,
+      })),
+      api("/admin/api/requests/stats").catch((error) => ({
+        enabled: false,
+        error: error.message,
+      })),
+      api("/admin/api/rtk").catch((error) => ({ error: error.message })),
+      api("/admin/api/rtk/gain").catch((error) => ({
+        available: false,
+        reason: "run_failed",
+        detail: error.message,
+      })),
+    ]);
+    optState.stats = stats;
+    optState.requestStats = requestStats;
+    optState.rtk = rtk;
+    optState.rtkGain = rtkGain;
+  } finally {
+    optState.loading = false;
+  }
+  renderOptimizerView();
+}
+
+function renderOptimizerView() {
+  if (!byId("optKpis")) return;
+  renderOptimizerKpis();
+  renderOptimizerRules();
+  renderOptimizerCandidates();
+  renderOptimizerCache();
+  syncOptimizerTrimControls();
+}
+
+/** Headline figures. Every one of them says where it stopped being knowable. */
+function renderOptimizerKpis() {
+  const container = byId("optKpis");
+  if (!container) return;
+  const stats = optState.stats || {};
+  const scope = byId("optLedgerScope");
+  const cards = [];
+
+  if (stats.enabled === false) {
+    scope.textContent = stats.error
+      ? `The request log could not be read: ${stats.error}`
+      : "Request logging is off, so there is nothing measured to show.";
+    container.replaceChildren(
+      optEmpty(
+        "Turn on request logging to measure what the optimizer is doing. " +
+          "Until then this page can only tell you what is switched on, not " +
+          "what it saved.",
+      ),
+    );
+    return;
+  }
+
+  const total = Number(stats.total_requests || 0);
+  const locally = Number(stats.answered_locally || 0);
+  scope.textContent = `${optNumber(total)} request${total === 1 ? "" : "s"} recorded · all-time`;
+
+  cards.push(
+    optKpi({
+      label: "Tokens never sent",
+      value: optCompact(stats.tokens_saved),
+      sub: "by local rules, all-time",
+    }),
+  );
+  cards.push(
+    optKpi({
+      label: "Requests answered locally",
+      value: optNumber(locally),
+      sub: total
+        ? `${((locally / total) * 100).toFixed(1)}% of all traffic`
+        : "no traffic recorded yet",
+    }),
+  );
+
+  // RTK is a separate program. "Not installed" and "installed but reported
+  // nothing" are different answers and are printed as different answers.
+  const gain = optState.rtkGain || {};
+  const rtk = optState.rtk || {};
+  if (gain.available && gain.summary && gain.summary.total_saved != null) {
+    cards.push(
+      optKpi({
+        label: "RTK savings",
+        value: optCompact(gain.summary.total_saved),
+        sub:
+          gain.summary.avg_savings_pct != null
+            ? `${Number(gain.summary.avg_savings_pct).toFixed(1)}% average, RTK's own figure`
+            : "RTK's own figure",
+      }),
+    );
+  } else {
+    const reasons = {
+      not_installed: "not installed",
+      run_failed: "could not be run",
+      empty_output: "reported nothing",
+      invalid_json: "output could not be parsed",
+      unexpected_schema: "output was not recognised",
+      timeout: "did not answer in time",
+    };
+    cards.push(
+      optKpi({
+        label: "RTK savings",
+        value: OPT_UNKNOWN,
+        sub:
+          reasons[gain.reason] ||
+          (rtk.installed ? "no figure reported" : "not installed"),
+        unknown: true,
+      }),
+    );
+  }
+
+  const trimming = optimizerTrimSummary();
+  cards.push(
+    optKpi({
+      label: "Tool-result trimming",
+      value: trimming.headline,
+      sub: trimming.detail,
+      unknown: !trimming.master,
+    }),
+  );
+
+  container.replaceChildren(...cards);
+}
+
+/** What the trimming settings currently say. Read from the live controls. */
+function optimizerTrimSummary() {
+  const readField = (key) => {
+    const input = document.querySelector(`[data-key="${key}"]`);
+    if (input && input.matches("input, select, textarea")) {
+      return input.type === "checkbox"
+        ? input.checked
+          ? "true"
+          : "false"
+        : input.value;
+    }
+    const field = state.fields?.get(key);
+    return field ? field.value || field.default || "" : "";
+  };
+  const master = readField("ENABLE_TOOL_RESULT_TRIMMING") === "true";
+  const modes = ["READ", "GREP", "GLOB"].map((tool) =>
+    readField(`TOOL_RESULT_TRIM_${tool}`),
+  );
+  const on = modes.filter((mode) => mode === "on").length;
+  const observing = modes.filter((mode) => mode === "observe").length;
+  if (!master) {
+    return { master: false, headline: "off", detail: "master switch is off" };
+  }
+  if (on === 0 && observing === 0) {
+    return { master: true, headline: "idle", detail: "every rule is off" };
+  }
+  if (on === 0) {
+    return {
+      master: true,
+      headline: "observing",
+      detail: `${observing} rule${observing === 1 ? "" : "s"} measuring, wire unchanged`,
+    };
+  }
+  return {
+    master: true,
+    headline: "trimming",
+    detail: `${on} rule${on === 1 ? "" : "s"} editing what the model sees`,
+  };
+}
+
+function renderOptimizerRules() {
+  const container = byId("optRules");
+  if (!container) return;
+  const stats = optState.stats || {};
+  const rules = stats.rules || [];
+  const rows = rules.map((rule) => {
+    const name = document.createElement("div");
+    const title = document.createElement("div");
+    title.className = "opt-rule-name";
+    title.textContent = rule.label || rule.rule;
+    const description = document.createElement("div");
+    description.className = "opt-sub";
+    description.textContent = rule.description || "";
+    name.append(title, description);
+
+    let statePill;
+    if (rule.enabled === true) statePill = optPill("on", "on");
+    else if (rule.enabled === false) statePill = optPill("off");
+    else statePill = optPill("retired", "warn");
+
+    const answer = document.createElement("div");
+    if (rule.answer == null) {
+      answer.className = "opt-sub";
+      answer.textContent = OPT_UNKNOWN;
+    } else if (rule.answer === "") {
+      answer.append(optCode('""'), document.createTextNode(" (nothing shown)"));
+    } else {
+      answer.appendChild(optCode(JSON.stringify(rule.answer)));
+    }
+
+    return [
+      name,
+      statePill,
+      optNumber(rule.requests),
+      // A rule that never fired saved an unknown amount, not zero.
+      rule.tokens_saved == null ? OPT_UNKNOWN : optNumber(rule.tokens_saved),
+      optSparkline(rule.daily || [], { label: rule.label || rule.rule }),
+      answer,
+    ];
+  });
+
+  container.replaceChildren(
+    optTable(
+      [
+        "Rule",
+        "State",
+        { label: "Fired", right: true },
+        { label: "Tokens avoided", right: true },
+        `Last ${stats.series_days || 14} days`,
+        "Answers with",
+      ],
+      rows,
+      "No optimization rules are registered.",
+    ),
+  );
+
+  const partial = rules.filter(
+    (rule) =>
+      Number(rule.requests || 0) > 0 &&
+      Number(rule.tokens_reported || 0) < Number(rule.requests || 0),
+  );
+  if (partial.length) {
+    const note = document.createElement("p");
+    note.className = "opt-hint";
+    note.textContent =
+      "Some rows predate per-request savings accounting, so the tokens above " +
+      "cover fewer requests than the fire count. The gap is not zero saving; " +
+      "it is saving that was never written down.";
+    container.appendChild(note);
+  }
+}
+
+function renderOptimizerCandidates() {
+  const container = byId("optCandidates");
+  const scope = byId("optCandidatesScope");
+  if (!container || !scope) return;
+  if (optState.scanning) {
+    container.replaceChildren(optEmpty("Scanning the log…"));
+    return;
+  }
+  if (optState.candidatesError) {
+    scope.textContent = "The scan could not be run.";
+    container.replaceChildren(optEmpty(optState.candidatesError));
+    return;
+  }
+  const result = optState.candidates;
+  if (!result) {
+    scope.textContent =
+      "Recurring request families no rule covers. Nothing is scanned until you ask.";
+    container.replaceChildren(
+      optEmpty(
+        "No scan has been run. A scan decompresses recent request bodies, " +
+          "which costs seconds of CPU, so it happens on demand and never on a timer.",
+      ),
+    );
+    return;
+  }
+  if (result.enabled === false) {
+    scope.textContent = "Request logging is off, so there is nothing to scan.";
+    container.replaceChildren(
+      optEmpty("Turn on request logging to look for recurring request families."),
+    );
+    return;
+  }
+
+  const scanned = result.scanned || {};
+  const parts = [
+    `scanned ${optNumber(scanned.rows)} row${scanned.rows === 1 ? "" : "s"}`,
+  ];
+  if (scanned.elapsed_ms != null) {
+    parts.push(`${(Number(scanned.elapsed_ms) / 1000).toFixed(1)} s`);
+  }
+  if (scanned.truncated) {
+    parts.push(
+      `bounded at ${optNumber(scanned.row_limit)} of ${optNumber(scanned.matching_rows)} matching — this is a sample`,
+    );
+  }
+  if (Number(scanned.rows_without_prompt_text || 0) > 0) {
+    parts.push(
+      `${optNumber(scanned.rows_without_prompt_text)} rows carried no prompt text and could not be grouped`,
+    );
+  }
+  if (result.capture_bodies === false) {
+    parts.push(
+      "body capture is off, so only rows written while it was on can be grouped",
+    );
+  }
+  scope.textContent = parts.join(" · ");
+
+  const rows = (result.candidates || []).map((family) => [
+    optCode(family.signature),
+    optNumber(family.requests),
+    optNumber(family.tokens_total),
+    optNumber(family.tokens_per_request),
+    `${formatOptDate(family.first_seen)} – ${formatOptDate(family.last_seen)}`,
+  ]);
+  container.replaceChildren(
+    optTable(
+      [
+        "Family",
+        { label: "Requests", right: true },
+        { label: "Tokens", right: true },
+        { label: "Per request", right: true },
+        "Seen",
+      ],
+      rows,
+      "No recurring family in this scan is left uncovered by a rule.",
+    ),
+  );
+  if (result.candidates_truncated) {
+    const note = document.createElement("p");
+    note.className = "opt-hint";
+    note.textContent = `Showing ${optNumber((result.candidates || []).length)} of ${optNumber(result.candidates_total)} families.`;
+    container.appendChild(note);
+  }
+}
+
+function formatOptDate(epoch) {
+  if (epoch == null) return OPT_UNKNOWN;
+  return new Date(Number(epoch) * 1000).toLocaleDateString();
+}
+
+function renderOptimizerCache() {
+  const container = byId("optCache");
+  if (!container) return;
+  const stats = optState.requestStats || {};
+  if (stats.enabled === false) {
+    container.replaceChildren(
+      optEmpty(
+        stats.error ||
+          "Request logging is off, so cache effectiveness cannot be measured.",
+      ),
+    );
+    return;
+  }
+  const rows = (stats.by_provider || []).map((row) => {
+    const total = totalInputTokens(row);
+    const cached = Number(row.cache_read_tokens || 0);
+    const reported = row.cache_reported !== 0 && total > 0;
+    const percent = reported ? (cached / total) * 100 : null;
+
+    const bar = document.createElement("div");
+    if (reported) {
+      bar.className = "opt-bar";
+      const fill = document.createElement("i");
+      // The threshold is the measured trimming break-even, so this bar and the
+      // warning at the bottom of the page are talking about the same line.
+      if (percent < 90.9) fill.className = "opt-bar-low";
+      fill.style.width = `${Math.max(0, Math.min(100, percent)).toFixed(0)}%`;
+      bar.appendChild(fill);
+    } else {
+      bar.className = "opt-sub";
+      bar.textContent = "reports no cache figures";
+    }
+
+    return [
+      providerDisplayLabel(row.key) || UNKNOWN_PROVIDER_KEY,
+      optNumber(row.requests),
+      formatCacheHitRate(row),
+      bar,
+    ];
+  });
+  container.replaceChildren(
+    optTable(
+      ["Provider", { label: "Requests", right: true }, { label: "Cache hit", right: true }, ""],
+      rows,
+      "No provider traffic recorded yet.",
+    ),
+  );
+}
+
+/* -------------------------------------------------- trimming settings block */
+
+/** Wrap a manifest field in a control shaped like the thing it controls.
+ *
+ * The real input from buildFieldControl() goes into the document hidden: the
+ * shared dirty/apply machinery walks [data-key] and an input it cannot find is
+ * an edit that is silently never saved. The visible control writes through to
+ * it and dispatches `change`, so the dirty counter still counts one change per
+ * setting rather than one per widget.
+ */
+function optProxiedField(field) {
+  const { input, control } = buildFieldControl(field);
+  const holder = document.createElement("div");
+  holder.className = "opt-proxied-field";
+  holder.appendChild(control);
+  return { input, holder };
+}
+
+function optSwitch(field, describedBy) {
+  const { input, holder } = optProxiedField(field);
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "opt-switch";
+  button.setAttribute("aria-label", field.label);
+  if (describedBy) button.setAttribute("aria-describedby", describedBy);
+  button.disabled = Boolean(field.locked);
+  const sync = () => button.setAttribute("aria-pressed", String(input.checked));
+  button.addEventListener("click", () => {
+    input.checked = !input.checked;
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+    sync();
+    renderOptimizerKpis();
+    syncOptimizerTrimControls();
+  });
+  input.addEventListener("change", sync);
+  sync();
+  const wrap = document.createElement("div");
+  wrap.append(holder, button);
+  return wrap;
+}
+
+function optSegmented(field, options, label) {
+  const { input, holder } = optProxiedField(field);
+  const group = document.createElement("div");
+  group.className = "opt-seg";
+  group.setAttribute("role", "group");
+  group.setAttribute("aria-label", label);
+  const sync = () => {
+    buttons.forEach((button) => {
+      button.setAttribute(
+        "aria-pressed",
+        String(button.dataset.state === input.value),
+      );
+    });
+  };
+  const buttons = options.map(([value, text]) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.dataset.state = value;
+    button.textContent = text;
+    button.disabled = Boolean(field.locked);
+    button.addEventListener("click", () => {
+      input.value = value;
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+      sync();
+      renderOptimizerKpis();
+    });
+    group.appendChild(button);
+    return button;
+  });
+  input.addEventListener("change", sync);
+  sync();
+  const wrap = document.createElement("div");
+  wrap.dataset.optSeg = field.key;
+  wrap.append(holder, group);
+  return wrap;
+}
+
+/** Per-tool controls do nothing while the master switch is off; say so by
+ *  disabling them, rather than letting someone set a mode that has no effect
+ *  and walk away believing they enabled something. */
+function syncOptimizerTrimControls() {
+  const master = document.querySelector('[data-key="ENABLE_TOOL_RESULT_TRIMMING"]');
+  const note = byId("optPerToolNote");
+  if (!master || !note) return;
+  const on = master.checked;
+  note.textContent = on
+    ? "Each rule runs independently. Observe changes nothing on the wire."
+    : "Disabled while the master switch is off.";
+  document.querySelectorAll("[data-opt-seg] .opt-seg button").forEach((button) => {
+    button.disabled = !on;
+  });
+}
+
+const OPT_TRIM_MODES = [
+  ["off", "Off"],
+  ["observe", "Observe"],
+  ["on", "On"],
+];
+
+const OPT_TOOL_NOTES = {
+  TOOL_RESULT_TRIM_READ:
+    "Observe records what it would cut and changes nothing on the wire.",
+  TOOL_RESULT_TRIM_GREP:
+    "Cuts on line boundaries, so every path:line:match stays intact.",
+  TOOL_RESULT_TRIM_GLOB: "Path lists; there are no line numbers to preserve.",
+};
+
+/** The measured trimming result, stated on the page that offers the switch.
+ *
+ * These figures are the table in core/anthropic/tool_result_trimming.py. The
+ * previous wording here was "unvalidated"; it has since been measured, and a
+ * measured loss is a stronger thing to say than an unknown.
+ */
+function optimizerTrimWarning() {
+  const note = document.createElement("div");
+  note.className = "opt-note";
+
+  const icon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  icon.setAttribute("class", "opt-note-icon");
+  icon.setAttribute("width", "14");
+  icon.setAttribute("height", "14");
+  icon.setAttribute("viewBox", "0 0 24 24");
+  icon.setAttribute("fill", "none");
+  icon.setAttribute("stroke", "currentColor");
+  icon.setAttribute("stroke-width", "2");
+  icon.setAttribute("aria-hidden", "true");
+  const triangle = document.createElementNS("http://www.w3.org/2000/svg", "path");
+  triangle.setAttribute(
+    "d",
+    "M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z",
+  );
+  triangle.setAttribute("stroke-linejoin", "round");
+  const stem = document.createElementNS("http://www.w3.org/2000/svg", "path");
+  stem.setAttribute("d", "M12 9v4");
+  stem.setAttribute("stroke-linecap", "round");
+  const dot = document.createElementNS("http://www.w3.org/2000/svg", "path");
+  dot.setAttribute("d", "M12 17h.01");
+  dot.setAttribute("stroke-linecap", "round");
+  icon.append(triangle, stem, dot);
+
+  const heading = document.createElement("p");
+  heading.className = "opt-note-heading";
+  const strong = document.createElement("strong");
+  strong.textContent = "Measured harmful at your cache rates.";
+  heading.append(icon, strong);
+
+  const body = document.createElement("p");
+  body.className = "opt-note-body";
+  body.textContent =
+    "Trimming rewrites bytes in the middle of the prompt, and prompt caching " +
+    "depends on those bytes not changing. Measured over a 24-turn session: at " +
+    "the shipped protect-recent-results of 2, trimming costs 10.9% more fresh " +
+    "input tokens than leaving it off, and switching it on mid-conversation " +
+    "costs one near-total cache miss — 3.8% hit and 107,797 fresh tokens " +
+    "on that turn. Break-even is a baseline cache hit rate of about 90.9%: " +
+    "below that trimming wins, above it trimming loses. Check the cache table " +
+    "above against that line, and run a rule in Observe before you run it On.";
+
+  note.append(
+    heading,
+    body,
+    optTable(
+      [
+        "Protect recent",
+        { label: "Fresh tokens", right: true },
+        { label: "Cache hit", right: true },
+        { label: "Chars removed", right: true },
+      ],
+      [
+        ["0", "72,897", "91.9%", "15,024,408"],
+        ["1", "486,278", "62.5%", "13,781,644"],
+        ["2 (shipped default)", "521,860", "69.1%", "12,561,418"],
+        ["4", "955,949", "59.8%", "10,409,077"],
+        ["trimming off", "470,648", "91.8%", "0"],
+      ],
+      "",
+    ),
+  );
+  return note;
+}
+
+/** Custom renderer for the "optimizer" settings section.
+ *
+ * Registered like renderModelRouting: the generic field grid would render nine
+ * unrelated boxes where the shape of the thing is a master switch, three
+ * per-tool rules, and the numbers those rules use.
+ */
+function renderOptimizerSettings(fields) {
+  const byKey = new Map(fields.map((field) => [field.key, field]));
+  const wrap = document.createElement("div");
+  const claimed = new Set();
+
+  const master = byKey.get("ENABLE_TOOL_RESULT_TRIMMING");
+  if (master) {
+    claimed.add(master.key);
+    const bar = document.createElement("div");
+    bar.className = "opt-master";
+    const text = document.createElement("div");
+    const title = document.createElement("div");
+    title.className = "opt-master-title";
+    // The section heading above already names the feature; this names the
+    // control, so the two lines do not say the same words twice.
+    title.textContent = "Master switch";
+    const detail = document.createElement("div");
+    detail.className = "opt-master-detail";
+    detail.id = "optMasterDetail";
+    detail.textContent =
+      "Shortens large Read, Grep and Glob results before they reach the model. " +
+      "This is the only feature on this page that changes what the model sees. " +
+      "Off by default, and off means the request goes upstream exactly as " +
+      "Claude Code sent it.";
+    text.append(title, detail);
+    bar.append(text, optSwitch(master, "optMasterDetail"));
+    wrap.appendChild(bar);
+  }
+
+  const perTool = document.createElement("section");
+  perTool.className = "settings-section opt-section";
+  const heading = document.createElement("div");
+  heading.className = "section-heading";
+  const headingText = document.createElement("div");
+  const headingTitle = document.createElement("h3");
+  headingTitle.textContent = "Per-tool rules";
+  const headingNote = document.createElement("p");
+  headingNote.id = "optPerToolNote";
+  headingText.append(headingTitle, headingNote);
+  heading.appendChild(headingText);
+  perTool.appendChild(heading);
+
+  const toolRows = [
+    ["TOOL_RESULT_TRIM_READ", "Read"],
+    ["TOOL_RESULT_TRIM_GREP", "Grep"],
+    ["TOOL_RESULT_TRIM_GLOB", "Glob"],
+  ]
+    .filter(([key]) => byKey.has(key))
+    .map(([key, tool]) => {
+      claimed.add(key);
+      const name = document.createElement("strong");
+      name.textContent = tool;
+      const effect = document.createElement("div");
+      effect.className = "opt-sub";
+      effect.textContent = OPT_TOOL_NOTES[key] || "";
+      return [
+        name,
+        optSegmented(byKey.get(key), OPT_TRIM_MODES, `${tool} trim mode`),
+        effect,
+      ];
+    });
+
+  const scroll = document.createElement("div");
+  scroll.className = "opt-scroll";
+  scroll.appendChild(
+    optTable(["Tool", "Mode", "Effect"], toolRows, "No trimming rules are registered."),
+  );
+  perTool.appendChild(scroll);
+
+  const knobKeys = [
+    "TOOL_RESULT_TRIM_THRESHOLD_CHARS",
+    "TOOL_RESULT_TRIM_KEEP_HEAD_CHARS",
+    "TOOL_RESULT_TRIM_KEEP_TAIL_CHARS",
+    "TOOL_RESULT_TRIM_PROTECT_RECENT_RESULTS",
+  ].filter((key) => byKey.has(key));
+  if (knobKeys.length) {
+    const grid = document.createElement("div");
+    grid.className = "field-grid";
+    knobKeys.forEach((key) => {
+      claimed.add(key);
+      grid.appendChild(renderField(byKey.get(key)));
+    });
+    perTool.appendChild(grid);
+  }
+
+  perTool.appendChild(optimizerTrimWarning());
+  wrap.appendChild(perTool);
+
+  // Anything the manifest adds to this section later still renders, rather
+  // than silently existing in the API and nowhere on the page. That exact gap
+  // shipped once already, as a settings page with no page.
+  const unclaimed = fields.filter((field) => !claimed.has(field.key));
+  if (unclaimed.length) {
+    const rest = document.createElement("div");
+    rest.className = "field-grid";
+    unclaimed.forEach((field) => rest.appendChild(renderField(field)));
+    wrap.appendChild(rest);
+  }
+
+  return wrap;
+}
+
+function initOptimizerView() {
+  byId("optRefresh")?.addEventListener("click", () => {
+    loadOptimizerView({ force: true }).catch((error) =>
+      showMessage(error.message, "error"),
+    );
+  });
+  byId("optScan")?.addEventListener("click", async (event) => {
+    const button = event.currentTarget;
+    optState.scanning = true;
+    optState.candidatesError = null;
+    button.disabled = true;
+    renderOptimizerCandidates();
+    try {
+      optState.candidates = await api("/admin/api/requests/discover-optimizations");
+    } catch (error) {
+      optState.candidates = null;
+      optState.candidatesError = error.message;
+    } finally {
+      optState.scanning = false;
+      button.disabled = false;
+      renderOptimizerCandidates();
+    }
+  });
+}
+
+initOptimizerView();
 
 initThemeSwitch();

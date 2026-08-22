@@ -821,6 +821,87 @@
             </div>
           </section>
 
+          <section id="view-optimizer" class="admin-view" data-view="optimizer" hidden>
+            <p class="view-intro">
+              What My Claude Code kept off the wire, what is keeping it off, and what
+              could keep more off. Every number here is measured from your own request
+              log. Nothing on this page is enabled for you.
+            </p>
+
+            <section class="settings-section opt-section">
+              <div class="section-heading">
+                <div>
+                  <h3>Ledger</h3>
+                  <p id="optLedgerScope">Reading the request log&hellip;</p>
+                </div>
+                <button type="button" id="optRefresh" class="secondary-button">
+                  Refresh
+                </button>
+              </div>
+              <div id="optKpis" class="opt-kpis" aria-live="polite"></div>
+              <p class="opt-hint">
+                &ldquo;Tokens never sent&rdquo; counts prompt tokens that no provider
+                ever received. It is not a bill estimate &mdash; what a provider would
+                have charged for the reply is unknowable and deliberately not guessed
+                at.
+              </p>
+            </section>
+
+            <section class="settings-section opt-section">
+              <div class="section-heading">
+                <div>
+                  <h3>Local rules</h3>
+                  <p>
+                    Answer a request inside the proxy. No provider is contacted, and
+                    the model sees nothing it would otherwise have seen.
+                  </p>
+                </div>
+              </div>
+              <div id="optRules" class="opt-scroll"></div>
+            </section>
+
+            <section class="settings-section opt-section">
+              <div class="section-heading">
+                <div>
+                  <h3>Candidates</h3>
+                  <p id="optCandidatesScope">
+                    Recurring request families no rule covers.
+                  </p>
+                </div>
+                <button type="button" id="optScan" class="secondary-button">
+                  Scan the log
+                </button>
+              </div>
+              <div id="optCandidates" class="opt-scroll"></div>
+              <p class="opt-hint">
+                Ranked by tokens actually spent. There is no score &mdash; every number
+                a judgement would use is in the row. Scanning is on demand and reads
+                nothing until you ask it to.
+              </p>
+            </section>
+
+            <section class="settings-section opt-section">
+              <div class="section-heading">
+                <div>
+                  <h3>Cache effectiveness</h3>
+                  <p>
+                    The largest lever on this page, and not one the optimizer controls.
+                  </p>
+                </div>
+              </div>
+              <div id="optCache" class="opt-scroll"></div>
+              <p class="opt-hint">
+                An em dash is not zero. A provider that never reports the field is a
+                different fact from one that reported none.
+              </p>
+            </section>
+
+            <div
+              id="optimizerSections"
+              class="form-sections"
+              aria-label="Tool-result trimming configuration"
+            ></div>
+          </section>
           <section id="view-web_search" class="admin-view" data-view="web_search" hidden>
             <section id="webSearchRouteSummary" class="route-summary" aria-live="polite">
               Resolving the effective web-search route…

@@ -104,13 +104,19 @@ SECTIONS: tuple[ConfigSectionSpec, ...] = (
         "Web search provider selection, API keys, and key rotation.",
     ),
     ConfigSectionSpec(
+        "optimizer",
+        "Tool-result trimming",
+        "Shortens large Read, Grep and Glob results before they reach the "
+        "model. This is the only feature in MCC that changes what the model is "
+        "allowed to see, and it is off by default. The local rules above cost "
+        "the model nothing; these controls do.",
+    ),
+    ConfigSectionSpec(
         "limits",
         "Limits",
-        "What MCC waits for, keeps, and records -- and, at the bottom, how "
-        "much of a large Read/Grep/Glob result is forwarded to the model. "
-        "Every value here is a trade-off between how long a failing model may "
-        "hold a request, how much history survives on disk, and how much of a "
-        "tool result the model gets to see.",
+        "What MCC waits for, keeps, and records. Every value here is a "
+        "trade-off between how long a failing model may hold a request, how "
+        "much history survives on disk, and how much log noise you want.",
     ),
     ConfigSectionSpec(
         "desktop",
@@ -481,7 +487,7 @@ _NON_PROVIDER_FIELDS: tuple[ConfigFieldSpec, ...] = (
     ConfigFieldSpec(
         "ENABLE_TITLE_GENERATION_SKIP",
         "Title Generation Skip",
-        "runtime",
+        "optimizer",
         "boolean",
         settings_attr="enable_title_generation_skip",
         default="true",
@@ -490,7 +496,7 @@ _NON_PROVIDER_FIELDS: tuple[ConfigFieldSpec, ...] = (
     ConfigFieldSpec(
         "ENABLE_SUGGESTION_MODE_SKIP",
         "Suggestion Mode Skip",
-        "runtime",
+        "optimizer",
         "boolean",
         settings_attr="enable_suggestion_mode_skip",
         default="true",
@@ -1010,7 +1016,7 @@ _NON_PROVIDER_FIELDS: tuple[ConfigFieldSpec, ...] = (
     ConfigFieldSpec(
         "ENABLE_TOOL_RESULT_TRIMMING",
         "Trim large tool results",
-        "limits",
+        "optimizer",
         "boolean",
         settings_attr="enable_tool_result_trimming",
         default="false",
@@ -1029,7 +1035,7 @@ _NON_PROVIDER_FIELDS: tuple[ConfigFieldSpec, ...] = (
     ConfigFieldSpec(
         "TOOL_RESULT_TRIM_READ",
         "Read results",
-        "limits",
+        "optimizer",
         "select",
         settings_attr="tool_result_trim_read",
         default="off",
@@ -1039,7 +1045,7 @@ _NON_PROVIDER_FIELDS: tuple[ConfigFieldSpec, ...] = (
     ConfigFieldSpec(
         "TOOL_RESULT_TRIM_GREP",
         "Grep results",
-        "limits",
+        "optimizer",
         "select",
         settings_attr="tool_result_trim_grep",
         default="off",
@@ -1049,7 +1055,7 @@ _NON_PROVIDER_FIELDS: tuple[ConfigFieldSpec, ...] = (
     ConfigFieldSpec(
         "TOOL_RESULT_TRIM_GLOB",
         "Glob results",
-        "limits",
+        "optimizer",
         "select",
         settings_attr="tool_result_trim_glob",
         default="off",
@@ -1059,7 +1065,7 @@ _NON_PROVIDER_FIELDS: tuple[ConfigFieldSpec, ...] = (
     ConfigFieldSpec(
         "TOOL_RESULT_TRIM_THRESHOLD_CHARS",
         "Trim above",
-        "limits",
+        "optimizer",
         "number",
         settings_attr="tool_result_trim_threshold_chars",
         default="20000",
@@ -1073,7 +1079,7 @@ _NON_PROVIDER_FIELDS: tuple[ConfigFieldSpec, ...] = (
     ConfigFieldSpec(
         "TOOL_RESULT_TRIM_KEEP_HEAD_CHARS",
         "Keep from the start",
-        "limits",
+        "optimizer",
         "number",
         settings_attr="tool_result_trim_keep_head_chars",
         default="4000",
@@ -1087,7 +1093,7 @@ _NON_PROVIDER_FIELDS: tuple[ConfigFieldSpec, ...] = (
     ConfigFieldSpec(
         "TOOL_RESULT_TRIM_KEEP_TAIL_CHARS",
         "Keep from the end",
-        "limits",
+        "optimizer",
         "number",
         settings_attr="tool_result_trim_keep_tail_chars",
         default="4000",
@@ -1101,7 +1107,7 @@ _NON_PROVIDER_FIELDS: tuple[ConfigFieldSpec, ...] = (
     ConfigFieldSpec(
         "TOOL_RESULT_TRIM_PROTECT_RECENT_RESULTS",
         "Never trim the newest",
-        "limits",
+        "optimizer",
         "number",
         settings_attr="tool_result_trim_protect_recent_results",
         default="2",

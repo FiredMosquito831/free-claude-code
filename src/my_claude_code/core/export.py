@@ -17,6 +17,8 @@ from typing import Any, Literal, cast
 
 import openpyxl
 
+from my_claude_code.core.request_log import PROVIDER_KEY_SQL
+
 Format = Literal["json", "csv", "xlsx", "txt"]
 REQUEST_SCOPE = "requests"
 WEBSEARCH_SCOPE = "websearch"
@@ -478,7 +480,11 @@ _REQUEST_AGGREGATE: dict[str, tuple[tuple[str, str], ...]] = {
 
 # Dimension -> SQL alias expression for the request-log scope.
 _REQUEST_DIMENSION_SQL: dict[str, str] = {
-    "provider": "COALESCE(provider, '(unknown)')",
+    # Shared with the dashboard breakdown so an export and the page it was
+    # exported from group the same rows under the same key. Traffic a local
+    # rule answered has no provider by design and is named for its rule
+    # instead of being pooled into "(unknown)" with genuinely unattributed rows.
+    "provider": PROVIDER_KEY_SQL,
     "model": "COALESCE(resolved_model, '(unknown)')",
     "key": "COALESCE(key_label, '(unknown)')",
     "period": "strftime('%Y-%m-%d', ts_epoch, 'unixepoch')",
