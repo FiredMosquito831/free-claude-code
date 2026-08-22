@@ -84,6 +84,11 @@ from my_claude_code.config.websearch_catalog import (
     WEBSEARCH_CATALOG,
     WebSearchDescriptor,
 )
+from my_claude_code.core.optimization_discovery import (
+    DEFAULT_SCAN_ROW_LIMIT,
+    MAX_SCAN_ROW_LIMIT,
+    discover_families,
+)
 from my_claude_code.core.request_log import RequestLogStore, store_from_settings
 from my_claude_code.providers.anthropic_oauth.credentials import (
     OAuthTokens,
@@ -1484,6 +1489,53 @@ async def request_log_lifetime(
     result = await asyncio.to_thread(store.lifetime)
     result["enabled"] = True
     result["retained_rows_max"] = int(settings.request_log_max_rows)
+    return result
+
+
+@router.get("/admin/api/requests/discover-optimizations")
+async def request_log_discover_optimizations(
+    request: Request,
+    row_limit: int = DEFAULT_SCAN_ROW_LIMIT,
+    since: float | None = None,
+    until: float | None = None,
+    min_requests: int = 2,
+    family_limit: int = 50,
+    settings: Settings = Depends(get_settings),
+):
+    """Cluster logged requests into recurring prompt families, on demand.
+
+    Answers "which repeated request shapes are we paying for, and which are
+    already answered locally" -- the drift the hand-maintained optimization
+    rule list cannot report on itself. Purely observational: it proposes
+    nothing and changes nothing about how any request is answered.
+
+    Deliberately not cached and not scheduled. Every call is a fresh
+    decompressing scan a human asked for, bounded by ``row_limit`` so the
+    default returns in seconds on a large log; the ``scanned`` block in the
+    response states what the bound actually covered.
+    """
+    require_loopback_admin(request)
+    store = _request_log_store_or_none(settings)
+    if store is None:
+        return {"enabled": False}
+    if row_limit > MAX_SCAN_ROW_LIMIT:
+        raise HTTPException(
+            status_code=422,
+            detail=f"row_limit must not exceed {MAX_SCAN_ROW_LIMIT}",
+        )
+    # A decompressing scan of thousands of rows is seconds of blocking CPU;
+    # on the event loop it would stall every proxied request for that long.
+    result = await asyncio.to_thread(
+        discover_families,
+        store,
+        row_limit=row_limit,
+        since=since,
+        until=until,
+        min_requests=min_requests,
+        family_limit=family_limit,
+    )
+    result["enabled"] = True
+    result["capture_bodies"] = bool(settings.request_log_capture_bodies)
     return result
 
 
