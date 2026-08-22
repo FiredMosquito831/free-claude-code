@@ -24,7 +24,11 @@ from my_claude_code.config.reasoning import ReasoningPreference
 from my_claude_code.config.settings import Settings
 from my_claude_code.core.anthropic.models import Message, MessagesRequest
 from my_claude_code.core.async_iterators import AsyncCloseable
-from my_claude_code.core.failures import ExecutionFailure, FailureKind
+from my_claude_code.core.failures import (
+    ExecutionFailure,
+    FailureKind,
+    parse_failure_kinds,
+)
 from my_claude_code.core.reasoning import ReasoningPolicy
 
 
@@ -1389,3 +1393,140 @@ async def test_disabling_the_stall_guard_tolerates_a_long_pause() -> None:
     chunks = [chunk async for chunk in stream]
     assert chunks.count(_TEXT) == 2
     assert chunks[-1] == "event: message_stop\ndata: {}\n\n"
+
+
+class _ContextOverflowProvider(FakeProvider):
+    """The user's bug: OpenRouter rejecting a 256487-token body at 256000."""
+
+    def preflight_stream(
+        self, request: MessagesRequest, *, reasoning: ReasoningPolicy
+    ) -> None:
+        raise ExecutionFailure(
+            kind=FailureKind.CONTEXT_LENGTH,
+            status_code=400,
+            message=(
+                "Request exceeds this model's context window. Needed about "
+                "256487 tokens; this model holds 256000."
+            ),
+            retryable=False,
+        )
+
+
+@pytest.mark.asyncio
+async def test_a_context_overflow_moves_on_to_the_next_model() -> None:
+    """A body too big for a 256k window is not too big for a 1M one.
+
+    This is the reported bug: a seven-model chain went entirely unused because
+    the overflow classified as `invalid_request` and hit the default skip list.
+    """
+    attempts, observer = _attempt_log()
+    healthy = FakeProvider()
+
+    stream = _taxonomy_executor(
+        {"first": _ContextOverflowProvider(), "second": healthy},
+        skip_kinds=frozenset({FailureKind.INVALID_REQUEST}),
+    ).stream(
+        _plan(
+            _routed_request(provider_id="first"),
+            _routed_request(provider_id="second"),
+        ),
+        wire_api="messages",
+        raw_log_label="FULL_PAYLOAD",
+        raw_log_payload={},
+        request_id="req_context_overflow",
+        on_attempt_result=observer,
+    )
+
+    assert [chunk async for chunk in stream] == ["event: message_stop\ndata: {}\n\n"]
+    assert healthy.stream_calls, "the wider model must actually be tried"
+    assert [(a.attempt, a.outcome, a.error_kind) for a in attempts] == [
+        (0, "failed", "context_length"),
+        (1, "succeeded", None),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_a_malformed_request_still_ends_the_route_beside_it() -> None:
+    """The narrowing must not have widened the chain for real 400s."""
+    healthy = FakeProvider()
+
+    with pytest.raises(ExecutionFailure):
+        _taxonomy_executor(
+            {"first": _MalformedRequestProvider(), "second": healthy},
+            skip_kinds=frozenset({FailureKind.INVALID_REQUEST}),
+        ).stream(
+            _plan(
+                _routed_request(provider_id="first"),
+                _routed_request(provider_id="second"),
+            ),
+            wire_api="messages",
+            raw_log_label="FULL_PAYLOAD",
+            raw_log_payload={},
+            request_id="req_still_malformed",
+        )
+
+    assert healthy.preflight_calls == []
+
+
+@pytest.mark.asyncio
+async def test_an_operator_can_opt_back_into_aborting_on_a_context_overflow() -> None:
+    """FALLBACK_SKIP_KINDS=context_length restores the pre-fix behaviour."""
+    settings = Settings()
+    settings.fallback_skip_kinds = "context_length"
+    assert settings.fallback_skip_kinds == "context_length"
+
+    attempts, observer = _attempt_log()
+    healthy = FakeProvider()
+
+    with pytest.raises(ExecutionFailure):
+        _taxonomy_executor(
+            {"first": _ContextOverflowProvider(), "second": healthy},
+            skip_kinds=parse_failure_kinds(settings.fallback_skip_kinds),
+        ).stream(
+            _plan(
+                _routed_request(provider_id="first"),
+                _routed_request(provider_id="second"),
+            ),
+            wire_api="messages",
+            raw_log_label="FULL_PAYLOAD",
+            raw_log_payload={},
+            request_id="req_opt_out",
+            on_attempt_result=observer,
+        )
+
+    assert healthy.preflight_calls == []
+    assert [(a.attempt, a.outcome, a.error_kind) for a in attempts] == [
+        (0, "failed", "context_length"),
+        (1, "skipped", "route_ended"),
+    ]
+    assert "context_length failure ends the route" in (attempts[1].error_message or "")
+
+
+@pytest.mark.asyncio
+async def test_the_default_policy_is_what_lets_a_context_overflow_fall_back() -> None:
+    """The shipped default, not a hand-built one, is what the user's route used.
+
+    Pinned separately because every other test here constructs its own
+    `skip_kinds`: adding CONTEXT_LENGTH back to the default would reinstate the
+    reported bug without reddening any of them.
+    """
+    assert RouteExecutionPolicy().skip_kinds == frozenset({FailureKind.INVALID_REQUEST})
+
+    healthy = FakeProvider()
+    providers = {"first": _ContextOverflowProvider(), "second": healthy}
+    stream = ProviderExecutor(
+        lambda provider_id: providers[provider_id],
+        token_counter=lambda _m, _s, _t: 1,
+    ).stream(
+        _plan(
+            _routed_request(provider_id="first"),
+            _routed_request(provider_id="second"),
+        ),
+        wire_api="messages",
+        raw_log_label="FULL_PAYLOAD",
+        raw_log_payload={},
+        request_id="req_default_policy",
+    )
+
+    assert [chunk async for chunk in stream] == ["event: message_stop\ndata: {}\n\n"]
+    assert healthy.stream_calls, "the default policy must let the chain continue"

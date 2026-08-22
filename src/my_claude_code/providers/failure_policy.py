@@ -1,6 +1,7 @@
 """Provider-owned SDK classification and retry qualification."""
 
 import json
+import re
 from collections.abc import Callable, Mapping
 from contextlib import suppress
 from dataclasses import replace
@@ -38,6 +39,27 @@ _INTERNAL_ERROR_MARKERS = frozenset({"internal_server_error", "internal server e
 _AUTHENTICATION_MESSAGE = "Provider authentication failed. Check API key."
 _RATE_LIMIT_MESSAGE = "Provider rate limit reached. Please retry shortly."
 _INVALID_REQUEST_MESSAGE = "Invalid request sent to provider."
+_CONTEXT_LENGTH_MESSAGE = "Request exceeds this model's context window."
+# Substrings that hold across every vendor wording measured in production:
+# NVIDIA NIM "This model's maximum context length is ...", Nous Portal and
+# OpenRouter "This endpoint's maximum context length is ...", plus the
+# OpenAI-compatible machine code. Deliberately narrow: a false positive here
+# would retry a genuinely malformed body on every model in the chain, so
+# anything not clearly a window overflow stays INVALID_REQUEST.
+_CONTEXT_LENGTH_MARKERS = frozenset(
+    {
+        "maximum context length",
+        "context_length_exceeded",
+        "context length exceeded",
+        "exceeds the maximum context",
+    }
+)
+_CONTEXT_LIMIT_PATTERN = re.compile(r"maximum context length is\s+(\d+)")
+# "you requested about 256487 tokens" (OpenRouter, Nous) and "your messages
+# resulted in 262294 tokens" (NVIDIA NIM).
+_CONTEXT_REQUESTED_PATTERN = re.compile(
+    r"(?:you requested about|resulted in)\s+(\d+)\s+tokens"
+)
 _OVERLOADED_MESSAGE = "Provider is currently overloaded. Please retry."
 
 
@@ -232,6 +254,34 @@ def rate_limit_cooldown_seconds(
     return min(seconds, MAX_RATE_LIMIT_COOLDOWN_SECONDS)
 
 
+def is_context_length_error(exc: BaseException) -> bool:
+    """Whether a 400 means the body outgrew the model's context window.
+
+    This is the one 400 a fallback chain can fix: the same body that overflows
+    a 256k window fits a 1M one, so it must not be classified as the malformed
+    request that ends the route.
+    """
+    return _has_marker(transient_error_text(exc), _CONTEXT_LENGTH_MARKERS)
+
+
+def context_length_failure(exc: BaseException) -> ExecutionFailure:
+    """Return the canonical context-overflow failure, naming the numbers if given.
+
+    ``retryable`` stays False: it means "safe to retry the same credential",
+    and the same model rejects the same body again. Only the chain helps.
+    """
+    text = transient_error_text(exc)
+    limit = _CONTEXT_LIMIT_PATTERN.search(text)
+    requested = _CONTEXT_REQUESTED_PATTERN.search(text)
+    message = _CONTEXT_LENGTH_MESSAGE
+    if limit and requested:
+        message = (
+            f"{_CONTEXT_LENGTH_MESSAGE} Needed about {requested.group(1)} tokens; "
+            f"this model holds {limit.group(1)}."
+        )
+    return _failure(FailureKind.CONTEXT_LENGTH, 400, message, False)
+
+
 def _classify_provider_failure(
     exc: Exception,
     *,
@@ -250,6 +300,8 @@ def _classify_provider_failure(
         mark_rate_limited(rate_limit_cooldown_seconds(exc, cooldown_seconds))
         return _failure(FailureKind.RATE_LIMIT, 429, _RATE_LIMIT_MESSAGE, True)
     if isinstance(exc, openai.BadRequestError):
+        if is_context_length_error(exc):
+            return context_length_failure(exc)
         return _failure(
             FailureKind.INVALID_REQUEST, 400, _INVALID_REQUEST_MESSAGE, False
         )
@@ -296,6 +348,8 @@ def _classify_provider_failure(
             mark_rate_limited(rate_limit_cooldown_seconds(exc, cooldown_seconds))
             return _failure(FailureKind.RATE_LIMIT, 429, _RATE_LIMIT_MESSAGE, True)
         if status == 400:
+            if is_context_length_error(exc):
+                return context_length_failure(exc)
             return _failure(
                 FailureKind.INVALID_REQUEST, 400, _INVALID_REQUEST_MESSAGE, False
             )

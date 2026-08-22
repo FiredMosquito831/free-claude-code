@@ -20,6 +20,7 @@ _ANTHROPIC_ERROR_STATUS_CODES = {
 
 _FAILURE_ERROR_TYPES = {
     FailureKind.INVALID_REQUEST: "invalid_request_error",
+    FailureKind.CONTEXT_LENGTH: "invalid_request_error",
     FailureKind.AUTHENTICATION: "authentication_error",
     FailureKind.PERMISSION: "permission_error",
     FailureKind.RATE_LIMIT: "rate_limit_error",
